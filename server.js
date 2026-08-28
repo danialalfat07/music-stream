@@ -2,6 +2,7 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const { Readable } = require('stream');
 
 const app = express();
 app.use(express.json());
@@ -1227,13 +1228,11 @@ app.get('/api/audio', async (req, res) => {
     const cacheKey = 'audio_' + id;
     const hit = cache.get(cacheKey);
     if (hit && Date.now() - hit.t < 6 * 60 * 1000 && hit.v && hit.v.url) {
-      // quick check url still valid? return cached
       return sendJsonWithCache(req, res, hit.v, 300);
     }
     const info = await getAudioUrl(id);
     if (!info || !info.url) return res.status(404).json({ error: 'no audio url' });
     cache.set(cacheKey, { v: info, t: Date.now() });
-    // allow cross-origin for <audio>
     res.setHeader('Access-Control-Allow-Origin', '*');
     sendJsonWithCache(req, res, info, 300);
   } catch (e) {
@@ -1241,11 +1240,53 @@ app.get('/api/audio', async (req, res) => {
   }
 });
 
+// Stream proxy for TWA background (same-origin, Range 206, no IP mismatch)
+app.get('/api/stream', async (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).end();
+  try {
+    const info = await getAudioUrl(id);
+    if (!info || !info.url) return res.status(404).end();
+    const headers = {};
+    if (req.headers.range) headers['Range'] = req.headers.range;
+    // Use ANDROID UA for googlevideo
+    headers['User-Agent'] = ANDROID_HEADERS['User-Agent'];
+    headers['Accept'] = '*/*';
+    const upstream = await fetch(info.url, { headers });
+    // Forward status and headers
+    res.status(upstream.status);
+    const pass = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'expires'];
+    for (const [k, v] of upstream.headers.entries()) {
+      if (pass.includes(k.toLowerCase())) res.setHeader(k, v);
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (!res.getHeader('Content-Type')) res.setHeader('Content-Type', info.mimeType || 'audio/webm');
+    // Stream body
+    if (upstream.body) {
+      // Node 18 fetch body is Web ReadableStream
+      try {
+        const nodeStream = Readable.fromWeb(upstream.body);
+        nodeStream.pipe(res);
+        nodeStream.on('error', () => res.end());
+      } catch {
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        res.send(buf);
+      }
+    } else {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
+    }
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     app: 'dnialify-music-stream',
-    version: '1.2.0',
+    version: '1.2.1',
     uptime: process.uptime(),
   });
 });

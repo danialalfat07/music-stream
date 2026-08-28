@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -337,6 +337,7 @@ function setMediaSessionForAudio(song){
   }catch{}
 }
 async function fetchAudioUrl(videoId){
+  // kept for compat, but now we use /api/stream directly
   try{
     const r = await fetch(`/api/audio?videoId=${encodeURIComponent(videoId)}`);
     if(!r.ok) return null;
@@ -346,12 +347,13 @@ async function fetchAudioUrl(videoId){
 }
 async function playViaAudio(song){
   if(!Player.audio || !song || !song.videoId) return false;
-  const url = await fetchAudioUrl(song.videoId);
-  if(!url) return false;
-  Player.audioUrl = url;
-  Player.audio.src = url;
-  Player.audio.crossOrigin = 'anonymous';
+  // Use same-origin stream proxy (Vercel, no IP mismatch, Range 206, TWA bg)
+  const streamUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
+  Player.audioUrl = streamUrl;
+  // same-origin, no need crossOrigin, but keep for safety
+  try{ Player.audio.crossOrigin = null; }catch{}
   Player.audio.preload = 'metadata';
+  Player.audio.src = streamUrl;
   try{
     await Player.audio.play();
     Player.useAudio = true;
@@ -359,6 +361,18 @@ async function playViaAudio(song){
     return true;
   }catch(e){
     console.warn('audio play failed', e);
+    // fallback: try direct url via /api/audio
+    try{
+      const direct = await fetchAudioUrl(song.videoId);
+      if(direct){
+        Player.audio.src = direct;
+        Player.audio.crossOrigin = 'anonymous';
+        await Player.audio.play();
+        Player.useAudio = true;
+        setMediaSessionForAudio(song);
+        return true;
+      }
+    }catch{}
     return false;
   }
 }
