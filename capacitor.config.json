@@ -3,7 +3,7 @@
   "appName": "Dnialify Music Stream",
   "webDir": "public",
   "server": {
-    "url": "https://music-stream-danialalfat07.vercel.app",
+    "url": "https://dnialify-music-stream.vercel.app",
     "cleartext": false,
     "androidScheme": "https"
   },
