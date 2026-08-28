@@ -1,66 +1,111 @@
 package com.dnialify.musicstream;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
-import android.os.PowerManager;
 
-import androidx.core.app.NotificationCompat;
+import androidx.annotation.Nullable;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.session.MediaSession;
+import androidx.media3.session.MediaSessionService;
 
-public class PlaybackService extends Service {
-    private static final String CHANNEL_ID = "playback";
-    private PowerManager.WakeLock wakeLock;
+public class PlaybackService extends MediaSessionService {
+    private static final String ACTION_PLAY = "com.dnialify.musicstream.PLAY";
+    private static final String EXTRA_URL = "url";
+    private static final String EXTRA_TITLE = "title";
+    private static final String EXTRA_ARTIST = "artist";
+    private static final String EXTRA_ARTWORK = "artwork";
+    private ExoPlayer player;
+    private MediaSession session;
+
+    public static void play(Context context, String url, String title, String artist, String artwork) {
+        Intent i = new Intent(context, PlaybackService.class).setAction(ACTION_PLAY)
+                .putExtra(EXTRA_URL, url).putExtra(EXTRA_TITLE, title)
+                .putExtra(EXTRA_ARTIST, artist).putExtra(EXTRA_ARTWORK, artwork);
+        context.startService(i);
+    }
+
+    public static void pause(Context context) {
+        context.startService(new Intent(context, PlaybackService.class).setAction("pause"));
+    }
+
+    public static void seek(Context context, double seconds) {
+        context.startService(new Intent(context, PlaybackService.class).setAction("seek")
+                .putExtra("seconds", seconds));
+    }
+
+    public static boolean isPlaying() { return instance != null && instance.player != null && instance.player.isPlaying(); }
+    public static double currentTime() { return instance == null || instance.player == null ? 0 : instance.player.getCurrentPosition() / 1000d; }
+    public static double duration() { return instance == null || instance.player == null ? 0 : Math.max(0, instance.player.getDuration() / 1000d); }
+    public static void speed(Context context, double value) {
+        context.startService(new Intent(context, PlaybackService.class).setAction("speed").putExtra("value", value));
+    }
+    public static void volume(Context context, double value) {
+        context.startService(new Intent(context, PlaybackService.class).setAction("volume").putExtra("value", value));
+    }
+
+    private static PlaybackService instance;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        createChannel();
-        PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Dnialify:Playback");
-        wakeLock.setReferenceCounted(false);
-        wakeLock.acquire();
-
-        Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        PendingIntent pending = PendingIntent.getActivity(this, 0, launch,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentTitle(getString(R.string.app_name))
-                .setContentText("Playback active")
-                .setContentIntent(pending)
-                .setOngoing(true)
-                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .build();
-        startForeground(1001, notification);
-    }
-
-    private void createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Playback",
-                    NotificationManager.IMPORTANCE_LOW);
-            getSystemService(NotificationManager.class).createNotificationChannel(channel);
-        }
+        instance = this;
+        AudioAttributes attrs = new AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build();
+        player = new ExoPlayer.Builder(this).setAudioAttributes(attrs, true).build();
+        session = new MediaSession.Builder(this, player).build();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null) {
+            String action = intent.getAction();
+            if (ACTION_PLAY.equals(action)) {
+                MediaMetadata.Builder metadataBuilder = new MediaMetadata.Builder()
+                        .setTitle(intent.getStringExtra(EXTRA_TITLE))
+                        .setArtist(intent.getStringExtra(EXTRA_ARTIST));
+                String artwork = intent.getStringExtra(EXTRA_ARTWORK);
+                if (artwork != null && !artwork.isEmpty()) metadataBuilder.setArtworkUri(android.net.Uri.parse(artwork));
+                MediaMetadata metadata = metadataBuilder.build();
+                MediaItem item = new MediaItem.Builder()
+                        .setUri(intent.getStringExtra(EXTRA_URL)).setMediaMetadata(metadata).build();
+                player.setMediaItem(item);
+                player.prepare();
+                player.play();
+            } else if ("pause".equals(action)) {
+                player.pause();
+            } else if ("seek".equals(action)) {
+                player.seekTo((long) (intent.getDoubleExtra("seconds", 0) * 1000));
+            } else if ("speed".equals(action)) {
+                player.setPlaybackSpeed((float) intent.getDoubleExtra("value", 1));
+            } else if ("volume".equals(action)) {
+                player.setVolume((float) intent.getDoubleExtra("value", 1));
+            }
+        }
         return START_STICKY;
     }
 
     @Override
-    public void onDestroy() {
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        super.onDestroy();
+    public void onTaskRemoved(Intent rootIntent) {
+        if (player != null && !player.isPlaying()) stopSelf();
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
-    public IBinder onBind(Intent intent) {
-        return null;
+    public void onDestroy() {
+        instance = null;
+        if (session != null) session.release();
+        if (player != null) player.release();
+        super.onDestroy();
     }
+
+    @Nullable
+    @Override
+    public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) { return session; }
 }

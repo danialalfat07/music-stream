@@ -262,6 +262,7 @@ const Player = {
   useAudio: true,
   audioReady: false,
   audioUrl: null,
+  native: false,
   get current() {
     return this.queue[this.index] || null;
   },
@@ -271,6 +272,7 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
+  Player.native = !!window.NativePlayback;
   Player.audioReady = true;
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
@@ -349,6 +351,18 @@ async function playViaAudio(song){
   if(!Player.audio || !song || !song.videoId) return false;
   // Use same-origin stream proxy (Vercel, no IP mismatch, Range 206, TWA bg)
   const streamUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
+  if (Player.native) {
+    Player.audioUrl = `${location.origin}${streamUrl}`;
+    try { Player.audio.pause(); } catch {}
+    window.NativePlayback.play(`${location.origin}${streamUrl}`, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
+    window.NativePlayback.speed(Player.speed);
+    window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
+    Player.useAudio = true;
+    document.body.classList.remove('paused');
+    renderPlayButtons();
+    setMediaSessionForAudio(song);
+    return true;
+  }
   Player.audioUrl = streamUrl;
   // same-origin, no need crossOrigin, but keep for safety
   try{ Player.audio.crossOrigin = null; }catch{}
@@ -819,8 +833,10 @@ function nextTrack(auto) {
     togglePlay();
     return;
   }
-  if(Player.audio && !Player.audio.paused) try{ Player.audio.pause(); }catch{}
+  if(Player.native) { try { window.NativePlayback.pause(); } catch {} }
+  else if(Player.audio && !Player.audio.paused) try{ Player.audio.pause(); }catch{}
   if (Player.repeat === 2 && auto) {
+    if(Player.native){ window.NativePlayback.seek(0); window.NativePlayback.play(Player.audioUrl, Player.current.title, Player.current.artist || '', Player.current.thumbnail || ''); return; }
     if(Player.useAudio && Player.audio && Player.audio.src){ Player.audio.currentTime=0; Player.audio.play().catch(()=>{}); return; }
     Player.yt.seekTo(0);
     Player.yt.playVideo();
@@ -874,6 +890,11 @@ function togglePlay() {
     if (!hasRadio) fetchQueue(s);
     return;
   }
+  if(Player.native && Player.current) {
+    if(window.NativePlayback.isPlaying()) window.NativePlayback.pause();
+    else window.NativePlayback.play(Player.audioUrl || `${location.origin}/api/stream?videoId=${encodeURIComponent(Player.current.videoId)}`, displayTitle(Player.current.title) || Player.current.title || 'Dnialify', Player.current.artist || '', Player.current.thumbnail || '');
+    return;
+  }
   if(Player.useAudio && Player.audio && Player.audio.src){
     if(Player.audio.paused) Player.audio.play().catch(()=>{});
     else Player.audio.pause();
@@ -907,12 +928,12 @@ function toggleNowPlayingPlay() {
 /* progress loop */
 let _lastTick = null;
 setInterval(() => {
-  const isAudio = Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
+  const isAudio = Player.native ? window.NativePlayback.isPlaying() : Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
   let cur, dur, playing;
   if(isAudio){
-    cur = Player.audio.currentTime || 0;
-    dur = Player.audio.duration || 0;
-    playing = !Player.audio.paused;
+    cur = Player.native ? window.NativePlayback.currentTime() : Player.audio.currentTime || 0;
+    dur = Player.native ? window.NativePlayback.duration() : Player.audio.duration || 0;
+    playing = Player.native ? true : !Player.audio.paused;
     const now = Date.now();
     if (playing && _lastTick && Player.current) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
@@ -3794,6 +3815,7 @@ $('#mini-repeat').addEventListener('click', (e) => {
 $('#mini-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
   if(Player.audio) Player.audio.volume = v/100;
+  if(Player.native) window.NativePlayback.volume(v / 100);
   if (Player.yt && Player.ready) Player.yt.setVolume(v);
   $('#np-volume').value = e.target.value;
   store.set('vol', v);
@@ -3876,6 +3898,7 @@ $('#np-sb').addEventListener('click', toggleSB);
 $('#np-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
   if(Player.audio) Player.audio.volume = v/100;
+  if(Player.native) window.NativePlayback.volume(v / 100);
   if (Player.yt) Player.yt.setVolume(Number(e.target.value));
   $('#mini-volume').value = e.target.value;
   store.set('vol', v);
@@ -3900,6 +3923,10 @@ range.addEventListener('change', () => {
   seekDragging = false;
   if (isPreviewing()) return;
   const frac = range.value / 1000;
+  if(Player.native){
+    window.NativePlayback.seek(frac * (window.NativePlayback.duration() || 0));
+    return;
+  }
   if(Player.useAudio && Player.audio && Player.audio.duration){
     Player.audio.currentTime = frac * Player.audio.duration;
     return;

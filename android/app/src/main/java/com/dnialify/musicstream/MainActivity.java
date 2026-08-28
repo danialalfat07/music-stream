@@ -2,6 +2,8 @@ package com.dnialify.musicstream;
 
 import android.content.Intent;
 import android.os.Build;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -15,5 +17,37 @@ public class MainActivity extends BridgeActivity {
         } else {
             startService(intent);
         }
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1002);
+        }
+        getBridge().getWebView().addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
+    }
+
+    private final class PlaybackBridge {
+        @JavascriptInterface
+        public void play(String url, String title, String artist, String artwork) {
+            PlaybackService.play(MainActivity.this, url, title, artist, artwork);
+        }
+
+        @JavascriptInterface
+        public void pause() { PlaybackService.pause(MainActivity.this); }
+
+        @JavascriptInterface
+        public void seek(double seconds) { PlaybackService.seek(MainActivity.this, seconds); }
+
+        @JavascriptInterface
+        public boolean isPlaying() { return PlaybackService.isPlaying(); }
+
+        @JavascriptInterface
+        public double currentTime() { return PlaybackService.currentTime(); }
+
+        @JavascriptInterface
+        public double duration() { return PlaybackService.duration(); }
+
+        @JavascriptInterface
+        public void speed(double value) { PlaybackService.speed(MainActivity.this, value); }
+
+        @JavascriptInterface
+        public void volume(double value) { PlaybackService.volume(MainActivity.this, value); }
     }
 }
