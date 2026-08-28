@@ -1,4 +1,4 @@
-/* Dnialify Music Stream — Spotify-style theme (polished) */
+/* Dnialify Music Stream - Spotify-style theme (polished) */
 :root {
   --bg: #000000;
   --main-bg: #121212;
@@ -751,7 +751,7 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 }
 #np-lyric-preview:hover { color: #fff; }
 
-/* lyrics — always light-on-dark so album art never washes out the text */
+/* lyrics - always light-on-dark so album art never washes out the text */
 #np-lyrics {
   background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.42));
   border-radius: 12px;
@@ -1175,9 +1175,6 @@ body.hq-audio #yt-player {
   #nav-mobile .nav-item.active{ color: var(--text); }
   #nav-mobile .nav-item .ic{ width: 22px; height: 22px; }
   #nav-mobile .nav-item span{ font-size: 9.5px; letter-spacing: .02em; }
-  .mobile-credit{
-    display: flex !important;
-  }
   #main { border-radius: 0; }
   :root { --player-h: 64px; }
   .np-handle { display: block; }
@@ -1225,7 +1222,7 @@ body.hq-audio #yt-player {
   #toast { bottom: calc(var(--navm-h) + 92px); }
   .lyric-line { font-size: 22px; }
 
-  /* Track rows: ⋮ only — titles get the width */
+  /* Track rows: ⋮ only - titles get the width */
   .track { gap: 10px; padding: 8px 6px; }
   .track .tbtn { display: none; }
   .track .btn-more { display: inline-flex !important; opacity: 1; }

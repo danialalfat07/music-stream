@@ -1,5 +1,6 @@
+const APP_VERSION = "1.1.0";
 /* ============================================================
-   Dnialify Project — Dnialify Music Stream — SPA frontend
+   Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
    the local proxy to YouTube Music, synced lyrics via LRCLIB.
    ============================================================ */
@@ -323,8 +324,8 @@ function updateQualityButton() {
   const span = btn.querySelector('span');
   if (span) span.textContent = Player.hq ? 'Max' : 'Quality';
   btn.title = Player.hq
-    ? 'YouTube max quality — tap for YouTube Music audio'
-    : 'YouTube Music audio — tap for YouTube max quality';
+    ? 'YouTube max quality - tap for YouTube Music audio'
+    : 'YouTube Music audio - tap for YouTube max quality';
   document.body.classList.toggle('hq-audio', !!Player.hq);
   syncNpMore();
 }
@@ -627,7 +628,7 @@ function startCurrent() {
   loadLyrics(s);
   loadSponsorBlock(s.videoId);
   // refresh related tab lazily
-  Player.relatedBrowseId = null; // stale — belongs to the previous song until fetchQueue returns
+  Player.relatedBrowseId = null; // stale - belongs to the previous song until fetchQueue returns
   Player.lyricsBrowseId = null;
   $('#related-list').innerHTML = '<div class="loading-note">Loading…</div>';
   Player._relatedLoaded = false;
@@ -1149,7 +1150,7 @@ function renderQueue() {
       })
       .join('');
   } else {
-    html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet — tap the queue icon on a song, or Play next on Now Playing.</div>`;
+    html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
     html += `<div class="q-head">From radio · ${radio.length}</div>`;
@@ -1444,7 +1445,7 @@ async function downloadSong(song) {
     }
     toast('Download started');
   } catch (e) {
-    toast('Download failed — try again later');
+    toast('Download failed - try again later');
   } finally {
     activeDownloads.delete(song.videoId);
   }
@@ -2036,7 +2037,7 @@ async function viewHome(view) {
   loadMixForYou();
 }
 
-/* "Mix for you" — personalized-feel shelf built from your listening history (no account needed) */
+/* "Mix for you" - personalized-feel shelf built from your listening history (no account needed) */
 async function loadMixForYou() {
   const hist = Library.history;
   const seeds = [...Library.favorites, ...hist].filter((s) => s.videoId);
@@ -2490,7 +2491,7 @@ function viewStats(view) {
       ${topSongs.map((r, i) => trackRowHTML({ videoId: r.videoId, title: r.title, subtitle: `${r.artist} · ${r.plays} plays · ${Math.round(r.secs / 60)} min`, thumbnail: r.thumbnail, tn: i + 1 })).join('')}</div></div>`
         : ''
     }
-    ${!rows.length ? emptyHTML('No stats yet', 'Play some music — totals build up as you listen.', { label: 'Browse home', go: '#/home', ic: 'i-chart' }) : ''}`;
+    ${!rows.length ? emptyHTML('No stats yet', 'Play some music - totals build up as you listen.', { label: 'Browse home', go: '#/home', ic: 'i-chart' }) : ''}`;
   if (rows.length) {
     view.innerHTML += `<div class="stat-actions"><button class="pill-btn" id="stat-export">${icon('i-download')}<span>Export CSV</span></button><button class="pill-btn" id="stat-clear">${icon('i-trash')}<span>Clear history</span></button></div>`;
   }
@@ -3191,7 +3192,7 @@ async function shareSong(song) {
   if (!s || !s.videoId) return;
   const url = `${location.origin}${location.pathname}#/song/${s.videoId}`;
   const title = displayTitle(s.title) || s.title || 'Song';
-  const text = s.artist ? `${title} — ${s.artist}` : title;
+  const text = s.artist ? `${title} - ${s.artist}` : title;
   if (navigator.share) {
     try {
       await navigator.share({ title, text, url });
@@ -3424,7 +3425,7 @@ function openCreatePlaylist() {
       <div class="pl-form-cover" aria-hidden="true">${icon('i-note')}</div>
       <label class="pl-form-label" for="pl-form-name">Playlist name</label>
       <input id="pl-form-name" class="pl-form-input" type="text" maxlength="80" placeholder="My playlist" />
-      <div class="pl-form-hint">Give it a name — you can add songs anytime.</div>
+      <div class="pl-form-hint">Give it a name - you can add songs anytime.</div>
       <div class="pl-form-actions">
         <button type="button" class="pill-btn" id="pl-form-cancel">Cancel</button>
         <button type="submit" class="pill-btn primary" id="pl-form-create">${icon('i-plus')}<span>Create</span></button>
@@ -3886,8 +3887,8 @@ function syncFloatWidget() {
     const artist = doc.getElementById('fw-artist');
     const play = doc.querySelector('[data-fw="play"]');
     if (art && s) art.src = safeCover(s.thumbnail) || COVER_PH;
-    if (title) title.textContent = s ? s.title : '—';
-    if (artist) artist.textContent = s ? s.artist || s.subtitle || '' : '—';
+    if (title) title.textContent = s ? s.title : '-';
+    if (artist) artist.textContent = s ? s.artist || s.subtitle || '' : '-';
     if (play) play.innerHTML = ic;
   }
   $('#mini-float')?.classList.toggle('on', Player.floatOn);
@@ -4255,15 +4256,15 @@ async function openFloatWidget() {
   const el = $('#float-widget');
   if (sysOk) {
     el.classList.add('hidden');
-    toast('Widget di recent apps — buka aplikasi lain, musik tetap jalan');
+    toast('Widget di recent apps - buka aplikasi lain, musik tetap jalan');
   } else if (docOk) {
     el.classList.add('hidden');
-    toast('Widget floating — stays on top');
+    toast('Widget floating - stays on top');
   } else {
     el.classList.remove('hidden');
     enableDrag(el);
     bindFloatWidget(document);
-    toast('Floating widget — drag to move');
+    toast('Floating widget - drag to move');
   }
   syncFloatWidget();
 }
@@ -4313,7 +4314,7 @@ setInterval(() => {
   }
 }, 1500);
 
-/* Dnialify: keep SW registered (PWA) — only clean old smw- caches */
+/* Dnialify: keep SW registered (PWA) - only clean old smw- caches */
 if (window.caches)
   caches
     .keys()
@@ -4335,6 +4336,14 @@ if (window.caches)
 renderNav();
 renderSideQueue();
 updateThemeIcon();
+// version check (keep history, clear cache)
+try{
+  var _v = localStorage.getItem('dnialify_version');
+  if(_v && _v !== APP_VERSION){
+    if(window.caches) caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf('dnialify')===0 || k.indexOf('smw-')===0) caches.delete(k); }); });
+    localStorage.setItem('dnialify_version', APP_VERSION);
+  } else if(!_v) localStorage.setItem('dnialify_version', APP_VERSION);
+}catch(e){}
 $('#theme-toggle').addEventListener('click', toggleTheme);
 $('#settings-btn')?.addEventListener('click', () => openSettingsModal('about'));
 $('#help-btn')?.addEventListener('click', openHelpModal);
