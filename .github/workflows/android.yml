@@ -36,8 +36,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Copy web to android
-        run: npx cap copy android
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
 
       - name: Build Debug APK (no signing, for test)
         run: |
