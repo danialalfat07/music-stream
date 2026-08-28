@@ -1,11 +1,14 @@
-# Dnialify Music Stream
+# Dnialify Music Stream — Dnialify Project
 
 **Pemutar musik web gratis** bergaya Spotify, katalog [YouTube Music](https://music.youtube.com). Tanpa akun.
-Fork dari [ramax100/YT-Music-Mod](https://github.com/ramax100/YT-Music-Mod) — di-rebrand jadi **Dnialify Music Stream**.
+By **Dnialify Project** — danial.alfat7
 
-- **Website original:** [richmusic.vercel.app](https://richmusic.vercel.app)
-- **Repo original:** [github.com/ramax100/YT-Music-Mod](https://github.com/ramax100/YT-Music-Mod)
-- **Channel Telegram original:** [t.me/ChRichStore](https://t.me/ChRichStore)
+- **Creator:** Dnialify Project
+- **WA:** 089648528585
+- **Facebook:** [facebook.com/danial.alfat7](https://www.facebook.com/danial.alfat7/)
+- **Instagram:** [@dann4lfat_](https://instagram.com/dann4lfat_)
+- **Twitter/X:** [@dann4lfat_](https://twitter.com/dann4lfat_)
+- **Telegram:** [@dann4lfat](https://t.me/dann4lfat)
 
 Project ini **gratis** dan **bebas dipakai**.
 
@@ -21,15 +24,21 @@ Tidak berafiliasi dengan YouTube, Google, atau Spotify.
 
 ---
 
-## Channel Telegram
+## Kontak Dnialify Project
 
-Update original di: [t.me/ChRichStore](https://t.me/ChRichStore)
+Hubungi untuk request fitur, bug, atau collab:
+
+- **WA:** 089648528585
+- **Facebook:** https://www.facebook.com/danial.alfat7/
+- **Instagram:** https://instagram.com/dann4lfat_
+- **Twitter:** https://twitter.com/dann4lfat_
+- **Telegram:** https://t.me/dann4lfat
 
 ---
 
 ## Cara memakai website
 
-1. Buka website Dnialify Music Stream kamu (atau original **[richmusic.vercel.app](https://richmusic.vercel.app)** untuk demo)
+1. Buka website Dnialify Music Stream kamu
 2. Cari lagu, atau pilih dari Home / Charts / Browse all
 3. Lagu pertama langsung play. Kalau klik lagu lain, Now Playing menampilkan lagu baru — tekan **Play** untuk mengganti putaran
 4. Ikon hati = favorit. **Playlist** = simpan ke folder. Di halaman album/artis, **Save** masuk tab Saved
@@ -114,6 +123,7 @@ Tanpa login, tersimpan di perangkat ini.
 | `Esc` | Tutup Now Playing |
 | `L` | Ganti tema |
 | `P` | Widget |
+| `?` | Buka bantuan shortcut |
 
 ---
 
@@ -160,10 +170,8 @@ music-stream/
 
 ## Lisensi
 
-**Gratis. Bebas dipakai.**
+**© 2026 Dnialify Project — Gratis. Bebas dipakai.**
 
-Jalankan, bagikan, ubah, dan deploy ulang sesukamu. Tidak ada biaya. Credit ke [ramax100/YT-Music-Mod](https://github.com/ramax100/YT-Music-Mod).
+Jalankan, bagikan, ubah, dan deploy ulang sesukamu.
 
----
-
-**[Original Demo](https://richmusic.vercel.app)** · **[Join Telegram Original](https://t.me/ChRichStore)** · **[Original GitHub](https://github.com/ramax100/YT-Music-Mod)**
+Kontak: WA 089648528585 | [Facebook](https://www.facebook.com/danial.alfat7/) | [IG @dann4lfat_](https://instagram.com/dann4lfat_) | [X @dann4lfat_](https://twitter.com/dann4lfat_) | [Telegram @dann4lfat](https://t.me/dann4lfat)
