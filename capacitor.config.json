@@ -1,0 +1,21 @@
+{
+  "appId": "com.dnialify.musicstream",
+  "appName": "Dnialify Music Stream",
+  "webDir": "public",
+  "server": {
+    "url": "https://music-stream-danialalfat07.vercel.app",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#000000"
+    }
+  },
+  "android": {
+    "backgroundColor": "#000000",
+    "allowMixedContent": true,
+    "captureInput": true
+  }
+}
