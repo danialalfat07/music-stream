@@ -1,0 +1,10 @@
+﻿[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.dnialify.musicstream",
+      "sha256_cert_fingerprints": ["E2:56:AC:64:4F:91:76:7A:37:02:EF:73:DF:B5:A5:86:84:CE:40:69:ED:7A:E0:E4:87:42:5E:01:D5:60:33:80"]
+    }
+  }
+]

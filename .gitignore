@@ -6,3 +6,9 @@ node_modules/
 .DS_Store
 .cache/
 .arena/
+
+# PWA signing - keep private
+signing.keystore
+*.keystore
+*.jks
+
