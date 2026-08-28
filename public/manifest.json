@@ -1,27 +1,108 @@
 {
+  "id": "/",
   "name": "Dnialify Music Stream",
   "short_name": "Dnialify",
-  "description": "Pemutar musik web gratis bergaya Spotify \u2014 by Dnialify Project",
-  "start_url": "/",
+  "description": "Pemutar musik web gratis bergaya Spotify - by Dnialify Project. Cari lagu, playlist, lirik sync, tanpa akun.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
   "background_color": "#000000",
   "theme_color": "#1db954",
+  "categories": ["music", "entertainment", "media"],
+  "lang": "id",
+  "dir": "ltr",
   "icons": [
+    {
+      "src": "/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/logo-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/logo.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
+  "shortcuts": [
+    {
+      "name": "Home",
+      "short_name": "Home",
+      "description": "Buka Home Dnialify",
+      "url": "/#home",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "description": "Cari lagu",
+      "url": "/#search",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Library",
+      "short_name": "Library",
+      "description": "Buka Library kamu",
+      "url": "/#library",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Charts",
+      "short_name": "Charts",
+      "description": "Lihat Charts",
+      "url": "/#charts",
+      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Dnialify Music Stream - Home"
+    },
+    {
+      "src": "/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dnialify Music Stream - Player"
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "handle_links": "preferred",
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
   "version": "1.1.0"
 }
