@@ -1,0 +1,16 @@
+{
+  "name": "dnialify-music-stream",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Dnialify Music Stream - pemutar musik web gratis bergaya Spotify, katalog YouTube Music. Tanpa akun.",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
