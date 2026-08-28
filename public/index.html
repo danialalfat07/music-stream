@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="1.1.0" />
+<meta name="app-version" content="1.2.0" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -347,6 +347,8 @@ try {
     </div>
   </div>
 
+  <!-- background audio (Vercel-friendly, survives home/lock) -->
+  <audio id="bg-audio" preload="metadata" crossorigin="anonymous" playsinline style="display:none"></audio>
   <!-- hidden YouTube player + canvas/video used for OS Picture-in-Picture (recent apps) -->
   <div id="yt-holder"><div id="yt-player"></div></div>
   <canvas id="pip-canvas" width="360" height="640"></canvas>
@@ -356,7 +358,7 @@ try {
 // Dnialify versioning: auto clear cache when version differs (keep history/library)
 (function(){
   try{
-    var VER="1.1.0";
+    var VER="1.2.0";
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
     if(cur !== VER){

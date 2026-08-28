@@ -1154,11 +1154,98 @@ app.get('/api/thumb', async (req, res) => {
   }
 });
 
+// ---- audio stream URL via InnerTube ANDROID (background-capable) ----
+// Returns direct googlevideo audio URL for <audio> tag, which survives home/lock via MediaSession
+const ANDROID_CONTEXT = {
+  client: {
+    clientName: 'ANDROID',
+    clientVersion: '20.10.38',
+    androidSdkVersion: 35,
+    hl: 'en',
+    gl: 'US',
+  },
+};
+const ANDROID_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent': 'com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)',
+  'X-Goog-Api-Format-Version': '2',
+};
+
+async function getAudioUrl(videoId) {
+  // try ANDROID first (signed URL, no decipher)
+  const tryClients = [
+    { context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
+    // fallback WEB (needs decipher but try)
+    { context: CONTEXT, headers: HEADERS },
+  ];
+  for (const { context, headers } of tryClients) {
+    try {
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          context,
+          videoId,
+          racyCheckOk: true,
+          contentCheckOk: true,
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const sd = data.streamingData;
+      if (!sd) continue;
+      const formats = [...(sd.adaptiveFormats || []), ...(sd.formats || [])];
+      // pick best audio: opus > mp4a, highest bitrate
+      const audios = formats.filter((f) => f.mimeType && f.mimeType.includes('audio/'));
+      if (!audios.length) continue;
+      // prefer opus
+      audios.sort((a, b) => {
+        const aOpus = a.mimeType.includes('opus') ? 1 : 0;
+        const bOpus = b.mimeType.includes('opus') ? 1 : 0;
+        if (aOpus !== bOpus) return bOpus - aOpus;
+        return (b.bitrate || 0) - (a.bitrate || 0);
+      });
+      const best = audios[0];
+      if (best.url) {
+        return {
+          url: best.url,
+          mimeType: best.mimeType,
+          bitrate: best.bitrate,
+          approxDurationMs: best.approxDurationMs || data.videoDetails?.lengthSeconds * 1000 || null,
+        };
+      }
+      // if ciphered, skip (would need decipher)
+    } catch {}
+  }
+  return null;
+}
+
+app.get('/api/audio', async (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).json({ error: 'bad videoId' });
+  try {
+    const cacheKey = 'audio_' + id;
+    const hit = cache.get(cacheKey);
+    if (hit && Date.now() - hit.t < 6 * 60 * 1000 && hit.v && hit.v.url) {
+      // quick check url still valid? return cached
+      return sendJsonWithCache(req, res, hit.v, 300);
+    }
+    const info = await getAudioUrl(id);
+    if (!info || !info.url) return res.status(404).json({ error: 'no audio url' });
+    cache.set(cacheKey, { v: info, t: Date.now() });
+    // allow cross-origin for <audio>
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    sendJsonWithCache(req, res, info, 300);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     app: 'dnialify-music-stream',
-    version: '1.0.0',
+    version: '1.2.0',
     uptime: process.uptime(),
   });
 });

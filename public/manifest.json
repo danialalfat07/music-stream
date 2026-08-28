@@ -6,11 +6,19 @@
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
   "orientation": "any",
   "background_color": "#000000",
   "theme_color": "#1db954",
-  "categories": ["music", "entertainment", "media"],
+  "categories": [
+    "music",
+    "entertainment",
+    "media"
+  ],
   "lang": "id",
   "dir": "ltr",
   "icons": [
@@ -57,28 +65,52 @@
       "short_name": "Home",
       "description": "Buka Home Dnialify",
       "url": "/#home",
-      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/logo-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Search",
       "short_name": "Search",
       "description": "Cari lagu",
       "url": "/#search",
-      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/logo-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Library",
       "short_name": "Library",
       "description": "Buka Library kamu",
       "url": "/#library",
-      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/logo-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Charts",
       "short_name": "Charts",
       "description": "Lihat Charts",
       "url": "/#charts",
-      "icons": [{ "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/logo-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ],
   "screenshots": [
@@ -104,5 +136,5 @@
   "edge_side_panel": {
     "preferred_width": 400
   },
-  "version": "1.1.0"
+  "version": "1.2.0"
 }
