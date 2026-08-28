@@ -1803,22 +1803,32 @@ const NAV = [
     iconActive: 'i-library',
     hash: '#/library',
   },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: 'i-settings',
+    iconActive: 'i-settings',
+    hash: '#/settings',
+    modal: true,
+  },
 ];
 function renderNav() {
-  const html = NAV.map(
-    (n) =>
-      `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" onclick="location.hash='${n.hash}'"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`,
-  ).join('');
-  // desktop sidebar: only Home + Search (Spotify layout); library lives in its own box
+  const navBtn = (n) => {
+    if(n.modal) return `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" data-modal="settings"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`;
+    return `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" onclick="location.hash='${n.hash}'"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`;
+  };
+  const html = NAV.map(navBtn).join('');
+  // desktop sidebar: only Home + Search + Charts (no settings)
   $('#nav-desktop').innerHTML = NAV.filter((n) =>
     ['home', 'search', 'charts'].includes(n.id),
   )
-    .map(
-      (n) =>
-        `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" onclick="location.hash='${n.hash}'"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`,
-    )
+    .map(navBtn)
     .join('');
   $('#nav-mobile').innerHTML = html;
+  // bind settings modal on mobile + desktop (if ever shown)
+  $$('#nav-mobile [data-modal="settings"], #nav-desktop [data-modal="settings"]').forEach(b=>{
+    b.addEventListener('click', (e)=>{ e.preventDefault(); openSettingsModal('about'); });
+  });
   renderSidebarLibrary();
 }
 function setActiveNav(id) {
@@ -1894,6 +1904,7 @@ async function route() {
   applyTint(parts[0] || 'home');
 
   try {
+    if (parts[0] === 'settings') { openSettingsModal('about'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); return; }
     if (parts[0] === '' || parts[0] === 'home') {
       setActiveNav('home');
       await viewHome(view);
@@ -4343,6 +4354,8 @@ $('#footer-about')?.addEventListener('click', (e) => {
   e.preventDefault();
   openSettingsModal('about');
 });
+$('#mc-settings')?.addEventListener('click', ()=>openSettingsModal('settings'));
+$('#mc-help')?.addEventListener('click', openHelpModal);
 $('#tb-search').addEventListener('click', () => go('#/search'));
 $('#np-sb').classList.toggle('on', Player.sbEnabled);
 updateQualityButton();

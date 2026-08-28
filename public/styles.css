@@ -1161,6 +1161,23 @@ body.hq-audio #yt-player {
   #app { padding: 0; gap: 0; }
   #sidebar { display: none; }
   #topbar { display: none; }
+  #nav-mobile{
+    display: grid !important;
+    grid-template-columns: repeat(5,1fr);
+    position: fixed; bottom: 0; left: 0; right: 0; height: var(--navm-h);
+    background: var(--main-bg); border-top: 1px solid color-mix(in srgb,var(--text) 8%,transparent);
+    z-index: 30; padding: 6px 0 8px;
+  }
+  #nav-mobile .nav-item{
+    flex-direction: column; gap: 4px; padding: 4px 2px; font-size: 10px; font-weight: 600;
+    justify-content: center; align-items: center; color: var(--muted);
+  }
+  #nav-mobile .nav-item.active{ color: var(--text); }
+  #nav-mobile .nav-item .ic{ width: 22px; height: 22px; }
+  #nav-mobile .nav-item span{ font-size: 9.5px; letter-spacing: .02em; }
+  .mobile-credit{
+    display: flex !important;
+  }
   #main { border-radius: 0; }
   :root { --player-h: 64px; }
   .np-handle { display: block; }
