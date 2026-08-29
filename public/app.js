@@ -262,6 +262,7 @@ const Player = {
   useAudio: true,
   audioReady: false,
   audioUrl: null,
+  nativeUrl: null,
   native: false,
   get current() {
     return this.queue[this.index] || null;
@@ -315,11 +316,12 @@ function initAudio(){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
     }
   });
-  document.addEventListener('visibilitychange', ()=>{
+  document.addEventListener('visibilitychange', async ()=>{
     if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || Player.audio.paused || !Player.current || !window.NativePlayback) return;
     const song = Player.current;
     const position = Player.audio.currentTime || 0;
-    const url = `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
+    // ExoPlayer reads signed googlevideo URL more reliably than server stream proxy.
+    const url = Player.nativeUrl || `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
     try {
       window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
       window.NativePlayback.speed(Player.speed);
@@ -435,6 +437,9 @@ async function playViaAudio(song){
   try{
     await Player.audio.play();
     Player.useAudio = true;
+    fetchAudioUrl(song.videoId).then((url) => {
+      if (url && Player.current?.videoId === song.videoId) Player.nativeUrl = url;
+    }).catch(()=>{});
     setMediaSessionForAudio(song);
     return true;
   }catch(e){

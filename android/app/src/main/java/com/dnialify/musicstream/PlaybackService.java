@@ -13,6 +13,8 @@ import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
@@ -69,6 +71,12 @@ public class PlaybackService extends MediaSessionService {
         AudioAttributes attrs = new AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build();
         player = new ExoPlayer.Builder(this).setAudioAttributes(attrs, true).build();
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                android.util.Log.e("DnialifyPlayback", "Media3 playback failed", error);
+            }
+        });
         session = new MediaSession.Builder(this, player).build();
         android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
         if (android.os.Build.VERSION.SDK_INT >= 26) {
