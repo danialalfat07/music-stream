@@ -415,6 +415,8 @@ async function playViaAudio(song){
   try{ Player.audio.crossOrigin = null; }catch{}
   Player.audio.preload = 'metadata';
   Player.audio.src = streamUrl;
+  // Arm service while foreground; Android blocks late foreground-service starts.
+  if (window.NativePlayback?.arm) window.NativePlayback.arm();
   try{
     await Player.audio.play();
     Player.useAudio = true;

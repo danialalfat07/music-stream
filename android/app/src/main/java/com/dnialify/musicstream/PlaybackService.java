@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 
 import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
@@ -22,8 +23,15 @@ public class PlaybackService extends MediaSessionService {
     private static final String EXTRA_TITLE = "title";
     private static final String EXTRA_ARTIST = "artist";
     private static final String EXTRA_ARTWORK = "artwork";
+    private static final String ACTION_ARM = "arm";
+    private static final String CHANNEL_ID = "playback";
+    private static final int NOTIFICATION_ID = 1001;
     private ExoPlayer player;
     private MediaSession session;
+
+    public static void arm(Context context) {
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction(ACTION_ARM));
+    }
 
     public static void play(Context context, String url, String title, String artist, String artwork) {
         Intent i = new Intent(context, PlaybackService.class).setAction(ACTION_PLAY)
@@ -62,6 +70,18 @@ public class PlaybackService extends MediaSessionService {
                 .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build();
         player = new ExoPlayer.Builder(this).setAudioAttributes(attrs, true).build();
         session = new MediaSession.Builder(this, player).build();
+        android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(new android.app.NotificationChannel(
+                    CHANNEL_ID, "Playback", android.app.NotificationManager.IMPORTANCE_LOW));
+        }
+        startForeground(NOTIFICATION_ID, new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
+                .setContentTitle("Dnialify Music Stream")
+                .setContentText("Playback ready")
+                .setOngoing(true)
+                .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
+                .build());
     }
 
     @Override
@@ -69,7 +89,9 @@ public class PlaybackService extends MediaSessionService {
         super.onStartCommand(intent, flags, startId);
         if (intent != null) {
             String action = intent.getAction();
-            if (ACTION_PLAY.equals(action)) {
+            if (ACTION_ARM.equals(action)) {
+                return START_STICKY;
+            } else if (ACTION_PLAY.equals(action)) {
                 MediaMetadata.Builder metadataBuilder = new MediaMetadata.Builder()
                         .setTitle(intent.getStringExtra(EXTRA_TITLE))
                         .setArtist(intent.getStringExtra(EXTRA_ARTIST));
@@ -96,7 +118,6 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        if (player != null && !player.isPlaying()) stopSelf();
         super.onTaskRemoved(rootIntent);
     }
 

@@ -1,6 +1,8 @@
 package com.dnialify.musicstream;
 
 import android.webkit.JavascriptInterface;
+import android.Manifest;
+import android.content.pm.PackageManager;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -9,9 +11,16 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
         getBridge().getWebView().addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
+        }
     }
 
     private final class PlaybackBridge {
+        @JavascriptInterface
+        public void arm() { PlaybackService.arm(MainActivity.this); }
+
         @JavascriptInterface
         public void play(String url, String title, String artist, String artwork) {
             PlaybackService.play(MainActivity.this, url, title, artist, artwork);
