@@ -272,8 +272,8 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  // Use Media3 only inside Capacitor Android; browsers keep WebView audio.
-  Player.native = !!window.NativePlayback;
+  // Keep stable WebView playback until native bridge exposes async player state.
+  Player.native = false;
   Player.audioReady = true;
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
@@ -313,6 +313,25 @@ function initAudio(){
   a.addEventListener('loadedmetadata', ()=>{
     if('mediaSession' in navigator && Player.current){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
+    }
+  });
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || Player.audio.paused || !Player.current || !window.NativePlayback) return;
+    const song = Player.current;
+    const position = Player.audio.currentTime || 0;
+    const url = `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
+    try {
+      window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
+      window.NativePlayback.speed(Player.speed);
+      window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
+      Player.audio.pause();
+      Player.audioUrl = url;
+      Player.native = true;
+      // Native prepare is async; restore exact WebView position after player exists.
+      setTimeout(()=>{ try { window.NativePlayback.seek(position); } catch {} }, 800);
+      renderPlayButtons();
+    } catch (e) {
+      console.warn('native background handoff unavailable', e);
     }
   });
 }
