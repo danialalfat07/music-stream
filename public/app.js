@@ -263,6 +263,7 @@ const Player = {
   audioReady: false,
   audioUrl: null,
   nativeUrl: null,
+  wasPlaying: false,
   native: false,
   get current() {
     return this.queue[this.index] || null;
@@ -279,8 +280,8 @@ function initAudio(){
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
   a.addEventListener('ended', ()=>{ nextTrack(true); });
-  a.addEventListener('play', ()=>{ document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
-  a.addEventListener('pause', ()=>{ document.body.classList.add('paused'); renderPlayButtons(); updateMediaSessionState('paused'); });
+  a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
+  a.addEventListener('pause', ()=>{ if (!Player.native) Player.wasPlaying = false; document.body.classList.add('paused'); renderPlayButtons(); updateMediaSessionState('paused'); });
   a.addEventListener('timeupdate', ()=>{
     if(isPreviewing()) return;
     const cur = a.currentTime || 0;
@@ -317,7 +318,7 @@ function initAudio(){
     }
   });
   document.addEventListener('visibilitychange', async ()=>{
-    if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || Player.audio.paused || !Player.current || !window.NativePlayback) return;
+    if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || !Player.wasPlaying || !Player.current || !window.NativePlayback) return;
     const song = Player.current;
     const position = Player.audio.currentTime || 0;
     // ExoPlayer reads signed googlevideo URL more reliably than server stream proxy.
