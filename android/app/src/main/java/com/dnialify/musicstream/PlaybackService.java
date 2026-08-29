@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
@@ -28,26 +29,27 @@ public class PlaybackService extends MediaSessionService {
         Intent i = new Intent(context, PlaybackService.class).setAction(ACTION_PLAY)
                 .putExtra(EXTRA_URL, url).putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_ARTIST, artist).putExtra(EXTRA_ARTWORK, artwork);
-        context.startService(i);
+        ContextCompat.startForegroundService(context, i);
     }
 
     public static void pause(Context context) {
-        context.startService(new Intent(context, PlaybackService.class).setAction("pause"));
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("pause"));
     }
 
     public static void seek(Context context, double seconds) {
-        context.startService(new Intent(context, PlaybackService.class).setAction("seek")
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("seek")
                 .putExtra("seconds", seconds));
     }
 
     public static boolean isPlaying() { return instance != null && instance.player != null && instance.player.isPlaying(); }
+    public static boolean isEnded() { return instance != null && instance.player != null && instance.player.getPlaybackState() == androidx.media3.common.Player.STATE_ENDED; }
     public static double currentTime() { return instance == null || instance.player == null ? 0 : instance.player.getCurrentPosition() / 1000d; }
     public static double duration() { return instance == null || instance.player == null ? 0 : Math.max(0, instance.player.getDuration() / 1000d); }
     public static void speed(Context context, double value) {
-        context.startService(new Intent(context, PlaybackService.class).setAction("speed").putExtra("value", value));
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("speed").putExtra("value", value));
     }
     public static void volume(Context context, double value) {
-        context.startService(new Intent(context, PlaybackService.class).setAction("volume").putExtra("value", value));
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("volume").putExtra("value", value));
     }
 
     private static PlaybackService instance;

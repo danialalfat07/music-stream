@@ -27,6 +27,9 @@ public class MainActivity extends BridgeActivity {
         public boolean isPlaying() { return PlaybackService.isPlaying(); }
 
         @JavascriptInterface
+        public boolean isEnded() { return PlaybackService.isEnded(); }
+
+        @JavascriptInterface
         public double currentTime() { return PlaybackService.currentTime(); }
 
         @JavascriptInterface

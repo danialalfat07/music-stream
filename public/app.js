@@ -272,8 +272,8 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  // Keep proven WebView playback as default until native event bridge is verified.
-  Player.native = false;
+  // Use Media3 only inside Capacitor Android; browsers keep WebView audio.
+  Player.native = !!window.NativePlayback;
   Player.audioReady = true;
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
@@ -329,13 +329,34 @@ function setMediaSessionForAudio(song){
       album: '',
       artwork: song.thumbnail ? [{src: song.thumbnail, sizes:'512x512', type:'image/jpeg'}] : []
     });
-    navigator.mediaSession.setActionHandler('play', ()=>{ if(Player.audio) Player.audio.play(); else togglePlay(); });
-    navigator.mediaSession.setActionHandler('pause', ()=>{ if(Player.audio) Player.audio.pause(); else togglePlay(); });
+    navigator.mediaSession.setActionHandler('play', ()=>{
+      if(Player.native) togglePlay();
+      else if(Player.audio) Player.audio.play();
+      else togglePlay();
+    });
+    navigator.mediaSession.setActionHandler('pause', ()=>{
+      if(Player.native) togglePlay();
+      else if(Player.audio) Player.audio.pause();
+      else togglePlay();
+    });
     navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
     navigator.mediaSession.setActionHandler('nexttrack', ()=>nextTrack(false));
-    navigator.mediaSession.setActionHandler('seekto', (d)=>{ if(d.seekTime!=null && Player.audio) Player.audio.currentTime = d.seekTime; });
-    navigator.mediaSession.setActionHandler('seekbackward', (d)=>{ if(Player.audio) Player.audio.currentTime = Math.max(0, Player.audio.currentTime - (d.seekOffset||10)); });
-    navigator.mediaSession.setActionHandler('seekforward', (d)=>{ if(Player.audio) Player.audio.currentTime = Math.min(Player.audio.duration||1e9, Player.audio.currentTime + (d.seekOffset||10)); });
+    navigator.mediaSession.setActionHandler('seekto', (d)=>{
+      if(d.seekTime == null) return;
+      if(Player.native) window.NativePlayback.seek(d.seekTime);
+      else if(Player.audio) Player.audio.currentTime = d.seekTime;
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (d)=>{
+      const cur = Player.native ? window.NativePlayback.currentTime() : Player.audio?.currentTime || 0;
+      if(Player.native) window.NativePlayback.seek(Math.max(0, cur - (d.seekOffset || 10)));
+      else if(Player.audio) Player.audio.currentTime = Math.max(0, cur - (d.seekOffset || 10));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (d)=>{
+      const cur = Player.native ? window.NativePlayback.currentTime() : Player.audio?.currentTime || 0;
+      const dur = Player.native ? window.NativePlayback.duration() : Player.audio?.duration || 1e9;
+      if(Player.native) window.NativePlayback.seek(Math.min(dur || 1e9, cur + (d.seekOffset || 10)));
+      else if(Player.audio) Player.audio.currentTime = Math.min(dur || 1e9, cur + (d.seekOffset || 10));
+    });
     try{ navigator.mediaSession.setPositionState({duration: Player.audio?.duration||0, playbackRate: Player.audio?.playbackRate||1, position: Player.audio?.currentTime||0}); }catch{}
   }catch{}
 }
@@ -935,15 +956,21 @@ function toggleNowPlayingPlay() {
 /* progress loop */
 let _lastTick = null;
 setInterval(() => {
-  const isAudio = Player.native ? window.NativePlayback.isPlaying() : Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
+  const isAudio = Player.native
+    ? !!window.NativePlayback && !!Player.current
+    : Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
   let cur, dur, playing;
   if(isAudio){
     cur = Player.native ? window.NativePlayback.currentTime() : Player.audio.currentTime || 0;
     dur = Player.native ? window.NativePlayback.duration() : Player.audio.duration || 0;
-    playing = Player.native ? true : !Player.audio.paused;
+    playing = Player.native ? window.NativePlayback.isPlaying() : !Player.audio.paused;
     const now = Date.now();
     if (playing && _lastTick && Player.current) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
+    if (Player.native && window.NativePlayback.isEnded()) {
+      nextTrack(true);
+      return;
+    }
   } else {
     if (!Player.yt || !Player.ready || !Player.current || !Player.yt.getDuration) return;
     cur = Player.yt.getCurrentTime() || 0;
@@ -977,7 +1004,7 @@ setInterval(() => {
   syncFloatProgress(pct);
   if (Player.floatOn) drawPipFrame(pct);
   if(isAudio && 'mediaSession' in navigator && dur){
-    try{ navigator.mediaSession.setPositionState({duration: dur, playbackRate: Player.audio.playbackRate, position: cur}); }catch{}
+     try{ navigator.mediaSession.setPositionState({duration: dur, playbackRate: Player.native ? Player.speed : Player.audio.playbackRate, position: cur}); }catch{}
   }
 }, 400);
 
