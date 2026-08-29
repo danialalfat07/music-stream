@@ -102,6 +102,7 @@ public class PlaybackService extends MediaSessionService {
                         .setUri(intent.getStringExtra(EXTRA_URL)).setMediaMetadata(metadata).build();
                 player.setMediaItem(item);
                 player.prepare();
+                player.setPlayWhenReady(true);
                 player.play();
             } else if ("pause".equals(action)) {
                 player.pause();

@@ -324,12 +324,27 @@ function initAudio(){
       window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
       window.NativePlayback.speed(Player.speed);
       window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
-      Player.audio.pause();
       Player.audioUrl = url;
-      Player.native = true;
-      // Native prepare is async; restore exact WebView position after player exists.
-      setTimeout(()=>{ try { window.NativePlayback.seek(position); } catch {} }, 800);
-      renderPlayButtons();
+      // Media3 prepare is async. Stop WebView only after native actually plays.
+      let attempts = 0;
+      const waitForNative = setInterval(()=>{
+        attempts++;
+        try {
+          if (window.NativePlayback.isPlaying()) {
+            clearInterval(waitForNative);
+            Player.audio.pause();
+            Player.native = true;
+            window.NativePlayback.seek(position);
+            renderPlayButtons();
+          } else if (attempts >= 20) {
+            clearInterval(waitForNative);
+            console.warn('native playback did not start');
+          }
+        } catch (e) {
+          clearInterval(waitForNative);
+          console.warn('native background handoff unavailable', e);
+        }
+      }, 250);
     } catch (e) {
       console.warn('native background handoff unavailable', e);
     }
