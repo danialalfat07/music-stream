@@ -272,7 +272,8 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  Player.native = !!window.NativePlayback && typeof window.NativePlayback.play === 'function';
+  // Keep proven WebView playback as default until native event bridge is verified.
+  Player.native = false;
   Player.audioReady = true;
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
@@ -314,15 +315,6 @@ function initAudio(){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
     }
   });
-  // Native bridge can arrive after WebView DOMContentLoaded on cold start.
-  if (!Player.native) {
-    setTimeout(() => {
-      if (window.NativePlayback && typeof window.NativePlayback.play === 'function') {
-        Player.native = true;
-        renderPlayButtons();
-      }
-    }, 500);
-  }
 }
 function updateMediaSessionState(state){
   if(!('mediaSession' in navigator)) return;
