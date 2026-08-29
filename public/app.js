@@ -272,7 +272,7 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  Player.native = !!window.NativePlayback;
+  Player.native = !!window.NativePlayback && typeof window.NativePlayback.play === 'function';
   Player.audioReady = true;
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
@@ -314,6 +314,15 @@ function initAudio(){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
     }
   });
+  // Native bridge can arrive after WebView DOMContentLoaded on cold start.
+  if (!Player.native) {
+    setTimeout(() => {
+      if (window.NativePlayback && typeof window.NativePlayback.play === 'function') {
+        Player.native = true;
+        renderPlayButtons();
+      }
+    }, 500);
+  }
 }
 function updateMediaSessionState(state){
   if(!('mediaSession' in navigator)) return;
@@ -354,9 +363,15 @@ async function playViaAudio(song){
   if (Player.native) {
     Player.audioUrl = `${location.origin}${streamUrl}`;
     try { Player.audio.pause(); } catch {}
-    window.NativePlayback.play(`${location.origin}${streamUrl}`, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
-    window.NativePlayback.speed(Player.speed);
-    window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
+    try {
+      window.NativePlayback.play(`${location.origin}${streamUrl}`, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
+      window.NativePlayback.speed(Player.speed);
+      window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
+    } catch (e) {
+      console.warn('native playback unavailable', e);
+      Player.native = false;
+      return false;
+    }
     Player.useAudio = true;
     document.body.classList.remove('paused');
     renderPlayButtons();
@@ -975,11 +990,17 @@ setInterval(() => {
 }, 400);
 
 function renderPlayButtons() {
-  const actuallyPlaying =
+  let nativePlaying = false;
+  if (Player.native && window.NativePlayback) {
+    try { nativePlaying = window.NativePlayback.isPlaying(); } catch {}
+  }
+  const actuallyPlaying = nativePlaying || (
     Player.yt &&
     Player.ready &&
     Player.yt.getPlayerState &&
-    Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
+    typeof YT !== 'undefined' &&
+    Player.yt.getPlayerState() === YT.PlayerState.PLAYING
+  );
   const preview = isPreviewing();
   $('#mini-play').innerHTML = icon(actuallyPlaying ? 'i-pause' : 'i-play');
   $('#np-play').innerHTML = icon(

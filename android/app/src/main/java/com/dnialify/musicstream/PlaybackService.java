@@ -64,6 +64,7 @@ public class PlaybackService extends MediaSessionService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        super.onStartCommand(intent, flags, startId);
         if (intent != null) {
             String action = intent.getAction();
             if (ACTION_PLAY.equals(action)) {
