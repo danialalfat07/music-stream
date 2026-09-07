@@ -97,11 +97,6 @@ public class PlaybackService extends MediaSessionService {
             }
         });
         session = new MediaSession.Builder(this, player).build();
-        // Handle prev/next from notification via MediaSession callback
-        session.setCallback(new MediaSession.Callback() {
-            @Override
-            public int onPlayerCommandRequest(MediaSession session, MediaSession.ControllerInfo controller, int playerCommand) { return super.onPlayerCommandRequest(session, controller, playerCommand); }
-        });
         android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
         if (android.os.Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(new android.app.NotificationChannel(
@@ -141,10 +136,7 @@ public class PlaybackService extends MediaSessionService {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .addAction(android.R.drawable.ic_media_previous, "Prev", prevPI)
                 .addAction(playIcon, playTitle, togglePI)
-                .addAction(android.R.drawable.ic_media_next, "Next", nextPI)
-                .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
-                        .setMediaSession(session.getSessionCompatToken())
-                        .setShowActionsInCompactView(0, 1, 2));
+                .addAction(android.R.drawable.ic_media_next, "Next", nextPI);
         // update foreground notification
         try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
     }
