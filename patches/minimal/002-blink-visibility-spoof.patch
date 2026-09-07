@@ -14,7 +14,7 @@ backgroundMediaPlaybackEnabled; hiddenForBinding bound via document.idl.
 diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink/renderer/core/dom/document.cc
 --- a/third_party/blink/renderer/core/dom/document.cc
 +++ b/third_party/blink/renderer/core/dom/document.cc
-@@ -2277,6 +2277,28 @@ bool Document::IsPrefetchOnly() const {
+@@ -2277,5 +2277,16 @@ bool Document::IsPrefetchOnly() const {
 +namespace {
 +bool ReportsVisibleForBackgroundMedia(const Document& document) {
 +  const Settings* settings = document.GetSettings();
@@ -32,7 +32,7 @@ diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink
      return V8VisibilityState(V8VisibilityState::Enum::kHidden);
    } else {
      return V8VisibilityState(V8VisibilityState::Enum::kVisible);
-@@ -2313,6 +2335,12 @@ void Document::DidChangeVisibilityState() {
+@@ -2313,2 +2335,4 @@ void Document::DidChangeVisibilityState() {
 -  DispatchEvent(*Event::CreateBubble(event_type_names::kVisibilitychange));
 -  DispatchEvent(*Event::CreateBubble(event_type_names::kWebkitvisibilitychange));
 +  if (!ReportsVisibleForBackgroundMedia(*this)) {
@@ -43,7 +43,7 @@ diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink
 diff --git a/third_party/blink/renderer/core/dom/document.h b/third_party/blink/renderer/core/dom/document.h
 --- a/third_party/blink/renderer/core/dom/document.h
 +++ b/third_party/blink/renderer/core/dom/document.h
-@@ -599,1 +599,3 @@ class CORE_EXPORT Document : public ContainerNode,
+@@ -599,2 +599,3 @@ class CORE_EXPORT Document : public ContainerNode,
    V8VisibilityState visibilityState() const;
 +  bool hiddenForBinding() const;
    String visibilityStateAsString() const;

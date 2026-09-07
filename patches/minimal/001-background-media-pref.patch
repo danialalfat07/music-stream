@@ -23,7 +23,7 @@ Removes MediaSettingsFragment UI; OverrideWebPreferences always true on Android.
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -4595,6 +4595,16 @@ void ChromeContentBrowserClient::OverrideWebPreferences(
+@@ -4595,6 +4595,12 @@ void ChromeContentBrowserClient::OverrideWebPreferences(
      WebContents* web_contents,
      content::SiteInstance& main_frame_site,
      blink::web_pref::WebPreferences* web_prefs) {
@@ -36,22 +36,20 @@ diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/ch
    Profile* profile =
        Profile::FromBrowserContext(web_contents->GetBrowserContext());
  
-@@ -4960,6 +4970,11 @@ bool ChromeContentBrowserClient::OverrideWebPreferencesAfterNavigation(
+@@ -4960,3 +4970,8 @@ bool ChromeContentBrowserClient::OverrideWebPreferencesAfterNavigation(
    prefs_changed |= (web_prefs->autoplay_policy != autoplay_policy);
    web_prefs->autoplay_policy = autoplay_policy;
- 
 +#if BUILDFLAG(IS_ANDROID)
 +  const bool bg = true;
 +  prefs_changed |= (web_prefs->background_media_playback_enabled != bg);
 +  web_prefs->background_media_playback_enabled = bg;
 +#endif
-+
  #if !BUILDFLAG(IS_ANDROID)
 
 diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
-@@ -2240,2 +2240,5 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
+@@ -2240,1 +2240,4 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
    registry->RegisterBooleanPref(prefs::kViewSourceLineWrappingEnabled, false);
 +#if BUILDFLAG(IS_ANDROID)
 +  registry->RegisterBooleanPref(prefs::kBackgroundMediaPlayback, false);
@@ -60,7 +58,7 @@ diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browse
 diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
-@@ -334,2 +334,9 @@ inline constexpr char kWebKitForceDarkModeEnabled[] =
+@@ -334,0 +334,2 @@ inline constexpr char kWebKitForceDarkModeEnabled[] =
 +inline constexpr char kBackgroundMediaPlayback[] =
 +    "bare.background_media_playback";
 
@@ -74,21 +72,21 @@ diff --git a/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
 diff --git a/third_party/blink/public/common/web_preferences/web_preferences.h b/third_party/blink/public/common/web_preferences/web_preferences.h
 --- a/third_party/blink/public/common/web_preferences/web_preferences.h
 +++ b/third_party/blink/public/common/web_preferences/web_preferences.h
-@@ -316,1 +316,7 @@ struct BLINK_COMMON_EXPORT WebPreferences {
+@@ -316,1 +316,2 @@ struct BLINK_COMMON_EXPORT WebPreferences {
    bool force_dark_mode_enabled = false;
 +  bool background_media_playback_enabled = false;
 
 diff --git a/third_party/blink/public/web/web_settings.h b/third_party/blink/public/web/web_settings.h
 --- a/third_party/blink/public/web/web_settings.h
 +++ b/third_party/blink/public/web/web_settings.h
-@@ -274,1 +274,4 @@ class WebSettings {
+@@ -274,1 +274,2 @@ class WebSettings {
    virtual void SetForceDarkModeEnabled(bool) = 0;
 +  virtual void SetBackgroundMediaPlaybackEnabled(bool) = 0;
 
 diff --git a/third_party/blink/renderer/core/exported/web_settings_impl.cc b/third_party/blink/renderer/core/exported/web_settings_impl.cc
 --- a/third_party/blink/renderer/core/exported/web_settings_impl.cc
 +++ b/third_party/blink/renderer/core/exported/web_settings_impl.cc
-@@ -769,2 +769,6 @@ void WebSettingsImpl::SetForceDarkModeEnabled(bool enabled) {
+@@ -769,0 +769,4 @@ void WebSettingsImpl::SetForceDarkModeEnabled(bool enabled) {
 +void WebSettingsImpl::SetBackgroundMediaPlaybackEnabled(bool enabled) {
 +  settings_->SetBackgroundMediaPlaybackEnabled(enabled);
 +}
@@ -105,7 +103,7 @@ diff --git a/third_party/blink/renderer/core/exported/web_view_impl.cc b/third_p
 diff --git a/third_party/blink/renderer/core/frame/settings.json5 b/third_party/blink/renderer/core/frame/settings.json5
 --- a/third_party/blink/renderer/core/frame/settings.json5
 +++ b/third_party/blink/renderer/core/frame/settings.json5
-@@ -1039,1 +1039,6 @@
+@@ -1039,0 +1039,4 @@
 +    {
 +      name: "backgroundMediaPlaybackEnabled",
 +      initial: false,
