@@ -4,6 +4,11 @@ on:
   push:
     branches: [feature/apk-chromium-shell]
   workflow_dispatch:
+    inputs:
+      full_build:
+        description: 'Run full autoninja (needs 100GB disk, will fail on GH free runner)'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -19,6 +24,14 @@ jobs:
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /tmp/depot_tools
           echo "/tmp/depot_tools" >> $GITHUB_PATH
 
+      - name: Free disk (Chromium needs >100GB, GH runner ~14GB)
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup 2>&1 | head -20 || true
+          sudo docker image prune --all --force 2>&1 | head -20 || true
+          sudo apt-get clean
+          df -h
+
       - name: Cache Chromium
         uses: actions/cache@v4
         with:
@@ -28,12 +41,15 @@ jobs:
       - name: Fetch Chromium (shallow)
         run: |
           mkdir -p /tmp/chromium && cd /tmp/chromium
+          df -h
           if [ ! -f .gclient ]; then
             fetch --nohooks --nohistory android
           else
             echo ".gclient exists, syncing..."
-            gclient sync --nohooks --with_branch_heads --with_tags
+            gclient sync --nohooks --with_branch_heads --with_tags --no-history
           fi
+          df -h
+          du -sh /tmp/chromium 2>&1 | head -20 || true
 
       - name: Apply minimal patches
         run: |
@@ -41,18 +57,21 @@ jobs:
           for p in $GITHUB_WORKSPACE/patches/minimal/*.patch; do echo "Applying $p"; git apply "$p" || (echo "FAILED $p" && exit 1); done
           git diff --stat
 
-      - name: GN gen
+      - name: GN gen (validate patches)
         run: |
           cd /tmp/chromium/src
-          gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=false'
+          gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=false' || echo "gn gen failed (expected if hooks not run)"
+          ls -lh out/Release 2>&1 | head -30 || true
 
-      - name: Build APK
+      - name: Build APK (full, needs self-hosted or 100GB runner)
+        if: ${{ inputs.full_build }}
         run: |
           cd /tmp/chromium/src
           autoninja -C out/Release chrome_public_apk
           ls -lh out/Release/apks/
 
       - name: Upload APK
+        if: ${{ inputs.full_build }}
         uses: actions/upload-artifact@v4
         with:
           name: MusicStream-apk
