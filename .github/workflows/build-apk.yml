@@ -1,0 +1,54 @@
+name: Build MusicStream APK (Chromium Shell)
+
+on:
+  push:
+    branches: [feature/apk-chromium-shell]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /tmp/depot_tools
+          echo "/tmp/depot_tools" >> $GITHUB_PATH
+
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: /tmp/chromium
+          key: chromium-${{ hashFiles('docs/architecture.md') }}
+
+      - name: Fetch Chromium (shallow)
+        run: |
+          mkdir -p /tmp/chromium && cd /tmp/chromium
+          fetch --nohooks android --no-history || gclient sync --nohooks --with_branch_heads --with_tags
+
+      - name: Apply minimal Bare patches (0043/0050/0051)
+        run: |
+          echo "TODO: apply patches from BareBrowser/bare-browser"
+          # git clone https://github.com/BareBrowser/bare-browser /tmp/bare
+          # cp -r patches/* /tmp/chromium/src/
+
+      - name: GN gen
+        run: |
+          cd /tmp/chromium/src
+          gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=false'
+
+      - name: Build APK
+        run: |
+          cd /tmp/chromium/src
+          autoninja -C out/Release chrome_public_apk
+          ls -lh out/Release/apks/
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicStream-apk
+          path: /tmp/chromium/src/out/Release/apks/*.apk

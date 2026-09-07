@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>MusicStream Background Test</title></head>
+<body>
+<video id="player" controls playsinline src="https://test-videos.co.uk/vids/sintel/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"></video>
+<pre id="log"></pre>
+<script>
+const v=document.getElementById('player'), l=document.getElementById('log');
+function log(m){ l.textContent+=m+"\n"; console.log(m); }
+v.addEventListener('play',()=>log('PLAY paused='+v.paused));
+v.addEventListener('pause',()=>log('PAUSE paused='+v.paused));
+v.addEventListener('playing',()=>log('PLAYING'));
+v.addEventListener('waiting',()=>log('WAITING'));
+v.addEventListener('ended',()=>log('ENDED'));
+document.addEventListener('visibilitychange',()=>log('visibility:'+document.visibilityState+' hidden='+document.hidden));
+setInterval(()=>log(`tick paused=${v.paused} ended=${v.ended} readyState=${v.readyState} visibility=${document.visibilityState} currentTime=${v.currentTime.toFixed(1)}`),2000);
+</script>
+</body>
+</html>
