@@ -3,7 +3,6 @@ name: Build Capacitor APK
 on:
   push:
     branches: [feature/apk-chromium-shell, main]
-    paths: [android/**, public/**, capacitor.config.json, package.json]
   workflow_dispatch:
 
 jobs:
