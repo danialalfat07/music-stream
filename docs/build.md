@@ -18,8 +18,8 @@ export PATH=/tmp/depot_tools:$PATH
 
 # 2. fetch Chromium (shallow, android)
 mkdir -p /tmp/chromium && cd /tmp/chromium
-fetch --nohooks android --no-history
-# atau jika fetch gagal: gclient sync --nohooks --with_branch_heads --with_tags
+fetch --nohooks --nohistory android
+# jika .gclient sudah ada (cache hit): gclient sync --nohooks --with_branch_heads --with_tags
 
 cd src
 git checkout 153.0.7999.0  # atau tag sesuai Bare base

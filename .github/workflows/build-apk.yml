@@ -28,7 +28,12 @@ jobs:
       - name: Fetch Chromium (shallow)
         run: |
           mkdir -p /tmp/chromium && cd /tmp/chromium
-          fetch --nohooks android --no-history || gclient sync --nohooks --with_branch_heads --with_tags
+          if [ ! -f .gclient ]; then
+            fetch --nohooks --nohistory android
+          else
+            echo ".gclient exists, syncing..."
+            gclient sync --nohooks --with_branch_heads --with_tags
+          fi
 
       - name: Apply minimal patches
         run: |
