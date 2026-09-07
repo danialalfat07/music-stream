@@ -12,3 +12,9 @@ signing.keystore
 *.keystore
 *.jks
 
+# apk-chromium-shell local only
+bare-browser/
+file.txt
+file1.txt
+ci-monitor.log
+
