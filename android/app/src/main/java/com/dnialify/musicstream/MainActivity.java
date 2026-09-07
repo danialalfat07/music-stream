@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    public static MainActivity current;
     @Override
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
@@ -18,6 +19,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStart() {
         super.onStart();
+        current = this;
         // Bridge ready here — add interface + settings (fixes patah jembatan: addJavascriptInterface sebelum WebView ready)
         try {
             android.webkit.WebView wv = getBridge().getWebView();
@@ -26,6 +28,11 @@ public class MainActivity extends BridgeActivity {
             wv.removeJavascriptInterface("NativePlayback");
             wv.addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
         } catch (Exception ignored) {}
+    }
+    @Override
+    public void onDestroy() {
+        if (current == this) current = null;
+        super.onDestroy();
     }
 
     private final class PlaybackBridge {

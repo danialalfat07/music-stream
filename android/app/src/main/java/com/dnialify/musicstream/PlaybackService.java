@@ -82,8 +82,26 @@ public class PlaybackService extends MediaSessionService {
             public void onPlayerError(PlaybackException error) {
                 android.util.Log.e("DnialifyPlayback", "Media3 playback failed", error);
             }
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                // refresh notif play/pause icon and ongoing
+                try {
+                    MediaItem cur = player.getCurrentMediaItem();
+                    String t = null, a = null;
+                    if (cur != null && cur.mediaMetadata != null) {
+                        t = cur.mediaMetadata.title != null ? cur.mediaMetadata.title.toString() : null;
+                        a = cur.mediaMetadata.artist != null ? cur.mediaMetadata.artist.toString() : null;
+                    }
+                    updateNotification(t, a);
+                } catch (Exception ignored) {}
+            }
         });
         session = new MediaSession.Builder(this, player).build();
+        // Handle prev/next from notification via MediaSession callback
+        session.setCallback(new MediaSession.Callback() {
+            @Override
+            public int onPlayerCommandRequest(MediaSession session, MediaSession.ControllerInfo controller, int playerCommand) { return super.onPlayerCommandRequest(session, controller, playerCommand); }
+        });
         android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
         if (android.os.Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(new android.app.NotificationChannel(
@@ -104,16 +122,29 @@ public class PlaybackService extends MediaSessionService {
         openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         String t = title != null && !title.isEmpty() ? title : "Dnialify Music Stream";
-        String a = artist != null && !artist.isEmpty() ? artist : "Playing in background";
+        String a = artist != null && !artist.isEmpty() ? artist : "Playing";
+        boolean isPlaying = player != null && player.isPlaying();
+        // PendingIntents for basic controls
+        PendingIntent prevPI = PendingIntent.getService(this, 1, new Intent(this, PlaybackService.class).setAction("prev"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent nextPI = PendingIntent.getService(this, 2, new Intent(this, PlaybackService.class).setAction("next"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent togglePI = PendingIntent.getService(this, 3, new Intent(this, PlaybackService.class).setAction("toggle"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        int playIcon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
+        String playTitle = isPlaying ? "Pause" : "Play";
         androidx.core.app.NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
                 .setContentTitle(t)
                 .setContentText(a)
-                .setOngoing(true)
+                .setOngoing(isPlaying)
                 .setOnlyAlertOnce(true)
                 .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
                 .setContentIntent(pi)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .addAction(android.R.drawable.ic_media_previous, "Prev", prevPI)
+                .addAction(playIcon, playTitle, togglePI)
+                .addAction(android.R.drawable.ic_media_next, "Next", nextPI)
+                .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(session.getSessionCompatToken())
+                        .setShowActionsInCompactView(0, 1, 2));
         // update foreground notification
         try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
     }
@@ -145,6 +176,30 @@ public class PlaybackService extends MediaSessionService {
                 player.setPlayWhenReady(true);
                 player.play();
                 updateNotification(title, artist);
+            } else if ("prev".equals(action)) {
+                // delegate to WebView queue if available
+                try {
+                    if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
+                        try { MainActivity.current.getBridge().eval("if(window.prevTrack) prevTrack();", null); } catch (Exception ignored) {}
+                    });
+                } catch (Exception ignored) {}
+                // fallback: seek to 0
+                try { player.seekTo(0); } catch (Exception ignored) {}
+            } else if ("next".equals(action)) {
+                try {
+                    if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
+                        try { MainActivity.current.getBridge().eval("if(window.nextTrack) nextTrack(false);", null); } catch (Exception ignored) {}
+                    });
+                } catch (Exception ignored) {}
+            } else if ("toggle".equals(action)) {
+                if (player.isPlaying()) player.pause(); else player.play();
+                // update icon
+                try {
+                    MediaItem cur = player.getCurrentMediaItem();
+                    String t2 = cur != null && cur.mediaMetadata != null && cur.mediaMetadata.title != null ? cur.mediaMetadata.title.toString() : null;
+                    String a2 = cur != null && cur.mediaMetadata != null && cur.mediaMetadata.artist != null ? cur.mediaMetadata.artist.toString() : null;
+                    updateNotification(t2, a2);
+                } catch (Exception ignored) {}
             } else if ("pause".equals(action)) {
                 player.pause();
                 // keep notification but update state
