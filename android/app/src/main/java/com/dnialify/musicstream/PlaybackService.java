@@ -61,6 +61,12 @@ public class PlaybackService extends MediaSessionService {
     public static void volume(Context context, double value) {
         ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("volume").putExtra("value", value));
     }
+    public static void updateNotificationStatic(Context context, String title, String artist) {
+        if (instance != null) { instance.updateNotification(title, artist); return; }
+        Intent i = new Intent(context, PlaybackService.class).setAction("updateNotification")
+                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist);
+        ContextCompat.startForegroundService(context, i);
+    }
 
     private static PlaybackService instance;
 
@@ -119,6 +125,9 @@ public class PlaybackService extends MediaSessionService {
             String action = intent.getAction();
             if (ACTION_ARM.equals(action)) {
                 updateNotification(null, null);
+                return START_STICKY;
+            } else if ("updateNotification".equals(action)) {
+                updateNotification(intent.getStringExtra(EXTRA_TITLE), intent.getStringExtra(EXTRA_ARTIST));
                 return START_STICKY;
             } else if (ACTION_PLAY.equals(action)) {
                 String title = intent.getStringExtra(EXTRA_TITLE);

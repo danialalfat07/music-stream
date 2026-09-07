@@ -24,22 +24,35 @@ const api = async (path) => {
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 };
-// Bare/Brave spoof: on Android Capacitor keep page visible to JS so YT IFrame / WebAudio doesn't pause on Home
-// Mirrors Bare patches 0043/0050: Document.hidden / visibilityState stays 'visible' for script
-try {
-  if (window.NativePlayback) {
-    const origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
-    const origVis = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
-    // only spoof if NativePlayback exists (Android)
-    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-    // still let real visibilitychange fire but prevent YT handler from seeing hidden
-    document.addEventListener('visibilitychange', (e) => {
-      // don't block our own handoff listener (it checks NativePlayback), just prevent YT pause
-      if (document.visibilityState === 'hidden') e.stopImmediatePropagation();
-    }, true);
-  }
-} catch {}
+// Bare/Brave spoof: keep YT IFrame fallback playing in background on Android Capacitor
+// Mirrors Bare 0043/0050 + Brave background_video_playback.js — must run before YT iframe loads
+(function(){
+  try {
+    if (!window.NativePlayback) return;
+    function spoof(doc, win) {
+      try { Object.defineProperty(doc, 'hidden', { get: () => false, configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'visibilityState', { get: () => 'visible', configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'webkitHidden', { get: () => false, configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'webkitVisibilityState', { get: () => 'visible', configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'hasFocus', { value: () => true, configurable: true }); } catch(e) {}
+      try { win.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { doc.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { win.addEventListener('webkitvisibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { doc.addEventListener('webkitvisibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+    }
+    spoof(document, window);
+    try {
+      var obs = new MutationObserver(function(muts){
+        muts.forEach(function(m){
+          m.addedNodes.forEach(function(n){
+            if (n.tagName === 'IFRAME' && n.contentWindow) { try { spoof(n.contentDocument, n.contentWindow); } catch(e) {} }
+          });
+        });
+      });
+      obs.observe(document.documentElement, { childList:true, subtree:true });
+    } catch(e) {}
+  } catch(e) {}
+})();
 
 const fmtTime = (s) => {
   s = Math.max(0, Math.floor(s || 0));
@@ -799,6 +812,13 @@ function startCurrent() {
         setTimeout(applyPlaybackQuality, 1600);
       };
       tryPlay();
+      // YT fallback still needs native notif so Home shows title/artist even when audio is WebView
+      if (window.NativePlayback) {
+        try {
+          if (window.NativePlayback.updateNotification) window.NativePlayback.updateNotification(displayTitle(s.title) || s.title, s.artist || s.subtitle || '');
+          else window.NativePlayback.arm();
+        } catch {}
+      }
       if ('mediaSession' in navigator) {
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
