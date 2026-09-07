@@ -10,14 +10,22 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
-        try { getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false); } catch (Exception ignored) {}
-        try { getBridge().getWebView().getSettings().setDomStorageEnabled(true); } catch (Exception ignored) {}
-        // Don't override WebViewClient (breaks Capacitor Bridge) — spoof is done in public/app.js via JS (Brave-style)
-        getBridge().getWebView().addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
         }
+    }
+    @Override
+    public void onStart() {
+        super.onStart();
+        // Bridge ready here — add interface + settings (fixes patah jembatan: addJavascriptInterface sebelum WebView ready)
+        try {
+            android.webkit.WebView wv = getBridge().getWebView();
+            wv.getSettings().setMediaPlaybackRequiresUserGesture(false);
+            wv.getSettings().setDomStorageEnabled(true);
+            wv.removeJavascriptInterface("NativePlayback");
+            wv.addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
+        } catch (Exception ignored) {}
     }
 
     private final class PlaybackBridge {
