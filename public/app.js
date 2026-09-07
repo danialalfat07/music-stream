@@ -24,6 +24,22 @@ const api = async (path) => {
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 };
+// Bare/Brave spoof: on Android Capacitor keep page visible to JS so YT IFrame / WebAudio doesn't pause on Home
+// Mirrors Bare patches 0043/0050: Document.hidden / visibilityState stays 'visible' for script
+try {
+  if (window.NativePlayback) {
+    const origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    const origVis = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    // only spoof if NativePlayback exists (Android)
+    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    // still let real visibilitychange fire but prevent YT handler from seeing hidden
+    document.addEventListener('visibilitychange', (e) => {
+      // don't block our own handoff listener (it checks NativePlayback), just prevent YT pause
+      if (document.visibilityState === 'hidden') e.stopImmediatePropagation();
+    }, true);
+  }
+} catch {}
 
 const fmtTime = (s) => {
   s = Math.max(0, Math.floor(s || 0));
@@ -274,9 +290,10 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  // Keep stable WebView playback until native bridge exposes async player state.
-  Player.native = false;
+  // On Android Capacitor, prefer ExoPlayer via NativePlayback for background (like Brave/Bare: keep audio in native layer)
+  Player.native = !!window.NativePlayback;
   Player.audioReady = true;
+  if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
   a.addEventListener('ended', ()=>{ nextTrack(true); });
@@ -321,33 +338,16 @@ function initAudio(){
     if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || !Player.wasPlaying || !Player.current || !window.NativePlayback) return;
     const song = Player.current;
     const position = Player.audio.currentTime || 0;
-    // ExoPlayer reads signed googlevideo URL more reliably than server stream proxy.
     const url = Player.nativeUrl || `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
     try {
       window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
       window.NativePlayback.speed(Player.speed);
       window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
       Player.audioUrl = url;
-      // Media3 prepare is async. Stop WebView only after native actually plays.
-      let attempts = 0;
-      const waitForNative = setInterval(()=>{
-        attempts++;
-        try {
-          if (window.NativePlayback.isPlaying()) {
-            clearInterval(waitForNative);
-            Player.audio.pause();
-            Player.native = true;
-            window.NativePlayback.seek(position);
-            renderPlayButtons();
-          } else if (attempts >= 20) {
-            clearInterval(waitForNative);
-            console.warn('native playback did not start');
-          }
-        } catch (e) {
-          clearInterval(waitForNative);
-          console.warn('native background handoff unavailable', e);
-        }
-      }, 250);
+      Player.audio.pause();
+      Player.native = true;
+      try { window.NativePlayback.seek(position); } catch {}
+      renderPlayButtons();
     } catch (e) {
       console.warn('native background handoff unavailable', e);
     }

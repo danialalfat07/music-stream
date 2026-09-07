@@ -10,6 +10,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
+        // Bare/Brave: keep WebView media from pausing on Home — allow autoplay without gesture
+        try { getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false); } catch (Exception ignored) {}
         getBridge().getWebView().addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

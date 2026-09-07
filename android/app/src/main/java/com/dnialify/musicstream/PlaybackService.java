@@ -92,18 +92,41 @@ public class PlaybackService extends MediaSessionService {
                 .build());
     }
 
+    private void updateNotification(String title, String artist) {
+        android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
+        Intent openIntent = new Intent(this, MainActivity.class);
+        openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        String t = title != null && !title.isEmpty() ? title : "Dnialify Music Stream";
+        String a = artist != null && !artist.isEmpty() ? artist : "Playing in background";
+        androidx.core.app.NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
+                .setContentTitle(t)
+                .setContentText(a)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
+                .setContentIntent(pi)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+        // update foreground notification
+        try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
         if (intent != null) {
             String action = intent.getAction();
             if (ACTION_ARM.equals(action)) {
+                updateNotification(null, null);
                 return START_STICKY;
             } else if (ACTION_PLAY.equals(action)) {
-                MediaMetadata.Builder metadataBuilder = new MediaMetadata.Builder()
-                        .setTitle(intent.getStringExtra(EXTRA_TITLE))
-                        .setArtist(intent.getStringExtra(EXTRA_ARTIST));
+                String title = intent.getStringExtra(EXTRA_TITLE);
+                String artist = intent.getStringExtra(EXTRA_ARTIST);
                 String artwork = intent.getStringExtra(EXTRA_ARTWORK);
+                MediaMetadata.Builder metadataBuilder = new MediaMetadata.Builder()
+                        .setTitle(title)
+                        .setArtist(artist);
                 if (artwork != null && !artwork.isEmpty()) metadataBuilder.setArtworkUri(android.net.Uri.parse(artwork));
                 MediaMetadata metadata = metadataBuilder.build();
                 MediaItem item = new MediaItem.Builder()
@@ -112,8 +135,11 @@ public class PlaybackService extends MediaSessionService {
                 player.prepare();
                 player.setPlayWhenReady(true);
                 player.play();
+                updateNotification(title, artist);
             } else if ("pause".equals(action)) {
                 player.pause();
+                // keep notification but update state
+                try { player.getCurrentMediaItem(); } catch (Exception ignored) {}
             } else if ("seek".equals(action)) {
                 player.seekTo((long) (intent.getDoubleExtra("seconds", 0) * 1000));
             } else if ("speed".equals(action)) {
