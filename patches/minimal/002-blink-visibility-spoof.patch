@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MusicStream <dev@dnialify>
+Subject: [PATCH 2/3] blink: spoof visibilityState/hidden + suppress visibilitychange
+
+Port of Bare 0043 + 0050. ReportsVisibleForBackgroundMedia() checks
+backgroundMediaPlaybackEnabled; hiddenForBinding bound via document.idl.
+
+---
+ third_party/blink/renderer/core/dom/document.cc  | 38 +++++++++++++++++++++-
+ third_party/blink/renderer/core/dom/document.h   |  2 ++
+ third_party/blink/renderer/core/dom/document.idl |  4 +--
+ 3 files changed, 39 insertions(+), 5 deletions(-)
+
+diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink/renderer/core/dom/document.cc
+--- a/third_party/blink/renderer/core/dom/document.cc
++++ b/third_party/blink/renderer/core/dom/document.cc
+@@ -2277,6 +2277,28 @@ bool Document::IsPrefetchOnly() const {
++namespace {
++bool ReportsVisibleForBackgroundMedia(const Document& document) {
++  const Settings* settings = document.GetSettings();
++  return settings && settings->GetBackgroundMediaPlaybackEnabled();
++}
++} // namespace
++
++bool Document::hiddenForBinding() const {
++  return hidden() && !ReportsVisibleForBackgroundMedia(*this);
++}
++
+ V8VisibilityState Document::visibilityState() const {
+-  if (hidden()) {
++  if (hidden() && !ReportsVisibleForBackgroundMedia(*this)) {
+     return V8VisibilityState(V8VisibilityState::Enum::kHidden);
+   } else {
+     return V8VisibilityState(V8VisibilityState::Enum::kVisible);
+@@ -2313,6 +2335,12 @@ void Document::DidChangeVisibilityState() {
+-  DispatchEvent(*Event::CreateBubble(event_type_names::kVisibilitychange));
+-  DispatchEvent(*Event::CreateBubble(event_type_names::kWebkitvisibilitychange));
++  if (!ReportsVisibleForBackgroundMedia(*this)) {
++    DispatchEvent(*Event::CreateBubble(event_type_names::kVisibilitychange));
++    DispatchEvent(*Event::CreateBubble(event_type_names::kWebkitvisibilitychange));
++  }
+
+diff --git a/third_party/blink/renderer/core/dom/document.h b/third_party/blink/renderer/core/dom/document.h
+--- a/third_party/blink/renderer/core/dom/document.h
++++ b/third_party/blink/renderer/core/dom/document.h
+@@ -599,1 +599,3 @@ class CORE_EXPORT Document : public ContainerNode,
+   V8VisibilityState visibilityState() const;
++  bool hiddenForBinding() const;
+   String visibilityStateAsString() const;
+
+diff --git a/third_party/blink/renderer/core/dom/document.idl b/third_party/blink/renderer/core/dom/document.idl
+--- a/third_party/blink/renderer/core/dom/document.idl
++++ b/third_party/blink/renderer/core/dom/document.idl
+@@ -181,1 +181,1 @@
+-    readonly attribute boolean hidden;
++    [ImplementedAs=hiddenForBinding] readonly attribute boolean hidden;
+@@ -206,1 +206,1 @@
+-    [MeasureAs=PrefixedPageVisibility, ImplementedAs=hidden] readonly attribute boolean webkitHidden;
++    [MeasureAs=PrefixedPageVisibility, ImplementedAs=hiddenForBinding] readonly attribute boolean webkitHidden;

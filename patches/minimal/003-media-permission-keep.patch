@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MusicStream <dev@dnialify>
+Subject: [PATCH 3/3] keep allow_background_video_playback_ when hidden
+
+Port of Bare 0051.
+
+---
+ third_party/blink/public/platform/web_media_player.h       | 5 +++++
+ third_party/blink/renderer/core/html/media/html_media_element.cc | 7 +++++++
+ third_party/blink/renderer/platform/media/web_media_player_impl.cc | 14 ++++++++++----
+ third_party/blink/renderer/platform/media/web_media_player_impl.h  | 7 +++++++
+ 4 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/third_party/blink/public/platform/web_media_player.h b/third_party/blink/public/platform/web_media_player.h
+--- a/third_party/blink/public/platform/web_media_player.h
++++ b/third_party/blink/public/platform/web_media_player.h
+@@ -232,1 +232,6 @@ class WebMediaPlayer {
+   virtual bool GetShouldPauseWhenFrameIsHidden() { return false; }
++  virtual void SetBackgroundMediaPlaybackEnabled(bool enabled) {}
+
+diff --git a/third_party/blink/renderer/core/html/media/html_media_element.cc b/third_party/blink/renderer/core/html/media/html_media_element.cc
+--- a/third_party/blink/renderer/core/html/media/html_media_element.cc
++++ b/third_party/blink/renderer/core/html/media/html_media_element.cc
+@@ -1783,2 +1783,9 @@ void HTMLMediaElement::StartPlayerLoad() {
++  {
++    Settings* s = GetDocument().GetSettings();
++    web_media_player_->SetBackgroundMediaPlaybackEnabled(
++        s && s->GetBackgroundMediaPlaybackEnabled());
++  }
+
+diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.cc b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
+--- a/third_party/blink/renderer/platform/media/web_media_player_impl.cc
++++ b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
+@@ -1297,1 +1297,4 @@ bool WebMediaPlayerImpl::GetShouldPauseWhenFrameIsHidden() {
++void WebMediaPlayerImpl::SetBackgroundMediaPlaybackEnabled(bool enabled) {
++  background_media_playback_enabled_ = enabled;
++}
+@@ -2657,2 +2660,3 @@ void WebMediaPlayerImpl::OnPageHidden() {
+-  if (IsPageHidden()) {
++  if (IsPageHidden() && !background_media_playback_enabled_) {
+     allow_background_video_playback_ = false;
+@@ -2778,2 +2782,3 @@ void WebMediaPlayerImpl::OnFrameHidden() {
+-  if (IsFrameHidden()) {
++  if (IsFrameHidden() && !background_media_playback_enabled_) {
+     allow_background_video_playback_ = false;
+
+diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.h b/third_party/blink/renderer/platform/media/web_media_player_impl.h
+--- a/third_party/blink/renderer/platform/media/web_media_player_impl.h
++++ b/third_party/blink/renderer/platform/media/web_media_player_impl.h
+@@ -264,1 +264,3 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
+   bool GetShouldPauseWhenFrameIsHidden() override;
++  void SetBackgroundMediaPlaybackEnabled(bool enabled) override;
+@@ -1032,1 +1032,6 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
+   bool allow_background_video_playback_ = true;
++  bool background_media_playback_enabled_ = false;

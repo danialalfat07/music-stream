@@ -30,11 +30,11 @@ jobs:
           mkdir -p /tmp/chromium && cd /tmp/chromium
           fetch --nohooks android --no-history || gclient sync --nohooks --with_branch_heads --with_tags
 
-      - name: Apply minimal Bare patches (0043/0050/0051)
+      - name: Apply minimal patches
         run: |
-          echo "TODO: apply patches from BareBrowser/bare-browser"
-          # git clone https://github.com/BareBrowser/bare-browser /tmp/bare
-          # cp -r patches/* /tmp/chromium/src/
+          cd /tmp/chromium/src
+          for p in $GITHUB_WORKSPACE/patches/minimal/*.patch; do echo "Applying $p"; git apply "$p" || (echo "FAILED $p" && exit 1); done
+          git diff --stat
 
       - name: GN gen
         run: |
