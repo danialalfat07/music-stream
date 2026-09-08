@@ -1,461 +1,326 @@
 package com.dnialify.musicstream;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Bundle;
-import android.os.IBinder;
-
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.os.IBinder;
+import android.view.View;
 import android.widget.RemoteViews;
-
-import android.support.v4.media.MediaMetadataCompat;
-import android.support.v4.media.session.MediaSessionCompat;
-import android.support.v4.media.session.PlaybackStateCompat;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
-import androidx.media3.common.AudioAttributes;
-import androidx.media3.common.C;
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.MediaMetadata;
-import androidx.media3.common.PlaybackException;
-import androidx.media3.common.Player;
-import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.session.MediaSession;
-import androidx.media3.session.MediaSessionService;
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
 
-public class PlaybackService extends MediaSessionService {
-    private static final String ACTION_PLAY = "com.dnialify.musicstream.PLAY";
-    private static final String EXTRA_URL = "url";
+public class PlaybackService extends Service {
+    private static final String CHANNEL_ID = "playback";
+    private static final int NOTIFICATION_ID = 1001;
+    private static final String ACTION_ARM = "arm";
     private static final String EXTRA_TITLE = "title";
     private static final String EXTRA_ARTIST = "artist";
     private static final String EXTRA_ARTWORK = "artwork";
-    private static final String ACTION_ARM = "arm";
-    private static final String CHANNEL_ID = "playback";
-    private static final int NOTIFICATION_ID = 1001;
-    private ExoPlayer player;
-    private MediaSession session;
-    private MediaSessionCompat mediaSessionCompat;
-    // WebView-driven state for notification (not ExoPlayer playback)
-    private String webViewTitle = null;
-    private String webViewArtist = null;
-    private String webViewArtwork = null;
-    private Bitmap webViewArtworkBitmap = null;
-    private String webViewPrevLyric = null;
-    private String webViewCurrentLyric = null;
-    private String webViewNextLyric = null;
-    private boolean webViewIsPlaying = false;
-    private long webViewPositionMs = 0;
-    private long webViewDurationMs = 0;
-
-    public static void arm(Context context) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction(ACTION_ARM));
-    }
-
-    public static void play(Context context, String url, String title, String artist, String artwork) {
-        Intent i = new Intent(context, PlaybackService.class).setAction(ACTION_PLAY)
-                .putExtra(EXTRA_URL, url).putExtra(EXTRA_TITLE, title)
-                .putExtra(EXTRA_ARTIST, artist).putExtra(EXTRA_ARTWORK, artwork);
-        ContextCompat.startForegroundService(context, i);
-    }
-
-    public static void pause(Context context) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("pause"));
-    }
-
-    public static void seek(Context context, double seconds) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("seek")
-                .putExtra("seconds", seconds));
-    }
-
-    public static boolean isPlaying() { return instance != null && instance.player != null && instance.player.isPlaying(); }
-    public static boolean isEnded() { return instance != null && instance.player != null && instance.player.getPlaybackState() == androidx.media3.common.Player.STATE_ENDED; }
-    public static double currentTime() { return instance == null || instance.player == null ? 0 : instance.player.getCurrentPosition() / 1000d; }
-    public static double duration() { return instance == null || instance.player == null ? 0 : Math.max(0, instance.player.getDuration() / 1000d); }
-    public static void speed(Context context, double value) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("speed").putExtra("value", value));
-    }
-    public static void volume(Context context, double value) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class).setAction("volume").putExtra("value", value));
-    }
-    public static void updateNotificationStatic(Context context, String title, String artist) {
-        if (instance != null) { instance.updateNotification(title, artist); return; }
-        Intent i = new Intent(context, PlaybackService.class).setAction("updateNotification")
-                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist);
-        ContextCompat.startForegroundService(context, i);
-    }
-
-    // WebView -> Native bridge for notification (incremental, minimal)
-    public static void updateWebViewState(Context context, String title, String artist, String artwork, boolean isPlaying, long positionMs, long durationMs) {
-        if (instance != null) { instance.handleWebViewState(title, artist, artwork, isPlaying, positionMs, durationMs); return; }
-        Intent i = new Intent(context, PlaybackService.class).setAction("webViewState")
-                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist).putExtra(EXTRA_ARTWORK, artwork)
-                .putExtra("isPlaying", isPlaying).putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
-        ContextCompat.startForegroundService(context, i);
-    }
-
-    public static void updateLyricsStatic(Context context, String prev, String current, String next) {
-        if (instance != null) { instance.handleLyrics(prev, current, next); return; }
-        Intent i = new Intent(context, PlaybackService.class).setAction("webViewLyrics")
-                .putExtra("prev", prev).putExtra("current", current).putExtra("next", next);
-        ContextCompat.startForegroundService(context, i);
-    }
 
     private static PlaybackService instance;
+    private MediaSessionCompat mediaSession;
+    private String title = "Dnialify Music Stream";
+    private String artist = "MusicStream";
+    private String artworkUrl = "";
+    private Bitmap artwork;
+    private String previousLyric = "";
+    private String currentLyric = "";
+    private String nextLyric = "";
+    private boolean playing;
+    private long positionMs;
+    private long durationMs;
+
+    public static void arm(Context context) {
+        if (instance != null) { instance.publishNotification(); return; }
+        start(context, ACTION_ARM);
+    }
+
+    private static void start(Context context, String action) {
+        ContextCompat.startForegroundService(context,
+                new Intent(context, PlaybackService.class).setAction(action));
+    }
+
+    public static void updateNotificationStatic(Context context, String title, String artist) {
+        if (instance != null) {
+            if (title != null) instance.title = title;
+            if (artist != null) instance.artist = artist;
+            instance.publishNotification();
+            return;
+        }
+        Intent intent = new Intent(context, PlaybackService.class).setAction("updateNotification")
+                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist);
+        ContextCompat.startForegroundService(context, intent);
+    }
+
+    public static void updateWebViewState(Context context, String title, String artist,
+            String artwork, boolean playing, long positionMs, long durationMs) {
+        if (instance != null) {
+            Intent state = new Intent().putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
+                    .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
+                    .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
+            instance.handleState(state);
+            return;
+        }
+        Intent intent = new Intent(context, PlaybackService.class).setAction("webViewState")
+                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
+                .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
+                .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
+        ContextCompat.startForegroundService(context, intent);
+    }
+
+    public static void updateLyricsStatic(Context context, String previous, String current, String next) {
+        if (instance != null) {
+            Intent lyrics = new Intent().putExtra("prev", previous)
+                    .putExtra("current", current).putExtra("next", next);
+            instance.handleLyrics(lyrics);
+            return;
+        }
+        Intent intent = new Intent(context, PlaybackService.class).setAction("webViewLyrics")
+                .putExtra("prev", previous).putExtra("current", current).putExtra("next", next);
+        ContextCompat.startForegroundService(context, intent);
+    }
+
+    // Kept for existing JS bridge callers. Playback itself remains WebView-owned.
+    public static void play(Context context, String url, String title, String artist, String artwork) {
+        updateNotificationStatic(context, title, artist);
+    }
+
+    public static void pause(Context context) { dispatch(context, "pause"); }
+    public static void seek(Context context, double seconds) {
+        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class)
+                .setAction("seek").putExtra("seconds", seconds));
+    }
+    public static boolean isPlaying() { return instance != null && instance.playing; }
+    public static boolean isEnded() { return false; }
+    public static double currentTime() { return instance == null ? 0 : instance.positionMs / 1000d; }
+    public static double duration() { return instance == null ? 0 : instance.durationMs / 1000d; }
+    public static void speed(Context context, double value) { }
+    public static void volume(Context context, double value) { }
+
+    private static void dispatch(Context context, String action) {
+        start(context, action);
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-        AudioAttributes attrs = new AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build();
-        player = new ExoPlayer.Builder(this).setAudioAttributes(attrs, true).build();
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onPlayerError(PlaybackException error) {
-                android.util.Log.e("DnialifyPlayback", "Media3 playback failed", error);
-            }
-            @Override
-            public void onIsPlayingChanged(boolean isPlaying) {
-                // For WebView-driven playback, isPlaying comes from WebView; keep ExoPlayer listener minimal
-                // Do not override WebView state with idle player
-                if (webViewTitle != null) return;
-                try {
-                    MediaItem cur = player.getCurrentMediaItem();
-                    String t = null, a = null;
-                    if (cur != null && cur.mediaMetadata != null) {
-                        t = cur.mediaMetadata.title != null ? cur.mediaMetadata.title.toString() : null;
-                        a = cur.mediaMetadata.artist != null ? cur.mediaMetadata.artist.toString() : null;
-                    }
-                    updateNotification(t, a);
-                } catch (Exception ignored) {}
+        createChannel();
+        mediaSession = new MediaSessionCompat(this, "MusicStreamSession");
+        mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
+                | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mediaSession.setCallback(new MediaSessionCompat.Callback() {
+            @Override public void onPlay() { sendToWebView("if(window.togglePlay) togglePlay();"); }
+            @Override public void onPause() { sendToWebView("if(window.togglePlay) togglePlay();"); }
+            @Override public void onSkipToPrevious() { sendToWebView("if(window.prevTrack) prevTrack();"); }
+            @Override public void onSkipToNext() { sendToWebView("if(window.nextTrack) nextTrack(false);"); }
+            @Override public void onSeekTo(long position) {
+                sendToWebView("if(window.Player && window.Player.yt) Player.yt.seekTo(" + (position / 1000d)
+                        + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime="
+                        + (position / 1000d) + ";");
             }
         });
-        session = new MediaSession.Builder(this, player).build();
-        // MediaSessionCompat as control/state layer for WebView (no VIDEO_URL into ExoPlayer)
-        try {
-            mediaSessionCompat = new MediaSessionCompat(this, "MusicStreamSession");
-            mediaSessionCompat.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
-            mediaSessionCompat.setCallback(new MediaSessionCompat.Callback() {
-                @Override public void onPlay() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.togglePlay) togglePlay();", null); } catch (Exception ignored) {} }); }
-                @Override public void onPause() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.togglePlay) togglePlay();", null); } catch (Exception ignored) {} }); }
-                @Override public void onSkipToNext() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.nextTrack) nextTrack(false);", null); } catch (Exception ignored) {} }); }
-                @Override public void onSkipToPrevious() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.prevTrack) prevTrack();", null); } catch (Exception ignored) {} }); }
-                @Override public void onSeekTo(long pos) { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.Player && window.Player.yt) Player.yt.seekTo(" + (pos/1000) + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime=" + (pos/1000) + ";", null); } catch (Exception ignored) {} }); }
-            });
-            mediaSessionCompat.setActive(true);
-        } catch (Exception e) { android.util.Log.w("DnialifyPlayback", "mediaSessionCompat init fail " + e); }
-        android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
-            manager.createNotificationChannel(new android.app.NotificationChannel(
-                    CHANNEL_ID, "Playback", android.app.NotificationManager.IMPORTANCE_LOW));
+        mediaSession.setActive(true);
+        startForeground(NOTIFICATION_ID, buildNotification());
+    }
+
+    private void createChannel() {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "Playback",
+                NotificationManager.IMPORTANCE_LOW));
+    }
+
+    private void sendToWebView(String script) {
+        if (MainActivity.current == null) return;
+        MainActivity.current.runOnUiThread(() -> {
+            try { MainActivity.current.getBridge().eval(script, null); } catch (Exception ignored) { }
+        });
+    }
+
+    private void handleState(Intent intent) {
+        String nextTitle = intent.getStringExtra(EXTRA_TITLE);
+        String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
+        String nextArtwork = intent.getStringExtra(EXTRA_ARTWORK);
+        if (nextTitle != null && !nextTitle.isEmpty()) title = nextTitle;
+        if (nextArtist != null && !nextArtist.isEmpty()) artist = nextArtist;
+        if (nextArtwork != null && !nextArtwork.equals(artworkUrl)) {
+            artworkUrl = nextArtwork;
+            loadArtwork(nextArtwork);
         }
-        startForeground(NOTIFICATION_ID, new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
-                .setContentTitle("Dnialify Music Stream")
-                .setContentText("Playback ready")
-                .setOngoing(false)
-                .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
-                .build());
+        playing = intent.getBooleanExtra("isPlaying", false);
+        positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
+        durationMs = Math.max(0, intent.getLongExtra("durationMs", 0));
+        updateMediaSession();
+        publishNotification();
     }
 
-    private void handleWebViewState(String title, String artist, String artwork, boolean isPlaying, long positionMs, long durationMs) {
-        if (title != null) webViewTitle = title;
-        if (artist != null) webViewArtist = artist;
-        if (artwork != null) webViewArtwork = artwork;
-        webViewIsPlaying = isPlaying;
-        webViewPositionMs = positionMs;
-        webViewDurationMs = durationMs;
-        // Update MediaSessionCompat for lockscreen (WebView as source, no VIDEO_URL into ExoPlayer)
-        try {
-            MediaMetadataCompat.Builder mb = new MediaMetadataCompat.Builder()
-                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, webViewTitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, webViewArtist)
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, webViewTitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, webViewArtist);
-            if (webViewArtworkBitmap != null) mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, webViewArtworkBitmap);
-            else if (webViewArtwork != null && !webViewArtwork.isEmpty()) mb.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, webViewArtwork);
-            if (mediaSessionCompat != null) mediaSessionCompat.setMetadata(mb.build());
-            PlaybackStateCompat.Builder psb = new PlaybackStateCompat.Builder()
-                    .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_SKIP_TO_NEXT | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_PLAY_PAUSE)
-                    .setState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED, positionMs, isPlaying ? 1.0f : 0f);
-            if (mediaSessionCompat != null) mediaSessionCompat.setPlaybackState(psb.build());
-        } catch (Exception e) { android.util.Log.w("DnialifyPlayback", "handleWebViewState mediaSessionCompat fail " + e); }
-        // Artwork async load (not on main/UI thread)
-        if (webViewArtwork != null && !webViewArtwork.isEmpty()) {
-            final String artUrl = webViewArtwork;
-            new Thread(() -> {
-                try {
-                    java.net.URL url = new java.net.URL(artUrl);
-                    Bitmap bmp = BitmapFactory.decodeStream(url.openConnection().getInputStream());
-                    if (bmp != null) {
-                        webViewArtworkBitmap = bmp;
-                        try {
-                            MediaMetadataCompat.Builder mb2 = new MediaMetadataCompat.Builder()
-                                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, webViewTitle)
-                                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, webViewArtist)
-                                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bmp)
-                                    .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, bmp);
-                            if (mediaSessionCompat != null) mediaSessionCompat.setMetadata(mb2.build());
-                        } catch (Exception ignored) {}
-                    }
-                } catch (Exception ignored) {}
-                try { updateNotificationWithWebViewState(); } catch (Exception ignored) {}
-            }).start();
+    private void loadArtwork(String url) {
+        if (url.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                Bitmap loaded = BitmapFactory.decodeStream(new java.net.URL(url).openStream());
+                if (loaded != null) {
+                    artwork = loaded;
+                    updateMediaSession();
+                    publishNotification();
+                }
+            } catch (Exception ignored) { }
+        }).start();
+    }
+
+    private void updateMediaSession() {
+        MediaMetadataCompat.Builder metadata = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist);
+        if (artwork != null) {
+            metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
+                    .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, artwork);
+        } else if (!artworkUrl.isEmpty()) {
+            metadata.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artworkUrl);
         }
-        updateNotificationWithWebViewState();
+        mediaSession.setMetadata(metadata.build());
+        long actions = PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
+                | PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+                | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SEEK_TO;
+        mediaSession.setPlaybackState(new PlaybackStateCompat.Builder().setActions(actions)
+                .setState(playing ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
+                        positionMs, playing ? 1f : 0f).build());
     }
 
-    private void handleLyrics(String prev, String current, String next) {
-        webViewPrevLyric = prev;
-        webViewCurrentLyric = current;
-        webViewNextLyric = next;
-        updateNotificationWithWebViewState();
+    private void handleLyrics(Intent intent) {
+        previousLyric = value(intent.getStringExtra("prev"));
+        currentLyric = value(intent.getStringExtra("current"));
+        nextLyric = value(intent.getStringExtra("next"));
+        publishNotification();
     }
 
-    private void updateNotification(String title, String artist) {
-        // Fallback to WebView state if available
-        if (webViewTitle != null) { updateNotificationWithWebViewState(); return; }
-        android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
-        Intent openIntent = new Intent(this, MainActivity.class);
-        openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String t = title != null && !title.isEmpty() ? title : "Dnialify Music Stream";
-        String a = artist != null && !artist.isEmpty() ? artist : "Playing";
-        boolean isPlaying = player != null && player.isPlaying();
-        PendingIntent prevPI = PendingIntent.getService(this, 1, new Intent(this, PlaybackService.class).setAction("prev"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent nextPI = PendingIntent.getService(this, 2, new Intent(this, PlaybackService.class).setAction("next"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent togglePI = PendingIntent.getService(this, 3, new Intent(this, PlaybackService.class).setAction("toggle"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        int playIcon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
-        String playTitle = isPlaying ? "Pause" : "Play";
-        androidx.core.app.NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
-                .setContentTitle(t)
-                .setContentText(a)
-                .setOngoing(isPlaying)
-                .setOnlyAlertOnce(true)
-                .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
-                .setContentIntent(pi)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .addAction(android.R.drawable.ic_media_previous, "Prev", prevPI)
-                .addAction(playIcon, playTitle, togglePI)
-                .addAction(android.R.drawable.ic_media_next, "Next", nextPI);
-        try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
+    private String value(String value) { return value == null ? "" : value; }
+
+    private PendingIntent serviceAction(String action, int requestCode) {
+        return PendingIntent.getService(this, requestCode,
+                new Intent(this, PlaybackService.class).setAction(action),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private void updateNotificationWithWebViewState() {
-        android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
-        Intent openIntent = new Intent(this, MainActivity.class);
-        openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String t = webViewTitle != null && !webViewTitle.isEmpty() ? webViewTitle : "Dnialify Music Stream";
-        String a = webViewArtist != null && !webViewArtist.isEmpty() ? webViewArtist : "MusicStream";
-        boolean isPlaying = webViewIsPlaying;
-        int playIcon = isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
-        String playTitle = isPlaying ? "Pause" : "Play";
-        PendingIntent prevPI = PendingIntent.getService(this, 1, new Intent(this, PlaybackService.class).setAction("prev"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent nextPI = PendingIntent.getService(this, 2, new Intent(this, PlaybackService.class).setAction("next"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent togglePI = PendingIntent.getService(this, 3, new Intent(this, PlaybackService.class).setAction("toggle"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        // RemoteViews collapsed/expanded with 3-layer lyrics
+    private Notification buildNotification() {
         RemoteViews collapsed = new RemoteViews(getPackageName(), R.layout.notification_music_collapsed);
         RemoteViews expanded = new RemoteViews(getPackageName(), R.layout.notification_music_expanded);
-        // Artwork
-        if (webViewArtworkBitmap != null) {
-            collapsed.setImageViewBitmap(R.id.notif_artwork, webViewArtworkBitmap);
-            expanded.setImageViewBitmap(R.id.notif_artwork_exp, webViewArtworkBitmap);
-        } else {
-            collapsed.setImageViewResource(R.id.notif_artwork, R.mipmap.ic_launcher);
-            expanded.setImageViewResource(R.id.notif_artwork_exp, R.mipmap.ic_launcher);
-        }
-        collapsed.setTextViewText(R.id.notif_title, t);
-        expanded.setTextViewText(R.id.notif_title_exp, t);
-        collapsed.setTextViewText(R.id.notif_artist, a);
-        expanded.setTextViewText(R.id.notif_artist_exp, a);
-        // Lyrics: prev/current/next — current bold, prev/next dim, gone if empty
-        boolean hasLyrics = webViewCurrentLyric != null && !webViewCurrentLyric.isEmpty();
-        if (hasLyrics) {
-            collapsed.setViewVisibility(R.id.notif_prev_lyric, webViewPrevLyric != null && !webViewPrevLyric.isEmpty() ? android.view.View.VISIBLE : android.view.View.GONE);
-            collapsed.setViewVisibility(R.id.notif_current_lyric, android.view.View.VISIBLE);
-            collapsed.setViewVisibility(R.id.notif_next_lyric, webViewNextLyric != null && !webViewNextLyric.isEmpty() ? android.view.View.VISIBLE : android.view.View.GONE);
-            collapsed.setTextViewText(R.id.notif_prev_lyric, webViewPrevLyric != null ? webViewPrevLyric : "");
-            collapsed.setTextViewText(R.id.notif_current_lyric, webViewCurrentLyric);
-            collapsed.setTextViewText(R.id.notif_next_lyric, webViewNextLyric != null ? webViewNextLyric : "");
-            expanded.setViewVisibility(R.id.notif_prev_lyric_exp, webViewPrevLyric != null && !webViewPrevLyric.isEmpty() ? android.view.View.VISIBLE : android.view.View.GONE);
-            expanded.setViewVisibility(R.id.notif_current_lyric_exp, android.view.View.VISIBLE);
-            expanded.setViewVisibility(R.id.notif_next_lyric_exp, webViewNextLyric != null && !webViewNextLyric.isEmpty() ? android.view.View.VISIBLE : android.view.View.GONE);
-            expanded.setTextViewText(R.id.notif_prev_lyric_exp, webViewPrevLyric != null ? webViewPrevLyric : "");
-            expanded.setTextViewText(R.id.notif_current_lyric_exp, webViewCurrentLyric);
-            expanded.setTextViewText(R.id.notif_next_lyric_exp, webViewNextLyric != null ? webViewNextLyric : "");
-        } else {
-            collapsed.setViewVisibility(R.id.notif_prev_lyric, android.view.View.GONE);
-            collapsed.setViewVisibility(R.id.notif_current_lyric, android.view.View.GONE);
-            collapsed.setViewVisibility(R.id.notif_next_lyric, android.view.View.GONE);
-            expanded.setViewVisibility(R.id.notif_prev_lyric_exp, android.view.View.GONE);
-            expanded.setViewVisibility(R.id.notif_current_lyric_exp, android.view.View.GONE);
-            expanded.setViewVisibility(R.id.notif_next_lyric_exp, android.view.View.GONE);
-        }
-        // Progress and times
-        int progress = 0;
-        if (webViewDurationMs > 0) progress = (int) Math.min(1000, (webViewPositionMs * 1000 / webViewDurationMs));
-        String curStr = formatTime(webViewPositionMs / 1000);
-        String durStr = formatTime(webViewDurationMs / 1000);
-        collapsed.setTextViewText(R.id.notif_cur_time, curStr);
-        collapsed.setTextViewText(R.id.notif_duration, durStr);
-        collapsed.setProgressBar(R.id.notif_progress, 1000, progress, false);
-        expanded.setTextViewText(R.id.notif_cur_time_exp, curStr);
-        expanded.setTextViewText(R.id.notif_duration_exp, durStr);
-        expanded.setProgressBar(R.id.notif_progress_exp, 1000, progress, false);
-        // Controls
-        collapsed.setImageViewResource(R.id.notif_play_pause, playIcon);
-        expanded.setImageViewResource(R.id.notif_play_pause_exp, playIcon);
-        collapsed.setOnClickPendingIntent(R.id.notif_prev, prevPI);
-        collapsed.setOnClickPendingIntent(R.id.notif_play_pause, togglePI);
-        collapsed.setOnClickPendingIntent(R.id.notif_next, nextPI);
-        expanded.setOnClickPendingIntent(R.id.notif_prev_exp, prevPI);
-        expanded.setOnClickPendingIntent(R.id.notif_play_pause_exp, togglePI);
-        expanded.setOnClickPendingIntent(R.id.notif_next_exp, nextPI);
-        // Build notification: custom view for shade (lyrics+progress) — lockscreen simple via MediaSession (system shows artwork/title/controls, not 3-layer lyrics)
-        NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
+        setViews(collapsed, false);
+        setViews(expanded, true);
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        int playIcon = playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
+        String playLabel = playing ? "Pause" : "Play";
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentIntent(pi)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setContentIntent(open)
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-                .setOngoing(isPlaying)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
+                .setOngoing(playing)
                 .setCustomContentView(collapsed)
                 .setCustomBigContentView(expanded)
-                .setStyle(new NotificationCompat.DecoratedCustomViewStyle())
-                .addAction(android.R.drawable.ic_media_previous, "Prev", prevPI)
-                .addAction(playIcon, playTitle, togglePI)
-                .addAction(android.R.drawable.ic_media_next, "Next", nextPI);
-        // Lockscreen: MediaSession provides simple artwork/title/controls, custom lyrics not shown (as intended)
-        try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
+                .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(mediaSession.getSessionToken())
+                        .setShowActionsInCompactView(0, 1, 2))
+                .addAction(android.R.drawable.ic_media_previous, "Prev", serviceAction("prev", 1))
+                .addAction(playIcon, playLabel, serviceAction("toggle", 3))
+                .addAction(android.R.drawable.ic_media_next, "Next", serviceAction("next", 2))
+                .build();
     }
 
-    private String formatTime(long seconds) {
-        long m = seconds / 60;
-        long s = seconds % 60;
-        return m + ":" + (s < 10 ? "0" + s : s);
+    private void setViews(RemoteViews views, boolean expanded) {
+        int artId = expanded ? R.id.notif_artwork_exp : R.id.notif_artwork;
+        int titleId = expanded ? R.id.notif_title_exp : R.id.notif_title;
+        int artistId = expanded ? R.id.notif_artist_exp : R.id.notif_artist;
+        int prevId = expanded ? R.id.notif_prev_lyric_exp : R.id.notif_prev_lyric;
+        int currentId = expanded ? R.id.notif_current_lyric_exp : R.id.notif_current_lyric;
+        int nextId = expanded ? R.id.notif_next_lyric_exp : R.id.notif_next_lyric;
+        int timeId = expanded ? R.id.notif_cur_time_exp : R.id.notif_cur_time;
+        int durationId = expanded ? R.id.notif_duration_exp : R.id.notif_duration;
+        int progressId = expanded ? R.id.notif_progress_exp : R.id.notif_progress;
+        int prevButtonId = expanded ? R.id.notif_prev_exp : R.id.notif_prev;
+        int playButtonId = expanded ? R.id.notif_play_pause_exp : R.id.notif_play_pause;
+        int nextButtonId = expanded ? R.id.notif_next_exp : R.id.notif_next;
+        if (artwork != null) views.setImageViewBitmap(artId, artwork);
+        else views.setImageViewResource(artId, R.mipmap.ic_launcher);
+        views.setTextViewText(titleId, title);
+        views.setTextViewText(artistId, artist);
+        setLyric(views, prevId, previousLyric);
+        setLyric(views, currentId, currentLyric);
+        setLyric(views, nextId, nextLyric);
+        views.setTextViewText(timeId, formatTime(positionMs));
+        views.setTextViewText(durationId, formatTime(durationMs));
+        int progress = durationMs == 0 ? 0 : (int) Math.min(1000, positionMs * 1000 / durationMs);
+        views.setProgressBar(progressId, 1000, progress, false);
+        views.setImageViewResource(playButtonId,
+                playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+        views.setOnClickPendingIntent(prevButtonId, serviceAction("prev", expanded ? 11 : 1));
+        views.setOnClickPendingIntent(playButtonId, serviceAction("toggle", expanded ? 13 : 3));
+        views.setOnClickPendingIntent(nextButtonId, serviceAction("next", expanded ? 12 : 2));
     }
 
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        super.onStartCommand(intent, flags, startId);
-        if (intent != null) {
-            String action = intent.getAction();
-            if ("webViewState".equals(action)) {
-                handleWebViewState(intent.getStringExtra(EXTRA_TITLE), intent.getStringExtra(EXTRA_ARTIST), intent.getStringExtra(EXTRA_ARTWORK),
-                        intent.getBooleanExtra("isPlaying", false), intent.getLongExtra("positionMs", 0), intent.getLongExtra("durationMs", 0));
-                return START_STICKY;
-            } else if ("webViewLyrics".equals(action)) {
-                handleLyrics(intent.getStringExtra("prev"), intent.getStringExtra("current"), intent.getStringExtra("next"));
-                return START_STICKY;
-            } else if (ACTION_ARM.equals(action)) {
-                updateNotification(null, null);
-                return START_STICKY;
-            } else if ("updateNotification".equals(action)) {
-                updateNotification(intent.getStringExtra(EXTRA_TITLE), intent.getStringExtra(EXTRA_ARTIST));
-                return START_STICKY;
-            } else if (ACTION_PLAY.equals(action)) {
-                String title = intent.getStringExtra(EXTRA_TITLE);
-                String artist = intent.getStringExtra(EXTRA_ARTIST);
-                String artwork = intent.getStringExtra(EXTRA_ARTWORK);
-                MediaMetadata.Builder metadataBuilder = new MediaMetadata.Builder()
-                        .setTitle(title)
-                        .setArtist(artist);
-                if (artwork != null && !artwork.isEmpty()) metadataBuilder.setArtworkUri(android.net.Uri.parse(artwork));
-                MediaMetadata metadata = metadataBuilder.build();
-                MediaItem item = new MediaItem.Builder()
-                        .setUri(intent.getStringExtra(EXTRA_URL)).setMediaMetadata(metadata).build();
-                player.setMediaItem(item);
-                player.prepare();
-                player.setPlayWhenReady(true);
-                player.play();
-                updateNotification(title, artist);
-            } else if ("prev".equals(action)) {
-                // WebView-driven: delegate to WebView
-                if (webViewTitle != null) {
-                    try { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.prevTrack) prevTrack();", null); } catch (Exception ignored) {}
-                    }); } catch (Exception ignored) {}
-                    return START_STICKY;
-                }
-                try {
-                    if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.prevTrack) prevTrack();", null); } catch (Exception ignored) {}
-                    });
-                } catch (Exception ignored) {}
-                try { player.seekTo(0); } catch (Exception ignored) {}
-            } else if ("next".equals(action)) {
-                if (webViewTitle != null) {
-                    try { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.nextTrack) nextTrack(false);", null); } catch (Exception ignored) {}
-                    }); } catch (Exception ignored) {}
-                    return START_STICKY;
-                }
-                try {
-                    if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.nextTrack) nextTrack(false);", null); } catch (Exception ignored) {}
-                    });
-                } catch (Exception ignored) {}
-            } else if ("toggle".equals(action)) {
-                if (webViewTitle != null) {
-                    // WebView-driven toggle
-                    try { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.togglePlay) togglePlay();", null); } catch (Exception ignored) {}
-                    }); } catch (Exception ignored) {}
-                    // Optimistically flip state until WebView pushes new state
-                    webViewIsPlaying = !webViewIsPlaying;
-                    updateNotificationWithWebViewState();
-                    return START_STICKY;
-                }
-                if (player.isPlaying()) player.pause(); else player.play();
-                try {
-                    MediaItem cur = player.getCurrentMediaItem();
-                    String t2 = cur != null && cur.mediaMetadata != null && cur.mediaMetadata.title != null ? cur.mediaMetadata.title.toString() : null;
-                    String a2 = cur != null && cur.mediaMetadata != null && cur.mediaMetadata.artist != null ? cur.mediaMetadata.artist.toString() : null;
-                    updateNotification(t2, a2);
-                } catch (Exception ignored) {}
-            } else if ("pause".equals(action)) {
-                if (webViewTitle != null) { webViewIsPlaying = false; updateNotificationWithWebViewState(); return START_STICKY; }
-                player.pause();
-                try { player.getCurrentMediaItem(); } catch (Exception ignored) {}
-            } else if ("seek".equals(action)) {
-                if (webViewTitle != null) {
-                    double secs = intent.getDoubleExtra("seconds", 0);
-                    try { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> {
-                        try { MainActivity.current.getBridge().eval("if(window.Player && window.Player.yt) { try{Player.yt.seekTo(" + secs + ",true);}catch(e){} } else if(window.Player && window.Player.audio) Player.audio.currentTime=" + secs + ";", null); } catch (Exception ignored) {}
-                    }); } catch (Exception ignored) {}
-                    return START_STICKY;
-                }
-                player.seekTo((long) (intent.getDoubleExtra("seconds", 0) * 1000));
-            } else if ("speed".equals(action)) {
-                player.setPlaybackSpeed((float) intent.getDoubleExtra("value", 1));
-            } else if ("volume".equals(action)) {
-                player.setVolume((float) intent.getDoubleExtra("value", 1));
-            }
+    private void setLyric(RemoteViews views, int id, String text) {
+        views.setTextViewText(id, text);
+        views.setViewVisibility(id, text.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private String formatTime(long milliseconds) {
+        long seconds = Math.max(0, milliseconds / 1000);
+        return (seconds / 60) + ":" + String.format(java.util.Locale.US, "%02d", seconds % 60);
+    }
+
+    private void publishNotification() {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        Notification notification = buildNotification();
+        try { startForeground(NOTIFICATION_ID, notification); }
+        catch (Exception ignored) { manager.notify(NOTIFICATION_ID, notification); }
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent == null) return START_STICKY;
+        String action = intent.getAction();
+        if ("webViewState".equals(action)) handleState(intent);
+        else if ("webViewLyrics".equals(action)) handleLyrics(intent);
+        else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
+            String nextTitle = intent.getStringExtra(EXTRA_TITLE);
+            String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
+            if (nextTitle != null) title = nextTitle;
+            if (nextArtist != null) artist = nextArtist;
+            publishNotification();
+        } else if ("prev".equals(action)) sendToWebView("if(window.prevTrack) prevTrack();");
+        else if ("next".equals(action)) sendToWebView("if(window.nextTrack) nextTrack(false);");
+        else if ("toggle".equals(action)) sendToWebView("if(window.togglePlay) togglePlay();");
+        else if ("pause".equals(action)) sendToWebView("if(window.togglePlay) togglePlay();");
+        else if ("seek".equals(action)) {
+            double seconds = intent.getDoubleExtra("seconds", 0);
+            sendToWebView("if(window.Player && window.Player.yt) Player.yt.seekTo(" + seconds
+                    + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime=" + seconds + ";");
         }
         return START_STICKY;
     }
 
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        super.onTaskRemoved(rootIntent);
-    }
+    @Override public void onTaskRemoved(Intent rootIntent) { super.onTaskRemoved(rootIntent); }
 
-    @Override
-    public void onDestroy() {
+    @Override public void onDestroy() {
+        if (mediaSession != null) { mediaSession.setActive(false); mediaSession.release(); }
+        mediaSession = null;
         instance = null;
-        if (mediaSessionCompat != null) { try { mediaSessionCompat.setActive(false); mediaSessionCompat.release(); } catch (Exception ignored) {} mediaSessionCompat = null; }
-        if (session != null) session.release();
-        if (player != null) player.release();
         super.onDestroy();
     }
 
-    @Nullable
-    @Override
-    public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) { return session; }
+    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
 }

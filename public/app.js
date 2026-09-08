@@ -304,7 +304,8 @@ function initAudio(){
   if(!a) return;
   Player.audio = a;
   // On Android Capacitor, prefer ExoPlayer via NativePlayback for background (like Brave/Bare: keep audio in native layer)
-  Player.native = !!window.NativePlayback;
+  // NativePlayback is notification/control bridge; WebView remains playback engine.
+  Player.native = false;
   Player.audioReady = true;
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   a.volume = (store.get('vol',100)/100);
@@ -347,24 +348,7 @@ function initAudio(){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
     }
   });
-  document.addEventListener('visibilitychange', async ()=>{
-    if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || !Player.wasPlaying || !Player.current || !window.NativePlayback) return;
-    const song = Player.current;
-    const position = Player.audio.currentTime || 0;
-    const url = Player.nativeUrl || `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
-    try {
-      window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
-      window.NativePlayback.speed(Player.speed);
-      window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
-      Player.audioUrl = url;
-      Player.audio.pause();
-      Player.native = true;
-      try { window.NativePlayback.seek(position); } catch {}
-      renderPlayButtons();
-    } catch (e) {
-      console.warn('native background handoff unavailable', e);
-    }
-  });
+  // Background playback stays inside WebView; native bridge only mirrors state and controls.
 }
 function updateMediaSessionState(state){
   if(!('mediaSession' in navigator)) return;
