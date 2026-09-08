@@ -176,12 +176,14 @@ public class MainActivity extends BridgeActivity {
         public void updateNotification(String title, String artist) { PlaybackService.updateNotificationStatic(MainActivity.this, title, artist); }
 
         @JavascriptInterface
-        public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, long positionMs, long durationMs) {
-            PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, positionMs, durationMs);
+        public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, double positionMs, double durationMs) {
+            android.util.Log.d("DnialifyDiag", "Bridge updateWebViewState title=" + title + " artist=" + artist + " playing=" + isPlaying + " pos=" + positionMs + " dur=" + durationMs);
+            PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, (long) positionMs, (long) durationMs);
         }
 
         @JavascriptInterface
         public void updateLyrics(String prev, String current, String next) {
+            android.util.Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
             PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
         }
 
