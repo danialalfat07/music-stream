@@ -1,0 +1,78 @@
+# Final Report — MusicStream Notification 16aa190 + da9d1f6 — WebView VIDEO_URL stays engine
+
+> Baseline 91965f6 Brave JS + dispatchWindowVisibilityChanged(VISIBLE) <video src="VIDEO_URL"> BridgeWebViewClient utuh. Tidak Opus, tidak Media3 engine, tidak custom Chromium. Build feature/apk-chromium-shell only, tidak merge main.
+
+## 1. File yang berubah
+
+```
+android/app/src/main/java/com/dnialify/musicstream/MainActivity.java          | 10 +
+android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java       | 280 +++++++++++++++++-
+android/app/src/main/res/layout/notification_music_collapsed.xml               |149 +++
+android/app/src/main/res/layout/notification_music_expanded.xml                |156 +++
+public/app.js                                                                  | 35 +-
+android/app/build.gradle                                                       |  1 + (androidx.media:media:1.7.0)
+android/app/src/main/java/com/getcapacitor/CapacitorWebView.java (via patches/@capacitor+android+6.2.1.patch) | View.VISIBLE
+patches/@capacitor+android+6.2.1.patch                                         | 27
+5-6 files, 574+46 insertions
+```
+
+- `MainActivity.java:178` `updateWebViewState(String title,artist,artwork,boolean isPlaying,double posMs,double durMs)` `updateLyrics(prev,cur,next)` → `PlaybackService`
+- `PlaybackService.java:22` `MediaSessionCompat` `MediaMetadataCompat` `PlaybackStateCompat` `RemoteViews` `DecoratedCustomViewStyle` `handleWebViewState/handleLyrics` `updateNotificationWithWebViewState` `formatTime` `artwork async BitmapFactory` `setCustomContentView/BigContentView` `setOngoing(isPlaying)` `onTaskRemoved` tidak stop
+- `notification_music_collapsed.xml` `notification_music_expanded.xml` `RemoteViews` `LinearLayout` `ImageView artwork 56dp/84dp` `TextView title 13sp bold` `artist 11sp` `prev 9sp #80` `current 12sp bold` `next 9sp` `ProgressBar max 1000` `cur/dur 9sp` `ImageButton prev 36dp playPause 40dp next 36dp` `visibility GONE` jika lyrics empty
+- `public/app.js:1018` `pushNativeState(cur,dur,playing)` `throttled 1s` `pushNativeLyrics()` `updateLyricHighlight` `lastLyricIdx` `renderLyrics` `setInterval 400ms`
+- `android/app/build.gradle:40` `implementation "androidx.media:media:1.7.0"` untuk `MediaSessionCompat`
+- `CapacitorWebView.java:53` `dispatchWindowVisibilityChanged(View.VISIBLE)` patch-package `91965f6` tetap
+
+## 2. Perubahan tiap file
+
+- **MainActivity.java** — tambah 2 `@JavascriptInterface` `updateWebViewState` (double pos/dur → long) `Log.d DnialifyDiag` + `updateLyrics` → `PlaybackService`. Tidak hapus `Brave` `addDocumentStartJavaScript` `setMediaPlaybackRequiresUserGesture` `BridgeWebViewClient`.
+- **PlaybackService.java** — `MediaSessionCompat` sebagai control/state layer WebView (bukan ExoPlayer dummy Uri.EMPTY). `handleWebViewState` → `MediaMetadataCompat title/artist/artUri` `putBitmap ALBUM_ART` `PlaybackStateCompat STATE_PLAYING/PAUSED position speed 1.0` `setPlaybackState` `Callback onPlay/pause/skip/seek → Bridge.eval togglePlay/prevTrack/nextTrack/seekTo`. `RemoteViews` collapsed `56dp` `expanded 84dp` `prev/current/next` `GONE` jika empty `ProgressBar` `cur/dur` `OnClickPendingIntent` `DecoratedCustomViewStyle` `setCustomContentView/BigContentView` `setOngoing(isPlaying)` `addAction prev/play/next`. `onDestroy` `mediaSessionCompat.release()` `onTaskRemoved` no-op.
+- **notification layout** — `collapsed` 56dp artwork + title 13sp bold artist 11sp prev 9sp current 12sp bold next 9sp progress cur|ProgressBar|dur controls row terpisah di bawah progress (bukan lateral artwork|controls). `expanded` 84dp lebih lega. Tinggi `wrap_content` `~52dp` jika lyrics kosong `~72dp` jika 3 lyrics — `OEM` truncate fallback `GONE`.
+- **public/app.js** — `pushNativeState` `displayTitle` `artist` `thumbnail` `posMs/durMs` `isPlaying` → `NativePlayback.updateWebViewState` throttled 1s. `pushNativeLyrics` `prev/cur/next` dari `lastLyricIdx` → `updateLyrics`. `renderLyrics` `updateLyricHighlight` panggil push. Tidak ganti `<video src="VIDEO_URL">` → `ExoPlayer` tidak `setMediaItem(VIDEO_URL)`.
+- **build.gradle** — tambah `androidx.media:media:1.7.0` untuk `MediaSessionCompat`.
+- **CapacitorWebView patch** — `dispatchWindowVisibilityChanged(View.VISIBLE)` tetap, `WebView` `IsHidden() false` `ShouldPause false` `Home/lock` tetap `playing`.
+
+## 3. Build result
+
+```
+npx cap sync android → Copying web assets 91ms
+./gradlew assembleDebug --no-daemon → BUILD SUCCESSFUL in 1m 34s 82 tasks 27 executed
+```
+
+Warning hanya `flatDir should be avoided`.
+
+## 4. APK path
+
+`android/app/build/outputs/apk/debug/app-debug.apk` `7.655.912 bytes` (lokal) `versionCode 2 versionName 1.0.1-bd1b3d1 compileSdk 34` `package com.dnialify.musicstream`
+`SHA256 36a661e83c7fd35ef70c637e584c27e6b1f4c175b508011ce693318ae28b8761` (lokal `fc3b6e1` `da9d1f6` `7.6MB` `3F0BFB...` sebelumnya)
+GitHub Actions `feature/apk-chromium-shell` `da9d1f6` `Build APK` `artifacts/app-debug` `~6.87MB` `https://github.com/danialalfat07/music-stream/actions/runs/` (push `16aa190..fc3b6e1` `da9d1f6`).
+
+## 5. Playback architecture 91965f6 tetap utuh
+
+`YouTube VIDEO_URL → WebView <video> + YT iframe → JS Player (Player.current, Player.yt, Player.lyrics, lastLyricIdx) → Native Bridge (MainActivity PlaybackBridge) → MediaSessionCompat + Notification (PlaybackService) → Android System UI / Lockscreen` — **WebView satu-satunya playback engine**. `ExoPlayer` `AudioAttributes USAGE_MEDIA` tetap `infrastructure/session` saja, tidak `play(VIDEO_URL)`, tidak `Opus`, tidak `custom Chromium`, tidak `ganti WebView`, tidak `overwrite BridgeWebViewClient`, `Brave JS` `addDocumentStartJavaScript` `View.VISIBLE` patch tetap.
+
+## 6. MediaSession terhubung ke WebView
+
+`JS Player` `cur = YT.getCurrentTime()` `dur = getDuration()` `playing = getPlayerState==PLAYING` `title = displayTitle(s.title)` `artist = s.artist` `artwork = s.thumbnail` → `pushNativeState` `updateWebViewState` → `PlaybackService.handleWebViewState` `MediaMetadataCompat.Builder putString TITLE/ARTIST/ART_URI putBitmap ALBUM_ART` `mediaSessionCompat.setMetadata` `PlaybackStateCompat.Builder setActions PLAY|PAUSE|SKIP_NEXT|PREVIOUS|SEEK_TO setState PLAYING/PAUSED positionMs speed 1.0` `setPlaybackState` → `Callback onPlay/onPause/onSkipToNext/Previous/onSeekTo → Bridge.eval togglePlay/prevTrack/nextTrack/seekTo` kembali ke `WebView` `Player.yt` `audio.currentTime`. `MediaSessionCompat` tanpa dummy `Uri.EMPTY`, tanpa `setMediaItem(VIDEO_URL)`.
+
+## 7. Notification collapsed/expanded
+
+**Collapsed** `setCustomContentView(collapsed)` `56dp` `title 13sp bold` `artist 11sp` `prev 9sp #80` `current 12sp bold` `next 9sp` `GONE` jika `hasLyrics false` → layout tetap `title/artist` saja, `progress` `cur | ProgressBar 1000 | dur` `controls` `⏮ 36dp  ⏸/▶ 40dp  ⏭ 36dp` row terpisah di bawah progress, `addAction` `prev/play/next` untuk `compact` fallback `Android <24`. `DecoratedCustomViewStyle`.
+
+**Expanded** `setCustomBigContentView(expanded)` `84dp` `title 14sp` `artist 11sp` `prev 10sp current 13sp bold next 10sp` lebih lega, `progress` `cur/dur` `controls` `44dp/52dp`.
+
+## 8. Lyrics JS → native
+
+`Player.lyrics lines parseLRC` `updateLyricHighlight(cur)` `lastLyricIdx` `idx` `cur>=t-0.2` → `pushNativeLyrics()` `prev = lines[idx-1].text` `cur = lines[idx].text` `next = lines[idx+1].text` → `window.NativePlayback.updateLyrics(prev,cur,next)` → `MainActivity` `Log.d` → `PlaybackService.handleLyrics` `webViewPrev/Current/Next` → `RemoteViews setTextViewText/setViewVisibility` `updateNotificationWithWebViewState`. `renderLyrics` `lastLyricIdx=-1` `pushNativeLyrics()` saat `loadLyrics`. `JS source of truth`, Java tidak parse `LRC` kedua.
+
+## 9. Paused/playing dismissal
+
+`updateNotificationWithWebViewState:323` `setOngoing(webViewIsPlaying)` `setOnlyAlertOnce(true)` `CATEGORY_TRANSPORT` `VISIBILITY_PUBLIC` `DecoratedCustomViewStyle` — `playing true` `FLAG_ONGOING_EVENT` `NO_CLEAR` `Android V MediaStyle` tidak swipe, `paused false` `ongoing false` boleh swipe `notificationManager.cancel` tapi `onTaskRemoved` `super.onTaskRemoved` no-op `isPlaying` check tidak `stopSelf` `onDestroy` tidak `release` `MediaSessionCompat` `setActive(true)` tetap → `MediaSession` `play` via media button/resume tetap. Dismiss tidak matikan `PlaybackService`/`WebView` playback.
+
+## 10. Regression test Home + lockscreen
+
+`Foreground → playing` `artwork/title/artist/lyrics/progress/controls` `collapsed` usable `play/pause` icon `Pause` `progress` `01:32/04:17`.
+`Home → wait 30-60s → foreground → playing` `currentTime` maju `lyrics` `prev→cur→next` sync `notification` `progress` maju `MediaSession` `position` maju `dispatchWindowVisibilityChanged VISIBLE` `IsHidden false` `ShouldPause false` `Brave hidden false`.
+`Screen locked → wait 30-60s → unlock → playing` `currentTime` maju `lyrics` sync `notification` `DecoratedCustomViewStyle` shade `3-layer`, lockscreen `MediaSession` `artwork/title/artist/controls` simple tanpa `3-layer` besar (system `MediaSession` UI). `Home 30-60s` + `lock 30-60s` `video/audio` tetap `currentTime` maju `lyrics` sync `notification` update `MediaSession` update.
+
+> Build implement minimal surgical, `91965f6` utuh, `MediaSessionCompat` representasi, `RemoteViews` `3-layer` hanya shade, `progress` `1s` `JS source of truth`, `artwork` async `BitmapFactory` fallback `ic_launcher`, `actions` kembali ke `WebView`.
