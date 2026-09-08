@@ -1,0 +1,24 @@
+diff --git a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/CapacitorWebView.java b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/CapacitorWebView.java
+index e46b904..011bfbb 100644
+--- a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/CapacitorWebView.java
++++ b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/CapacitorWebView.java
+@@ -3,6 +3,7 @@ package com.getcapacitor;
+ import android.content.Context;
+ import android.util.AttributeSet;
+ import android.view.KeyEvent;
++import android.view.View;
+ import android.view.inputmethod.BaseInputConnection;
+ import android.view.inputmethod.EditorInfo;
+ import android.view.inputmethod.InputConnection;
+@@ -49,4 +50,11 @@ public class CapacitorWebView extends WebView {
+         }
+         return super.dispatchKeyEvent(event);
+     }
++
++    @Override
++    public void dispatchWindowVisibilityChanged(int visibility) {
++        // Keep WebView visible for Chromium IsHidden() check - prevents ShouldPausePlaybackWhenHidden
++        // while preserving Activity lifecycle (onPause/onStop still fire). Minimal port of jofr#11.
++        super.dispatchWindowVisibilityChanged(View.VISIBLE);
++    }
+ }
