@@ -10,6 +10,10 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.widget.RemoteViews;
 
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -34,6 +38,7 @@ public class PlaybackService extends MediaSessionService {
     private static final int NOTIFICATION_ID = 1001;
     private ExoPlayer player;
     private MediaSession session;
+    private MediaSessionCompat mediaSessionCompat;
     // WebView-driven state for notification (not ExoPlayer playback)
     private String webViewTitle = null;
     private String webViewArtist = null;
@@ -130,6 +135,19 @@ public class PlaybackService extends MediaSessionService {
             }
         });
         session = new MediaSession.Builder(this, player).build();
+        // MediaSessionCompat as control/state layer for WebView (no VIDEO_URL into ExoPlayer)
+        try {
+            mediaSessionCompat = new MediaSessionCompat(this, "MusicStreamSession");
+            mediaSessionCompat.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+            mediaSessionCompat.setCallback(new MediaSessionCompat.Callback() {
+                @Override public void onPlay() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.togglePlay) togglePlay();", null); } catch (Exception ignored) {} }); }
+                @Override public void onPause() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.togglePlay) togglePlay();", null); } catch (Exception ignored) {} }); }
+                @Override public void onSkipToNext() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.nextTrack) nextTrack(false);", null); } catch (Exception ignored) {} }); }
+                @Override public void onSkipToPrevious() { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.prevTrack) prevTrack();", null); } catch (Exception ignored) {} }); }
+                @Override public void onSeekTo(long pos) { if (MainActivity.current != null) MainActivity.current.runOnUiThread(() -> { try { MainActivity.current.getBridge().eval("if(window.Player && window.Player.yt) Player.yt.seekTo(" + (pos/1000) + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime=" + (pos/1000) + ";", null); } catch (Exception ignored) {} }); }
+            });
+            mediaSessionCompat.setActive(true);
+        } catch (Exception e) { android.util.Log.w("DnialifyPlayback", "mediaSessionCompat init fail " + e); }
         android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
         if (android.os.Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(new android.app.NotificationChannel(
@@ -151,40 +169,40 @@ public class PlaybackService extends MediaSessionService {
         webViewIsPlaying = isPlaying;
         webViewPositionMs = positionMs;
         webViewDurationMs = durationMs;
-        // Update MediaSession metadata for lockscreen (without putting VIDEO_URL into ExoPlayer)
+        // Update MediaSessionCompat for lockscreen (WebView as source, no VIDEO_URL into ExoPlayer)
         try {
-            MediaMetadata.Builder mb = new MediaMetadata.Builder().setTitle(webViewTitle).setArtist(webViewArtist);
-            if (webViewArtwork != null && !webViewArtwork.isEmpty()) mb.setArtworkUri(android.net.Uri.parse(webViewArtwork));
-            // Use player dummy item to publish metadata to MediaSession for lockscreen
-            if (player.getMediaItemCount() == 0) {
-                MediaItem dummy = new MediaItem.Builder().setMediaId("webview-dummy").setUri(android.net.Uri.EMPTY).setMediaMetadata(mb.build()).build();
-                player.setMediaItem(dummy);
-                player.prepare();
-            } else {
-                // Update existing item metadata
-                MediaItem cur = player.getCurrentMediaItem();
-                if (cur != null) {
-                    MediaItem updated = cur.buildUpon().setMediaMetadata(mb.build()).build();
-                    player.replaceMediaItem(0, updated);
-                }
-            }
-            player.setPlayWhenReady(isPlaying);
-            if (isPlaying) player.play(); else player.pause();
-            // Seek dummy to reflect position for lockscreen progress (if duration known)
-            if (durationMs > 0 && positionMs >= 0) {
-                try { player.seekTo(positionMs); } catch (Exception ignored) {}
-            }
-        } catch (Exception e) { android.util.Log.w("DnialifyPlayback", "handleWebViewState mediaSession update fail " + e); }
-        // Artwork async load
+            MediaMetadataCompat.Builder mb = new MediaMetadataCompat.Builder()
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, webViewTitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, webViewArtist)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, webViewTitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, webViewArtist);
+            if (webViewArtworkBitmap != null) mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, webViewArtworkBitmap);
+            else if (webViewArtwork != null && !webViewArtwork.isEmpty()) mb.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, webViewArtwork);
+            if (mediaSessionCompat != null) mediaSessionCompat.setMetadata(mb.build());
+            PlaybackStateCompat.Builder psb = new PlaybackStateCompat.Builder()
+                    .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_SKIP_TO_NEXT | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_PLAY_PAUSE)
+                    .setState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED, positionMs, isPlaying ? 1.0f : 0f);
+            if (mediaSessionCompat != null) mediaSessionCompat.setPlaybackState(psb.build());
+        } catch (Exception e) { android.util.Log.w("DnialifyPlayback", "handleWebViewState mediaSessionCompat fail " + e); }
+        // Artwork async load (not on main/UI thread)
         if (webViewArtwork != null && !webViewArtwork.isEmpty()) {
             final String artUrl = webViewArtwork;
             new Thread(() -> {
                 try {
                     java.net.URL url = new java.net.URL(artUrl);
                     Bitmap bmp = BitmapFactory.decodeStream(url.openConnection().getInputStream());
-                    if (bmp != null) { webViewArtworkBitmap = bmp; }
+                    if (bmp != null) {
+                        webViewArtworkBitmap = bmp;
+                        try {
+                            MediaMetadataCompat.Builder mb2 = new MediaMetadataCompat.Builder()
+                                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, webViewTitle)
+                                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, webViewArtist)
+                                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bmp)
+                                    .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, bmp);
+                            if (mediaSessionCompat != null) mediaSessionCompat.setMetadata(mb2.build());
+                        } catch (Exception ignored) {}
+                    }
                 } catch (Exception ignored) {}
-                // Update notification on UI thread after artwork fetch
                 try { updateNotificationWithWebViewState(); } catch (Exception ignored) {}
             }).start();
         }
@@ -431,6 +449,7 @@ public class PlaybackService extends MediaSessionService {
     @Override
     public void onDestroy() {
         instance = null;
+        if (mediaSessionCompat != null) { try { mediaSessionCompat.setActive(false); mediaSessionCompat.release(); } catch (Exception ignored) {} mediaSessionCompat = null; }
         if (session != null) session.release();
         if (player != null) player.release();
         super.onDestroy();
