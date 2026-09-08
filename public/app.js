@@ -1015,8 +1015,37 @@ function toggleNowPlayingPlay() {
   togglePlay();
 }
 
+/* bridge WebView state to native notification (incremental, minimal) */
+function pushNativeState(cur, dur, playing) {
+  try {
+    if (!window.NativePlayback || !window.NativePlayback.updateWebViewState) return;
+    const s = Player.current;
+    if (!s) return;
+    const title = displayTitle(s.title) || s.title || '';
+    const artist = s.artist || s.subtitle || '';
+    const artwork = s.thumbnail || '';
+    const posMs = Math.round((cur || 0) * 1000);
+    const durMs = Math.round((dur || 0) * 1000);
+    window.NativePlayback.updateWebViewState(title, artist, artwork, !!playing, posMs, durMs);
+  } catch {}
+}
+function pushNativeLyrics() {
+  try {
+    if (!window.NativePlayback || !window.NativePlayback.updateLyrics) return;
+    const L = Player.lyrics;
+    if (!L || !L.lines.length) { window.NativePlayback.updateLyrics("", "", ""); return; }
+    let idx = -1;
+    // derive idx from lastLyricIdx
+    idx = lastLyricIdx;
+    const prev = idx > 0 ? L.lines[idx-1].text : "";
+    const cur = idx >= 0 ? L.lines[idx].text : "";
+    const next = idx >= 0 && idx+1 < L.lines.length ? L.lines[idx+1].text : "";
+    window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
+  } catch {}
+}
 /* progress loop */
 let _lastTick = null;
+let _lastNativePush = 0;
 setInterval(() => {
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
@@ -1063,11 +1092,13 @@ setInterval(() => {
     const ndur = document.getElementById('np-dur'); if(ndur) ndur.textContent = fmtTime(dur);
   }
   if (!isPreviewing()) updateLyricHighlight(cur);
-  syncFloatProgress(pct);
+   syncFloatProgress(pct);
   if (Player.floatOn) drawPipFrame(pct);
   if(isAudio && 'mediaSession' in navigator && dur){
      try{ navigator.mediaSession.setPositionState({duration: dur, playbackRate: Player.native ? Player.speed : Player.audio.playbackRate, position: cur}); }catch{}
   }
+  // Push WebView state to native notification (throttled 1s)
+  if (Date.now() - _lastNativePush > 1000) { _lastNativePush = Date.now(); pushNativeState(cur, dur, playing); }
 }, 400);
 
 function renderPlayButtons() {
@@ -1247,6 +1278,7 @@ function renderLyrics() {
     $('#np-lyric-preview').textContent = '';
     syncFloatLyric('');
   }
+  pushNativeLyrics();
 }
 let lastLyricIdx = -1;
 function updateLyricHighlight(cur) {
@@ -1270,6 +1302,7 @@ function updateLyricHighlight(cur) {
   const line = idx >= 0 ? L.lines[idx].text : '';
   $('#np-lyric-preview').textContent = line;
   syncFloatLyric(line);
+  pushNativeLyrics();
 }
 
 /* ================= now playing UI ================= */

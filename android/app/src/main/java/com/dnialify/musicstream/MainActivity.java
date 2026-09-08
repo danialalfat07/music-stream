@@ -176,6 +176,16 @@ public class MainActivity extends BridgeActivity {
         public void updateNotification(String title, String artist) { PlaybackService.updateNotificationStatic(MainActivity.this, title, artist); }
 
         @JavascriptInterface
+        public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, long positionMs, long durationMs) {
+            PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, positionMs, durationMs);
+        }
+
+        @JavascriptInterface
+        public void updateLyrics(String prev, String current, String next) {
+            PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
+        }
+
+        @JavascriptInterface
         public void play(String url, String title, String artist, String artwork) {
             PlaybackService.play(MainActivity.this, url, title, artist, artwork);
         }
