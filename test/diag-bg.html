@@ -33,6 +33,7 @@ window.__diagBoot = { t0: Date.now(), p0: performance.now(), hiddenAtBoot: docum
   <button id="btnCheck">Check State</button>
   <button id="btnExport">Export JSON</button>
   <button id="btnClear">Clear</button>
+  <button id="btnBack" style="background:#1db954;color:#000;border-color:#1db954;font-weight:600">Back to Music Stream</button>
 </div>
 <div id="stats"></div>
 <pre id="log"></pre>
@@ -248,6 +249,10 @@ document.getElementById('btnClear').addEventListener('click', ()=>{
   try{ localStorage.removeItem('diag_ring'); }catch(e){}
   const e={t:Date.now(), perf:performance.now(), type:"clear"};
   pushRing(e); uiLog(e);
+});
+document.getElementById('btnBack').addEventListener('click', ()=>{
+  const u='https://dnialify-music-stream.vercel.app';
+  try{ window.location.href=u; }catch(e){ location.assign(u); }
 });
 
 // initial
