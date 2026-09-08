@@ -5,8 +5,7 @@
   "server": {
     "url": "https://dnialify-music-stream.vercel.app",
     "cleartext": false,
-    "androidScheme": "https",
-    "allowNavigation": ["music-stream-git-feature-apk-chr-013370-danialalfat07s-projects.vercel.app"]
+    "androidScheme": "https"
   },
   "plugins": {
     "SplashScreen": {

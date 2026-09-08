@@ -1,0 +1,274 @@
+﻿<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Diag BG ΓÇö YouTube IFrame background diagnosis</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui;background:#0a0a0a;color:#d8d8d8;padding:12px;margin:0}
+h3{margin:6px 0 4px;font-size:15px}
+#yt-player{width:320px;height:180px;background:#000;margin:8px 0}
+pre{background:#1a1a1a;padding:8px;white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:38vh;overflow:auto;border:1px solid #333}
+button{padding:7px 10px;margin:4px 4px 4px 0;background:#222;color:#eee;border:1px solid #444;border-radius:6px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.badge{font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid #444;background:#111}
+#stats{font-size:12px;color:#9ecbff}
+</style>
+<!-- boot marker before any other script: measures document-start race -->
+<script>
+window.__diagBoot = { t0: Date.now(), p0: performance.now(), hiddenAtBoot: document.hidden, vsAtBoot: document.visibilityState };
+</script>
+</head>
+<body>
+<h3>Diag BG ΓÇö YouTube IFrame background diagnosis (test-only)</h3>
+<div class="row">
+  <span class="badge" id="badgeKeep">KeepRunning: ?</span>
+  <span class="badge" id="badgeDoc">hidden=? vs=?</span>
+  <span class="badge" id="badgeRAF">rAF=0</span>
+  <span class="badge" id="badgeCT">ct=-</span>
+</div>
+<div id="yt-player"></div>
+<div class="row">
+  <button id="btnPlay">Play YT</button>
+  <button id="btnCheck">Check State</button>
+  <button id="btnExport">Export JSON</button>
+  <button id="btnClear">Clear</button>
+  <button id="btnBack" style="background:#1db954;color:#000;border-color:#1db954;font-weight:600">Back to Music Stream</button>
+</div>
+<div id="stats"></div>
+<pre id="log"></pre>
+<script>
+const logEl = document.getElementById('log');
+const statsEl = document.getElementById('stats');
+const badgeKeep = document.getElementById('badgeKeep');
+const badgeDoc = document.getElementById('badgeDoc');
+const badgeRAF = document.getElementById('badgeRAF');
+const badgeCT = document.getElementById('badgeCT');
+
+// ring buffer: last 500 events, persisted to localStorage for resume recovery
+const RING_MAX = 500;
+let ring = [];
+let diagSeq = 0;
+function pushRing(entry){
+  entry.seq = ++diagSeq;
+  ring.push(entry);
+  if(ring.length > RING_MAX) ring.shift();
+  try{ localStorage.setItem('diag_ring', JSON.stringify(ring.slice(-300))); }catch(e){}
+}
+function flushRingToNative(){
+  if(!window.Diagnostics) return;
+  // batch 40 at a time to avoid logcat chunk limit
+  const batch = ring.slice(-40);
+  try{ window.Diagnostics.log(JSON.stringify({diag:"tick_batch", t: Date.now(), batch: batch})); }catch(e){}
+}
+function nativeLogLine(obj){
+  const line = typeof obj === 'string' ? obj : JSON.stringify(obj);
+  if(window.Diagnostics && window.Diagnostics.logLine) try{ window.Diagnostics.logLine(line); }catch(e){ console.log(line); }
+  else console.log(line);
+}
+function uiLog(entry){
+  const t = new Date(entry.t || Date.now()).toISOString().slice(11,23);
+  const line = `[${t}] seq=${entry.seq} ${entry.type} perf=${(entry.perf||0).toFixed(0)} dt=${entry.dt??''} ct=${entry.ct??''} state=${entry.ytState??''} tuCt=${entry.tuCt??''} rAF=${entry.rAF??''} hidden=${entry.hidden} vs=${entry.vs} focus=${entry.hasFocus} msState=${entry.msState||''}`;
+  logEl.textContent += line + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+  // also forward single line to native for real-time logcat during background
+  nativeLogLine(entry);
+}
+
+// ---- boot info ----
+nativeLogLine({type:"boot", t: Date.now(), perf: performance.now(), boot: window.__diagBoot, ua: navigator.userAgent, hasDiagnostics: !!window.Diagnostics, hasNative: !!window.NativePlayback});
+try{ localStorage.setItem('diag_boot', JSON.stringify(window.__diagBoot)); }catch(e){}
+
+// ---- YT player ----
+let ytReady = false;
+let lastTU = -1;
+let tuCount = 0;
+window.onYouTubeIframeAPIReady = function(){
+  const at = { t: Date.now(), perf: performance.now(), type:"yt_api_ready", hidden: document.hidden, vs: document.visibilityState, hasFocus: (document.hasFocus?document.hasFocus():false) };
+  pushRing(at); uiLog(at);
+  window.Player = window.Player || {};
+  window.Player.yt = new YT.Player('yt-player', {
+    height:'180', width:'320',
+    host:'https://www.youtube.com',
+    videoId:'jNQXAC9IVRw',
+    playerVars:{ playsinline:1, controls:1, origin: location.origin },
+    events: {
+      onReady: ()=>{
+        ytReady=true;
+        const e={t:Date.now(), perf:performance.now(), type:"yt_onReady", hidden:document.hidden, vs:document.visibilityState, hasFocus: document.hasFocus?document.hasFocus():false, ct: safeCT(), ytState: safeState()};
+        pushRing(e); uiLog(e); updateBadges();
+        nativeLogLine(e);
+      },
+      onStateChange: (ev)=>{
+        const names={ '-1':'unstarted','0':'ended','1':'playing','2':'paused','3':'buffering','5':'cued'};
+        const e={t:Date.now(), perf:performance.now(), type:"yt_state", ytState: ev.data, ytName: names[ev.data]||'', hidden:document.hidden, vs:document.visibilityState, hasFocus: document.hasFocus?document.hasFocus():false, ct: safeCT(), rAF: rAFTick};
+        pushRing(e); uiLog(e); updateBadges();
+        nativeLogLine(e);
+      },
+      onError:(ev)=>{ const e={t:Date.now(), perf:performance.now(), type:"yt_error", ytState: ev.data, hidden:document.hidden, vs:document.visibilityState, ct: safeCT()}; pushRing(e); uiLog(e); nativeLogLine(e);}
+    }
+  });
+  // timeupdate via HTML5 video inside iframe not directly accessible, use polling + YT getCurrentTime
+};
+(function injectYT(){ var s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api'; document.head.appendChild(s); })();
+
+function safeCT(){ try{ const yt=window.Player&&window.Player.yt; return yt&&yt.getCurrentTime?Number(yt.getCurrentTime().toFixed(2)):null; }catch(e){ return null; } }
+function safeState(){ try{ const yt=window.Player&&window.Player.yt; return yt&&yt.getPlayerState?yt.getPlayerState():null; }catch(e){ return null; } }
+function safeTU(){ return lastTU; }
+
+// ---- rAF loop ----
+let rAFTick = 0;
+let lastRAFPerf = performance.now();
+let rafDeltaMax = 0;
+function rafLoop(now){
+  rAFTick++;
+  const perf = performance.now();
+  const delta = perf - lastRAFPerf;
+  lastRAFPerf = perf;
+  if(delta > rafDeltaMax) rafDeltaMax = delta;
+  // throttling detection: if delta > 800ms, log
+  if(delta > 800){
+    const e={t:Date.now(), perf, type:"raf_throttle", dt: Math.round(delta), rAF: rAFTick, hidden: document.hidden, vs: document.visibilityState, hasFocus: document.hasFocus?document.hasFocus():false, ct: safeCT(), ytState: safeState()};
+    pushRing(e); uiLog(e); nativeLogLine(e);
+  }
+  requestAnimationFrame(rafLoop);
+}
+requestAnimationFrame(rafLoop);
+
+// ---- setInterval 250ms main tick: truth source vs spoof ----
+let lastPerf = performance.now();
+let tickCount = 0;
+let lastCt = null;
+let ctStalledAt = null;
+const TICK_MS = 250;
+setInterval(()=>{
+  tickCount++;
+  const perf = performance.now();
+  const dt = Math.round(perf - lastPerf);
+  lastPerf = perf;
+  const ct = safeCT();
+  const st = safeState();
+  const hidden = document.hidden;
+  const vs = document.visibilityState;
+  const hasFocus = document.hasFocus?document.hasFocus():false;
+  const msState = (navigator.mediaSession && navigator.mediaSession.playbackState) || '';
+  // detect ct stall
+  if(ct !== null && st === 1){
+    if(lastCt !== null && ct === lastCt){
+      if(ctStalledAt === null) ctStalledAt = Date.now();
+    } else ctStalledAt = null;
+  } else if(st !== 1) ctStalledAt = null;
+  lastCt = ct;
+  const e = {
+    t: Date.now(), perf, dt, tick: tickCount, rAF: rAFTick, rafDeltaMax: Math.round(rafDeltaMax),
+    ct, ytState: st, tuCt: lastTU, hasFocus, hidden, vs, msState,
+    ctStalledMs: ctStalledAt? (Date.now()-ctStalledAt):0
+  };
+  // log every tick to ring, but UI only every 4th or when playing/stall
+  pushRing(Object.assign({type:"tick"}, e));
+  if(tickCount % 4 === 0 || st === 1 || e.ctStalledMs>0) uiLog(Object.assign({type:"tick"}, e));
+  // forward sparse to native logcat: every 2s or on stall/throttle
+  if(tickCount % 8 === 0 || e.ctStalledMs>0 || dt>600) nativeLogLine(Object.assign({type:"tick"}, e));
+  updateBadges();
+  // periodic batch flush every 2s (still when JS throttled, will be delayed ΓÇö that delay IS the signal)
+  if(tickCount % 8 === 0) flushRingToNative();
+  // reset rafDeltaMax window
+  if(tickCount % 8 === 0) rafDeltaMax = 0;
+}, TICK_MS);
+
+// ---- visibility / pagehide / blur / focus ----
+function capEvent(name){
+  return function(ev){
+    const e={t:Date.now(), perf:performance.now(), type:name, hidden:document.hidden, vs:document.visibilityState, hasFocus: document.hasFocus?document.hasFocus():false, ct: safeCT(), ytState: safeState(), rAF: rAFTick};
+    pushRing(e); uiLog(e); nativeLogLine(e);
+  };
+}
+document.addEventListener('visibilitychange', capEvent('visibilitychange'), true);
+document.addEventListener('webkitvisibilitychange', capEvent('webkitvisibilitychange'), true);
+window.addEventListener('pagehide', capEvent('pagehide'), true);
+window.addEventListener('blur', capEvent('blur'), true);
+window.addEventListener('focus', capEvent('focus'), true);
+document.addEventListener('freeze', capEvent('freeze'), true);
+document.addEventListener('resume', capEvent('resume'), true);
+// Capacitor App plugin pause/resume if available
+try{
+  if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App){
+    window.Capacitor.Plugins.App.addListener('appStateChange', (s)=>{
+      const e={t:Date.now(), perf:performance.now(), type:"capacitor_appStateChange", isActive: s.isActive, hidden:document.hidden, vs:document.visibilityState, ct: safeCT(), ytState: safeState()};
+      pushRing(e); uiLog(e); nativeLogLine(e);
+    });
+    window.Capacitor.Plugins.App.addListener('pause', ()=>{ const e={t:Date.now(), perf:performance.now(), type:"capacitor_pause", ct: safeCT(), ytState: safeState()}; pushRing(e); uiLog(e); nativeLogLine(e); });
+    window.Capacitor.Plugins.App.addListener('resume', ()=>{ const e={t:Date.now(), perf:performance.now(), type:"capacitor_resume", ct: safeCT(), ytState: safeState()}; pushRing(e); uiLog(e); nativeLogLine(e); });
+  }
+}catch(e){}
+
+function updateBadges(){
+  try{
+    badgeDoc.textContent = `hidden=${document.hidden} vs=${document.visibilityState} focus=${document.hasFocus?document.hasFocus():'?'}`;
+    badgeRAF.textContent = `rAF=${rAFTick} ╬ömax=${Math.round(rafDeltaMax)}ms`;
+    const ct=safeCT(); badgeCT.textContent = `ct=${ct} st=${safeState()} tu=${lastTU}`;
+    if(window.Diagnostics) badgeKeep.textContent = 'Diagnostics: ok';
+    else badgeKeep.textContent = 'Diagnostics: no bridge (need native)';
+    statsEl.textContent = `tick=${tickCount} tuCount=${tuCount} ctStalled=${ctStalledAt?Math.round((Date.now()-ctStalledAt)/1000)+'s':'-'} perf=${Math.round(performance.now())}`;
+  }catch(e){}
+}
+setInterval(updateBadges, 400);
+
+// ---- buttons ----
+document.getElementById('btnPlay').addEventListener('click', ()=>{
+  if(!ytReady){ const e={t:Date.now(), perf:performance.now(), type:"play_click_not_ready"}; pushRing(e); uiLog(e); nativeLogLine(e); return; }
+  const before={t:Date.now(), perf:performance.now(), type:"play_click", hidden:document.hidden, vs:document.visibilityState, ct: safeCT(), ytState: safeState()};
+  pushRing(before); uiLog(before); nativeLogLine(before);
+  try{
+    window.Player.yt.loadVideoById({videoId:'jNQXAC9IVRw'});
+    window.Player.yt.playVideo();
+  }catch(e){ const er={t:Date.now(), type:"play_click_err", err: String(e)}; pushRing(er); uiLog(er); }
+  if(window.NativePlayback && window.NativePlayback.updateNotification){
+    try{ window.NativePlayback.updateNotification('Diag BG YT', 'diag-bg test'); }catch(e){}
+  }
+});
+document.getElementById('btnCheck').addEventListener('click', ()=>{
+  const e={t:Date.now(), perf:performance.now(), type:"check_click", hidden:document.hidden, vs:document.visibilityState, webkitHidden: document.webkitHidden, hasFocus: document.hasFocus?document.hasFocus():false, ct: safeCT(), ytState: safeState(), rAF: rAFTick, msState: (navigator.mediaSession&&navigator.mediaSession.playbackState)||'', diagnostics: !!window.Diagnostics};
+  pushRing(e); uiLog(e); nativeLogLine(e);
+  // dump ring batch
+  flushRingToNative();
+});
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const payload = {boot: window.__diagBoot, exportedAt: Date.now(), ring: ring, lastPerf: performance.now()};
+  const s = JSON.stringify(payload, null, 2);
+  // copy via clipboard + show
+  try{ navigator.clipboard.writeText(s); }catch(e){}
+  // also send to native
+  if(window.Diagnostics) try{ window.Diagnostics.log(s); }catch(e){}
+  const w = window.open();
+  if(w){ w.document.write('<pre>'+s.replace(/[&<]/g,c=>c=='&'?'&amp;':'&lt;')+'</pre>'); w.document.close(); }
+  else { logEl.textContent += "\n---EXPORT---\n"+s.slice(0,8000)+"\n"; }
+});
+document.getElementById('btnClear').addEventListener('click', ()=>{
+  ring=[]; diagSeq=0; logEl.textContent='';
+  try{ localStorage.removeItem('diag_ring'); }catch(e){}
+  const e={t:Date.now(), perf:performance.now(), type:"clear"};
+  pushRing(e); uiLog(e);
+});
+document.getElementById('btnBack').addEventListener('click', ()=>{
+  const u='/';
+  try{ window.location.href=u; }catch(e){ location.assign(u); }
+});
+
+// initial
+setTimeout(()=>{
+  const e={t:Date.now(), perf:performance.now(), type:"init", hidden:document.hidden, vs:document.visibilityState, hasFocus: document.hasFocus?document.hasFocus():false, hasDiagnostics: !!window.Diagnostics, hasNative: !!window.NativePlayback};
+  pushRing(e); uiLog(e); nativeLogLine(e);
+  flushRingToNative();
+}, 300);
+
+// also poll for Diagnostics bridge appearing late (onStart inject)
+let waitDiag=0;
+const waitDiagInt=setInterval(()=>{
+  waitDiag++;
+  if(window.Diagnostics){ clearInterval(waitDiagInt); const e={t:Date.now(), perf:performance.now(), type:"diagnostics_bridge_ready", waitTicks: waitDiag, hidden:document.hidden, vs:document.visibilityState}; pushRing(e); uiLog(e); nativeLogLine(e); badgeKeep.textContent='Diagnostics: ok'; }
+  if(waitDiag>40) clearInterval(waitDiagInt);
+}, 250);
+</script>
+</body>
+</html>

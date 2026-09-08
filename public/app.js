@@ -3609,16 +3609,12 @@ function openSettingsModal(tab = 'about') {
       }, 300);
     };
   }
-  // TEST/DEBUG: Inspect Diagnostics — navigate inside same WebView to Preview diag page
+  // TEST/DEBUG: Inspect Diagnostics — same-origin diagnostic page
   const diagBtn = $('#diag-inspect');
   if (diagBtn) {
     diagBtn.onclick = () => {
-      // Must stay inside same WebView, not Chrome/Custom Tab/Intent.ACTION_VIEW
-      // Preview deployment holds /test/diag-bg.html from feature branch
-      const previewUrl = 'https://music-stream-git-feature-apk-chr-013370-danialalfat07s-projects.vercel.app/test/diag-bg.html';
       try { closeSettingsModal(); } catch {}
-      // Internal navigation — allowed only if Capacitor allowNavigation permits preview host
-      window.location.href = previewUrl;
+      window.location.href = '/test/diag-bg.html';
     };
   }
   const copy = $('#contact-copy');
