@@ -16,7 +16,6 @@ import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.session.DefaultMediaNotificationProvider;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
 
@@ -27,11 +26,6 @@ public class PlaybackService extends MediaSessionService {
     private static final String EXTRA_ARTIST = "artist";
     private static final String EXTRA_ARTWORK = "artwork";
     private static final String ACTION_ARM = "arm";
-    // Isolated experiment: dummy MediaSession state (silent local asset, not YouTube)
-    private static final String ACTION_TEST_MEDIA = "testMedia";
-    private static final String EXTRA_STATE = "state";
-    private static final String EXTRA_DURATION_MS = "durationMs";
-    private static final String EXTRA_POSITION_MS = "positionMs";
     private static final String CHANNEL_ID = "playback";
     private static final int NOTIFICATION_ID = 1001;
     private ExoPlayer player;
@@ -83,7 +77,6 @@ public class PlaybackService extends MediaSessionService {
         AudioAttributes attrs = new AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build();
         player = new ExoPlayer.Builder(this).setAudioAttributes(attrs, true).build();
-        player.setRepeatMode(Player.REPEAT_MODE_ONE);
         player.addListener(new Player.Listener() {
             @Override
             public void onPlayerError(PlaybackException error) {
@@ -91,31 +84,29 @@ public class PlaybackService extends MediaSessionService {
             }
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
-                android.util.Log.d("DnialifyDiag", "PlaybackService onIsPlayingChanged isPlaying=" + isPlaying + " state=" + player.getPlaybackState());
-            }
-            @Override
-            public void onPlaybackStateChanged(int state) {
-                android.util.Log.d("DnialifyDiag", "PlaybackService onPlaybackStateChanged state=" + state + " isPlaying=" + player.isPlaying());
+                // refresh notif play/pause icon and ongoing
+                try {
+                    MediaItem cur = player.getCurrentMediaItem();
+                    String t = null, a = null;
+                    if (cur != null && cur.mediaMetadata != null) {
+                        t = cur.mediaMetadata.title != null ? cur.mediaMetadata.title.toString() : null;
+                        a = cur.mediaMetadata.artist != null ? cur.mediaMetadata.artist.toString() : null;
+                    }
+                    updateNotification(t, a);
+                } catch (Exception ignored) {}
             }
         });
         session = new MediaSession.Builder(this, player).build();
-        // Media3 DefaultMediaNotificationProvider renders MediaStyle + token automatically
-        try {
-            setMediaNotificationProvider(new DefaultMediaNotificationProvider(this));
-        } catch (Exception e) {
-            android.util.Log.e("DnialifyPlayback", "DefaultMediaNotificationProvider failed", e);
-        }
         android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
         if (android.os.Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(new android.app.NotificationChannel(
                     CHANNEL_ID, "Playback", android.app.NotificationManager.IMPORTANCE_LOW));
         }
-        // Keep foreground via MediaSessionService default provider; also show placeholder until testMedia
         startForeground(NOTIFICATION_ID, new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(com.dnialify.musicstream.R.mipmap.ic_launcher)
                 .setContentTitle("Dnialify Music Stream")
-                .setContentText("Playback ready — run testMedia via ADB")
-                .setOngoing(false)
+                .setContentText("Playback ready")
+                .setOngoing(true)
                 .setCategory(android.app.Notification.CATEGORY_TRANSPORT)
                 .build());
     }
@@ -150,61 +141,12 @@ public class PlaybackService extends MediaSessionService {
         try { startForeground(NOTIFICATION_ID, nb.build()); } catch (Exception e) { manager.notify(NOTIFICATION_ID, nb.build()); }
     }
 
-    private void applyTestMedia(Intent intent) {
-        String title = intent.getStringExtra(EXTRA_TITLE);
-        if (title == null || title.isEmpty()) title = "Dnialify Test Track";
-        String artist = intent.getStringExtra(EXTRA_ARTIST);
-        if (artist == null || artist.isEmpty()) artist = "Dnialify Music Stream";
-        String artwork = intent.getStringExtra(EXTRA_ARTWORK);
-        // artwork fallback to mipmap ic_launcher if not provided
-        android.net.Uri artworkUri = null;
-        if (artwork != null && !artwork.isEmpty()) {
-            try { artworkUri = android.net.Uri.parse(artwork); } catch (Exception ignored) {}
-        }
-        if (artworkUri == null) {
-            artworkUri = android.net.Uri.parse("android.resource://" + getPackageName() + "/" + com.dnialify.musicstream.R.mipmap.ic_launcher);
-        }
-        int durationMs = intent.getIntExtra(EXTRA_DURATION_MS, 180000); // requested dummy, actual asset 1.5s loop
-        int positionMs = intent.getIntExtra(EXTRA_POSITION_MS, 30000);
-        String state = intent.getStringExtra(EXTRA_STATE);
-        boolean wantPlaying = state == null || !"PAUSED".equalsIgnoreCase(state);
-        android.util.Log.d("DnialifyDiag", "testMedia title=" + title + " artist=" + artist + " state=" + (wantPlaying?"PLAYING":"PAUSED") + " durationMs=" + durationMs + " positionMs=" + positionMs);
-
-        // Build silent local asset MediaItem (experiment only, not YouTube) — 3 items so NEXT/PREV available
-        android.net.Uri silentUri = android.net.Uri.parse("android.resource://" + getPackageName() + "/" + com.dnialify.musicstream.R.raw.silent);
-        MediaMetadata metadata = new MediaMetadata.Builder()
-                .setTitle(title)
-                .setArtist(artist)
-                .setArtworkUri(artworkUri)
-                .setIsPlayable(true)
-                .build();
-        MediaItem item1 = new MediaItem.Builder().setMediaId("testMedia-dummy-1").setUri(silentUri).setMediaMetadata(metadata).build();
-        MediaItem item2 = new MediaItem.Builder().setMediaId("testMedia-dummy-2").setUri(silentUri).setMediaMetadata(metadata).build();
-        MediaItem item3 = new MediaItem.Builder().setMediaId("testMedia-dummy-3").setUri(silentUri).setMediaMetadata(metadata).build();
-        try {
-            player.setRepeatMode(Player.REPEAT_MODE_ALL);
-            java.util.List<MediaItem> list = new java.util.ArrayList<>();
-            list.add(item1); list.add(item2); list.add(item3);
-            player.setMediaItems(list, 1, positionMs > 0 ? positionMs : 0);
-            player.prepare();
-            player.setPlayWhenReady(wantPlaying);
-            if (wantPlaying) player.play(); else player.pause();
-            android.util.Log.d("DnialifyDiag", "testMedia prepared 3 silent items repeat ALL wantPlaying=" + wantPlaying);
-        } catch (Exception e) {
-            android.util.Log.e("DnialifyPlayback", "testMedia failed", e);
-        }
-        // DefaultMediaNotificationProvider will auto-update foreground notification with MediaStyle
-    }
-
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
         if (intent != null) {
             String action = intent.getAction();
-            if (ACTION_TEST_MEDIA.equals(action)) {
-                applyTestMedia(intent);
-                return START_STICKY;
-            } else if (ACTION_ARM.equals(action)) {
+            if (ACTION_ARM.equals(action)) {
                 updateNotification(null, null);
                 return START_STICKY;
             } else if ("updateNotification".equals(action)) {
