@@ -32,6 +32,7 @@ public class PlaybackService extends Service {
     private String artist = "MusicStream";
     private String artworkUrl = "";
     private Bitmap artwork;
+    private String currentLyric = "";
     private boolean playing;
     private long positionMs;
     private long durationMs;
@@ -74,9 +75,17 @@ public class PlaybackService extends Service {
         ContextCompat.startForegroundService(context, intent);
     }
 
-    // Kept as no-op for JS bridge compatibility; lyrics no longer rendered in notification
     public static void updateLyricsStatic(Context context, String previous, String current, String next) {
-        // Basic notification does not show lyrics — ignore
+        String cur = current == null ? "" : current;
+        if (instance != null) {
+            instance.currentLyric = cur;
+            instance.updateMediaSession();
+            instance.publishNotification();
+            return;
+        }
+        Intent intent = new Intent(context, PlaybackService.class).setAction("webViewLyrics")
+                .putExtra("current", cur);
+        ContextCompat.startForegroundService(context, intent);
     }
 
     // Kept for existing JS bridge callers. Playback itself remains WebView-owned.
@@ -172,7 +181,9 @@ public class PlaybackService extends Service {
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist);
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, currentLyric)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs);
         if (artwork != null) {
             metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
                     .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, artwork);
@@ -228,7 +239,14 @@ public class PlaybackService extends Service {
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
-        else if ("webViewLyrics".equals(action)) { /* basic notification ignores lyrics */ }
+        else if ("webViewLyrics".equals(action)) {
+            String cur = intent.getStringExtra("current");
+            if (cur != null) {
+                currentLyric = cur;
+                updateMediaSession();
+                publishNotification();
+            }
+        }
         else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);

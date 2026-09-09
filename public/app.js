@@ -1017,15 +1017,34 @@ function pushNativeLyrics() {
   try {
     if (!window.NativePlayback || !window.NativePlayback.updateLyrics) return;
     const L = Player.lyrics;
-    if (!L || !L.lines.length) { window.NativePlayback.updateLyrics("", "", ""); return; }
-    let idx = -1;
-    // derive idx from lastLyricIdx
-    idx = lastLyricIdx;
-    const prev = idx > 0 ? L.lines[idx-1].text : "";
-    const cur = idx >= 0 ? L.lines[idx].text : "";
-    const next = idx >= 0 && idx+1 < L.lines.length ? L.lines[idx+1].text : "";
+    let prev = "", cur = "", next = "";
+    if (!L || !L.lines.length) {
+      if (L && L.plain) {
+        const first = String(L.plain).split('\n').map(x=>x.trim()).find(Boolean) || "";
+        cur = first;
+      }
+      try { console.log('[LYRICS] pushNativeLyrics plain/no-sync cur="' + cur + '" lines=' + (L?L.lines.length:0) + ' plainLen='+(L&&L.plain?L.plain.length:0)); } catch {}
+      try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] pushNativeLyrics cur="'+cur+'" lines='+(L?L.lines.length:0)); } catch {}
+      window.NativePlayback.updateLyrics("", cur || "", "");
+      return;
+    }
+    let idx = lastLyricIdx;
+    // If no highlight yet (idx -1) but lines exist, use currentLyricText fallback
+    if (idx < 0) {
+      try { cur = currentLyricText(); } catch { cur = L.lines[0]?L.lines[0].text:""; }
+      try { console.log('[LYRICS] push fallback idx -1 cur="'+cur+'" total='+L.lines.length); } catch {}
+      prev = "";
+      next = L.lines.length>1 ? L.lines[1].text : "";
+      window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
+      return;
+    }
+    prev = idx > 0 ? L.lines[idx-1].text : "";
+    cur = idx >= 0 ? L.lines[idx].text : "";
+    next = idx >= 0 && idx+1 < L.lines.length ? L.lines[idx+1].text : "";
+    try { console.log('[LYRICS] push idx='+idx+' cur="'+cur+'" prev="'+prev+'" next="'+next+'" total='+L.lines.length); } catch {}
+    try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] push idx='+idx+' cur="'+cur+'"'); } catch {}
     window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
-  } catch {}
+  } catch (e) { try { console.log('[LYRICS] push error '+e); } catch {} }
 }
 /* progress loop */
 let _lastTick = null;
@@ -1179,12 +1198,16 @@ async function loadLyrics(song, { silent = false } = {}) {
     // never downgrade: keep existing synced lyrics if the retry found less
     if (Player.lyrics.synced && !d.synced) return;
     Player.lyrics = { ...d, lines: d.synced ? parseLRC(d.synced) : [] };
-  } catch {
+    try { console.log('[LYRICS] fetched title="'+title+'" artist="'+artist+'" dur='+durationSec+' rawSyncedLen='+(d.synced?d.synced.length:0)+' plainLen='+(d.plain?d.plain.length:0)+' parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
+    try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] fetched parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
+  } catch (e) {
+    try { console.log('[LYRICS] fetch failed '+e); } catch {}
     if (myReq !== lyricsReqId) return;
     if (!Player.lyrics.synced && !Player.lyrics.plain)
       Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
   }
   renderLyrics();
+  try { console.log('[LYRICS] after render lines='+Player.lyrics.lines.length+' plain='+(!!Player.lyrics.plain)); } catch {}
 }
 /* retry once the real duration is known (player loaded after first attempt),
    or when the first attempt found nothing */
