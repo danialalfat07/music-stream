@@ -325,35 +325,71 @@ public class MainActivity extends BridgeActivity {
                         } else {
                             getBridge().eval("try{if(window.syncFloatWidget) syncFloatWidget();}catch(e){}", null);
                         }
-                        // Diagnostics for black PiP
+                        // Diagnostics for black PiP - Step 1,2,3,4,5
                         getBridge().getWebView().postDelayed(() -> {
                             try {
+                                // Native WebView state - Step 8
+                                android.webkit.WebView wv = getBridge().getWebView();
+                                String visStr = "UNKNOWN";
+                                try {
+                                    int vis = wv.getVisibility();
+                                    if (vis == android.view.View.VISIBLE) visStr = "VISIBLE";
+                                    else if (vis == android.view.View.INVISIBLE) visStr = "INVISIBLE";
+                                    else if (vis == android.view.View.GONE) visStr = "GONE";
+                                    else visStr = String.valueOf(vis);
+                                } catch (Exception e) { visStr = "err:" + e; }
+                                String nativeDiag = "[PiP-NATIVE] vis=" + visStr
+                                        + " shown=" + wv.isShown()
+                                        + " alpha=" + wv.getAlpha()
+                                        + " size=" + wv.getWidth() + "x" + wv.getHeight()
+                                        + " pip=" + pip;
+                                android.util.Log.d(TAG_DIAG, nativeDiag);
+                                // Force invalidate - Step 9 diagnostic
+                                try { wv.invalidate(); wv.requestLayout(); } catch (Exception ignored) {}
+                                wv.post(() -> { try { wv.invalidate(); wv.requestLayout(); } catch (Exception ignored) {} });
+
                                 String diag = "(function(){try{"
                                         + "var w=document.getElementById('float-widget');"
                                         + "var r=w? w.getBoundingClientRect(): {width:0,height:0,top:0,left:0};"
-                                        + "var cs=w? getComputedStyle(w):{display:'',visibility:'',opacity:''};"
+                                        + "var cs=w? getComputedStyle(w):{display:'',visibility:'',opacity:'',zIndex:''};"
+                                        + "var bodyCs = getComputedStyle(document.body);"
+                                        + "var app=document.getElementById('app'); var appCs=app?getComputedStyle(app):{display:'',visibility:''}; var appR=app?app.getBoundingClientRect():{width:0,height:0};"
+                                        + "var parentChain=[]; var p=w? w.parentElement:null; for(var i=0;i<4 && p;i++){ parentChain.push({tag:p.tagName + (p.id?'#'+p.id:''), display:getComputedStyle(p).display, vis:getComputedStyle(p).visibility, w:Math.round(p.getBoundingClientRect().width), h:Math.round(p.getBoundingClientRect().height)}); p=p.parentElement; }"
                                         + "return JSON.stringify({"
                                         + "bodyClass: document.body.className,"
                                         + "pipSystem: document.body.classList.contains('pip-system'),"
                                         + "floatMode: document.body.classList.contains('float-mode'),"
                                         + "floatOn: (window.Player&&window.Player.floatOn),"
-                                        + "widgetHidden: w? w.classList.contains('hidden'): null,"
+                                        + "widgetExists: !!w,"
+                                        + "widgetHiddenAttr: w? w.hidden : null,"
+                                        + "widgetHiddenClass: w? w.classList.contains('hidden'): null,"
+                                        + "hasHiddenAttr: w? w.hasAttribute('hidden'): null,"
                                         + "display: cs.display,"
                                         + "visibility: cs.visibility,"
                                         + "opacity: cs.opacity,"
+                                        + "zIndex: cs.zIndex,"
                                         + "width: Math.round(r.width),"
                                         + "height: Math.round(r.height),"
                                         + "top: Math.round(r.top),"
                                         + "left: Math.round(r.left),"
                                         + "hasArt: !!document.getElementById('fw-art'),"
-                                        + "lyric: document.getElementById('fw-lyric')?document.getElementById('fw-lyric').textContent: null"
+                                        + "lyric: document.getElementById('fw-lyric')?document.getElementById('fw-lyric').textContent: null,"
+                                        + "viewport: window.innerWidth+'x'+window.innerHeight,"
+                                        + "docClient: document.documentElement.clientWidth+'x'+document.documentElement.clientHeight,"
+                                        + "bodyBg: bodyCs.backgroundColor,"
+                                        + "appDisplay: appCs.display,"
+                                        + "appVis: appCs.visibility,"
+                                        + "appSize: Math.round(appR.width)+'x'+Math.round(appR.height),"
+                                        + "parentChain: parentChain"
                                         + "});"
                                         + "}catch(e){return 'diag err '+e;}})()";
                                 getBridge().getWebView().evaluateJavascript(diag, value -> {
-                                    android.util.Log.d(TAG_DIAG, "[PiP] diag pip=" + pip + " " + value);
+                                    android.util.Log.d(TAG_DIAG, "[PiP-DIAG] pip=" + pip + " " + value);
                                 });
                                 // Also log via DiagnosticsBridge if available
                                 getBridge().eval("try{var d=(function(){var w=document.getElementById('float-widget');var r=w?w.getBoundingClientRect():{width:0,height:0};var cs=w?getComputedStyle(w):{display:''};return 'pip='+document.body.classList.contains('pip-system')+' hidden='+ (w&&w.classList.contains('hidden'))+' display='+cs.display+' '+r.width+'x'+r.height;})(); if(window.Diagnostics) window.Diagnostics.logLine('[PiP] '+d);}catch(e){}", null);
+                                // Step 6 simple render test - red background diagnostic (temporary)
+                                getBridge().getWebView().evaluateJavascript("try{document.body.style.background='red'; document.getElementById('app').style.background='red'; setTimeout(()=>{document.body.style.background=''; document.getElementById('app').style.background='';}, 1200);}catch(e){}", null);
                             } catch (Exception ignored) {}
                         }, 400);
                     } catch (Exception ignored) {}
