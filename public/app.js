@@ -4152,6 +4152,10 @@ $('#miniplayer').addEventListener('click', (e) => {
 Player.pipWin = null;
 Player.floatOn = false;
 
+function hasDocumentPiP() {
+  return 'documentPictureInPicture' in window && typeof window.documentPictureInPicture?.requestWindow === 'function';
+}
+
 const FW_CSS = `
   :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: #121212; color: #fff;
@@ -4273,16 +4277,26 @@ function enableDrag(el) {
     el.style.top = 'auto';
   }
   let drag = null;
+  let activePid = null;
+  const point = (e) => (e.touches ? e.touches[0] : e);
   const down = (e) => {
-    if (e.target.closest('button, .fw-bar')) return;
+    if (e.target.closest('button, .fw-bar, a')) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const pt = point(e);
+    if (!pt || !Number.isFinite(pt.clientX)) return;
     const r = el.getBoundingClientRect();
-    const pt = e.touches ? e.touches[0] : e;
     drag = { dx: pt.clientX - r.left, dy: pt.clientY - r.top };
     el.classList.add('dragging');
+    if (e.pointerId !== undefined && el.setPointerCapture) {
+      activePid = e.pointerId;
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    }
+    if (e.cancelable) e.preventDefault();
   };
   const move = (e) => {
     if (!drag) return;
-    const pt = e.touches ? e.touches[0] : e;
+    const pt = point(e);
+    if (!pt || !Number.isFinite(pt.clientX)) return;
     const x = Math.max(
       8,
       Math.min(window.innerWidth - el.offsetWidth - 8, pt.clientX - drag.dx),
@@ -4297,19 +4311,32 @@ function enableDrag(el) {
     el.style.bottom = 'auto';
     if (e.cancelable) e.preventDefault();
   };
-  const up = () => {
+  const up = (e) => {
     if (!drag) return;
+    if (e && e.pointerId !== undefined && activePid !== null && e.pointerId !== activePid) return;
     drag = null;
     el.classList.remove('dragging');
+    if (activePid !== null && el.releasePointerCapture) {
+      try { el.releasePointerCapture(activePid); } catch {}
+      activePid = null;
+    }
     const r = el.getBoundingClientRect();
     store.set('fw_pos', { l: r.left, t: r.top });
   };
+  const cancel = () => {
+    if (!drag) return;
+    drag = null;
+    el.classList.remove('dragging');
+    activePid = null;
+  };
   el.addEventListener('pointerdown', down);
-  window.addEventListener('pointermove', move);
+  window.addEventListener('pointermove', move, { passive: false });
   window.addEventListener('pointerup', up);
-  el.addEventListener('touchstart', down, { passive: true });
+  window.addEventListener('pointercancel', cancel);
+  el.addEventListener('touchstart', down, { passive: false });
   window.addEventListener('touchmove', move, { passive: false });
   window.addEventListener('touchend', up);
+  window.addEventListener('touchcancel', cancel);
 }
 
 async function openPipWidget() {
@@ -4566,8 +4593,12 @@ async function openFloatWidget() {
   closeNowPlaying();
   document.body.classList.add('float-mode');
   drawPipFrame();
-  const sysOk = await startSystemPip();
-  const docOk = sysOk ? false : await openPipWidget();
+  let sysOk = false;
+  let docOk = false;
+  if (hasDocumentPiP()) {
+    sysOk = await startSystemPip();
+    if (!sysOk) docOk = await openPipWidget();
+  }
   const el = $('#float-widget');
   if (sysOk) {
     el.classList.add('hidden');
