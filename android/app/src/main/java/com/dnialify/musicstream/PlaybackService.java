@@ -10,8 +10,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.IBinder;
-import android.view.View;
-import android.widget.RemoteViews;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -34,9 +32,6 @@ public class PlaybackService extends Service {
     private String artist = "MusicStream";
     private String artworkUrl = "";
     private Bitmap artwork;
-    private String previousLyric = "";
-    private String currentLyric = "";
-    private String nextLyric = "";
     private boolean playing;
     private long positionMs;
     private long durationMs;
@@ -79,16 +74,9 @@ public class PlaybackService extends Service {
         ContextCompat.startForegroundService(context, intent);
     }
 
+    // Kept as no-op for JS bridge compatibility; lyrics no longer rendered in notification
     public static void updateLyricsStatic(Context context, String previous, String current, String next) {
-        if (instance != null) {
-            Intent lyrics = new Intent().putExtra("prev", previous)
-                    .putExtra("current", current).putExtra("next", next);
-            instance.handleLyrics(lyrics);
-            return;
-        }
-        Intent intent = new Intent(context, PlaybackService.class).setAction("webViewLyrics")
-                .putExtra("prev", previous).putExtra("current", current).putExtra("next", next);
-        ContextCompat.startForegroundService(context, intent);
+        // Basic notification does not show lyrics — ignore
     }
 
     // Kept for existing JS bridge callers. Playback itself remains WebView-owned.
@@ -166,7 +154,7 @@ public class PlaybackService extends Service {
     }
 
     private void loadArtwork(String url) {
-        if (url.isEmpty()) return;
+        if (url == null || url.isEmpty()) return;
         new Thread(() -> {
             try {
                 Bitmap loaded = BitmapFactory.decodeStream(new java.net.URL(url).openStream());
@@ -200,15 +188,6 @@ public class PlaybackService extends Service {
                         positionMs, playing ? 1f : 0f).build());
     }
 
-    private void handleLyrics(Intent intent) {
-        previousLyric = value(intent.getStringExtra("prev"));
-        currentLyric = value(intent.getStringExtra("current"));
-        nextLyric = value(intent.getStringExtra("next"));
-        publishNotification();
-    }
-
-    private String value(String value) { return value == null ? "" : value; }
-
     private PendingIntent serviceAction(String action, int requestCode) {
         return PendingIntent.getService(this, requestCode,
                 new Intent(this, PlaybackService.class).setAction(action),
@@ -216,23 +195,19 @@ public class PlaybackService extends Service {
     }
 
     private Notification buildNotification() {
-        RemoteViews collapsed = new RemoteViews(getPackageName(), R.layout.notification_music_collapsed);
-        RemoteViews expanded = new RemoteViews(getPackageName(), R.layout.notification_music_expanded);
-        setViews(collapsed, false);
-        setViews(expanded, true);
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         int playIcon = playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
         String playLabel = playing ? "Pause" : "Play";
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(artist)
                 .setContentIntent(open)
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
                 .setOngoing(playing)
-                .setCustomContentView(collapsed)
-                .setCustomBigContentView(expanded)
                 .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.getSessionToken())
                         .setShowActionsInCompactView(0, 1, 2))
@@ -240,47 +215,6 @@ public class PlaybackService extends Service {
                 .addAction(playIcon, playLabel, serviceAction("toggle", 3))
                 .addAction(android.R.drawable.ic_media_next, "Next", serviceAction("next", 2))
                 .build();
-    }
-
-    private void setViews(RemoteViews views, boolean expanded) {
-        int artId = expanded ? R.id.notif_artwork_exp : R.id.notif_artwork;
-        int titleId = expanded ? R.id.notif_title_exp : R.id.notif_title;
-        int artistId = expanded ? R.id.notif_artist_exp : R.id.notif_artist;
-        int prevId = expanded ? R.id.notif_prev_lyric_exp : R.id.notif_prev_lyric;
-        int currentId = expanded ? R.id.notif_current_lyric_exp : R.id.notif_current_lyric;
-        int nextId = expanded ? R.id.notif_next_lyric_exp : R.id.notif_next_lyric;
-        int timeId = expanded ? R.id.notif_cur_time_exp : R.id.notif_cur_time;
-        int durationId = expanded ? R.id.notif_duration_exp : R.id.notif_duration;
-        int progressId = expanded ? R.id.notif_progress_exp : R.id.notif_progress;
-        int prevButtonId = expanded ? R.id.notif_prev_exp : R.id.notif_prev;
-        int playButtonId = expanded ? R.id.notif_play_pause_exp : R.id.notif_play_pause;
-        int nextButtonId = expanded ? R.id.notif_next_exp : R.id.notif_next;
-        if (artwork != null) views.setImageViewBitmap(artId, artwork);
-        else views.setImageViewResource(artId, R.mipmap.ic_launcher);
-        views.setTextViewText(titleId, title);
-        views.setTextViewText(artistId, artist);
-        setLyric(views, prevId, previousLyric);
-        setLyric(views, currentId, currentLyric);
-        setLyric(views, nextId, nextLyric);
-        views.setTextViewText(timeId, formatTime(positionMs));
-        views.setTextViewText(durationId, formatTime(durationMs));
-        int progress = durationMs == 0 ? 0 : (int) Math.min(1000, positionMs * 1000 / durationMs);
-        views.setProgressBar(progressId, 1000, progress, false);
-        views.setImageViewResource(playButtonId,
-                playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
-        views.setOnClickPendingIntent(prevButtonId, serviceAction("prev", expanded ? 11 : 1));
-        views.setOnClickPendingIntent(playButtonId, serviceAction("toggle", expanded ? 13 : 3));
-        views.setOnClickPendingIntent(nextButtonId, serviceAction("next", expanded ? 12 : 2));
-    }
-
-    private void setLyric(RemoteViews views, int id, String text) {
-        views.setTextViewText(id, text);
-        views.setViewVisibility(id, text.isEmpty() ? View.GONE : View.VISIBLE);
-    }
-
-    private String formatTime(long milliseconds) {
-        long seconds = Math.max(0, milliseconds / 1000);
-        return (seconds / 60) + ":" + String.format(java.util.Locale.US, "%02d", seconds % 60);
     }
 
     private void publishNotification() {
@@ -294,7 +228,7 @@ public class PlaybackService extends Service {
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
-        else if ("webViewLyrics".equals(action)) handleLyrics(intent);
+        else if ("webViewLyrics".equals(action)) { /* basic notification ignores lyrics */ }
         else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);

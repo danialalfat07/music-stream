@@ -4593,6 +4593,22 @@ async function openFloatWidget() {
   closeNowPlaying();
   document.body.classList.add('float-mode');
   drawPipFrame();
+  // 1. Android native System PiP via bridge — primary for WebView (Activity.enterPictureInPictureMode)
+  // enterPip is async (runOnUiThread); state is delivered via onPictureInPictureModeChanged -> pip-system class
+  if (window.NativePlayback && typeof window.NativePlayback.enterPip === 'function') {
+    try {
+      window.NativePlayback.enterPip();
+      document.body.classList.add('pip-system');
+      const el = $('#float-widget');
+      el.classList.remove('hidden');
+      enableDrag(el);
+      bindFloatWidget(document);
+      toast('PiP — floating window');
+      syncFloatWidget();
+      syncFloatLyric(currentLyricText());
+      return;
+    } catch (e) {}
+  }
   let sysOk = false;
   let docOk = false;
   if (hasDocumentPiP()) {
@@ -4617,6 +4633,7 @@ async function openFloatWidget() {
 function closeFloatWidget() {
   Player.floatOn = false;
   document.body.classList.remove('float-mode');
+  document.body.classList.remove('pip-system');
   $('#float-widget').classList.add('hidden');
   if (Player.pipWin && !Player.pipWin.closed) {
     try {

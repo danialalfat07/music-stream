@@ -4,6 +4,9 @@ import android.webkit.JavascriptInterface;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.app.PictureInPictureParams;
+import android.util.Rational;
+import android.content.res.Configuration;
 import java.io.InputStream;
 import java.util.Collections;
 
@@ -290,6 +293,31 @@ public class MainActivity extends BridgeActivity {
         super.onDestroy();
     }
 
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                final boolean pip = isInPictureInPictureMode;
+                getBridge().getWebView().post(() -> {
+                    try {
+                        String js = "try{document.body.classList.toggle('pip-system', " + pip + ");"
+                                + "if(" + pip + ") document.body.classList.add('float-mode');"
+                                + "else document.body.classList.remove('pip-system');"
+                                + "}catch(e){}";
+                        getBridge().getWebView().evaluateJavascript(js, null);
+                        if (pip) {
+                            getBridge().eval("try{Player.floatOn=true; if(window.syncFloatWidget) syncFloatWidget();}catch(e){}", null);
+                        }
+                    } catch (Exception ignored) {}
+                });
+            }
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "PiP changed notify err " + e);
+        }
+    }
+
     private final class DiagnosticsBridge {
         @JavascriptInterface
         public void log(String json) {
@@ -362,5 +390,36 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void volume(double value) { PlaybackService.volume(MainActivity.this, value); }
+
+        @JavascriptInterface
+        public void enterPip() {
+            runOnUiThread(() -> {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        if (isInPictureInPictureMode()) return;
+                        Rational ratio = new Rational(16, 9);
+                        PictureInPictureParams params = new PictureInPictureParams.Builder()
+                                .setAspectRatio(ratio)
+                                .build();
+                        enterPictureInPictureMode(params);
+                    }
+                } catch (Exception e) {
+                    android.util.Log.d(TAG_DIAG, "enterPip failed " + e);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void exitPip() {
+            // System gesture exits PiP; no direct API needed pre-Android 12
+        }
+
+        @JavascriptInterface
+        public boolean isInPip() {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return isInPictureInPictureMode();
+            } catch (Exception ignored) {}
+            return false;
+        }
     }
 }
