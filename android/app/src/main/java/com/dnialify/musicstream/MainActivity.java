@@ -137,6 +137,25 @@ public class MainActivity extends BridgeActivity {
         }
     }
     @Override
+    public void onBackPressed() {
+        try {
+            android.webkit.WebView wv = null;
+            if (getBridge() != null) {
+                wv = getBridge().getWebView();
+            }
+            if (wv != null && wv.canGoBack()) {
+                android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true " + lifecycleSnapshot());
+                wv.goBack();
+                return;
+            }
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "Back handler err " + e);
+        }
+        android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack canGoBack=false " + lifecycleSnapshot());
+        moveTaskToBack(true);
+    }
+
+    @Override
     public void onDestroy() {
         android.util.Log.d(TAG_DIAG, "Activity onDestroy " + lifecycleSnapshot());
         if (current == this) current = null;
