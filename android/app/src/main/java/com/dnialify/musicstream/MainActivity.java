@@ -143,43 +143,120 @@ public class MainActivity extends BridgeActivity {
             if (getBridge() != null) {
                 wv = getBridge().getWebView();
             }
-            if (wv != null) {
-                boolean canBack = false;
-                String url = "null";
-                String orig = "null";
-                int size = -1;
-                int idx = -1;
-                try { canBack = wv.canGoBack(); } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back canGoBack err " + e); }
-                try { url = String.valueOf(wv.getUrl()); } catch (Exception e) { url = "err:" + e.getMessage(); }
-                try { orig = String.valueOf(wv.getOriginalUrl()); } catch (Exception e) { orig = "err:" + e.getMessage(); }
-                try {
-                    android.webkit.WebBackForwardList list = wv.copyBackForwardList();
-                    if (list != null) {
-                        size = list.getSize();
-                        idx = list.getCurrentIndex();
-                        for (int i = 0; i < size; i++) {
-                            try { String itemUrl = list.getItemAtIndex(i).getUrl(); android.util.Log.d(TAG_DIAG, "Back history[" + i + "]=" + itemUrl); }
-                            catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back history[" + i + "] err " + e); }
-                        }
-                    }
-                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back BackForwardList err " + e); }
-                android.util.Log.d(TAG_DIAG, "Back diag wv!=null canGoBack=" + canBack + " url=" + url + " orig=" + orig + " size=" + size + " idx=" + idx + " " + lifecycleSnapshot());
-                try {
-                    wv.evaluateJavascript("(function(){try{return JSON.stringify({href:location.href,hash:location.hash,historyLen:history.length});}catch(e){return 'js err:'+e}})()", value -> android.util.Log.d(TAG_DIAG, "Back JS history=" + value));
-                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back JS eval err " + e); }
-                if (canBack) {
-                    android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true " + lifecycleSnapshot());
-                    wv.goBack();
-                    return;
-                }
-            } else {
+            if (wv == null) {
                 android.util.Log.d(TAG_DIAG, "Back diag wv null " + lifecycleSnapshot());
+                moveTaskToBack(true);
+                return;
             }
+            boolean canBack = false;
+            String url = "null";
+            String orig = "null";
+            int size = -1;
+            int idx = -1;
+            try { canBack = wv.canGoBack(); } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back canGoBack err " + e); }
+            try { url = String.valueOf(wv.getUrl()); } catch (Exception e) { url = "err:" + e.getMessage(); }
+            try { orig = String.valueOf(wv.getOriginalUrl()); } catch (Exception e) { orig = "err:" + e.getMessage(); }
+            try {
+                android.webkit.WebBackForwardList list = wv.copyBackForwardList();
+                if (list != null) {
+                    size = list.getSize();
+                    idx = list.getCurrentIndex();
+                    for (int i = 0; i < size; i++) {
+                        try { String itemUrl = list.getItemAtIndex(i).getUrl(); android.util.Log.d(TAG_DIAG, "Back history[" + i + "]=" + itemUrl); }
+                        catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back history[" + i + "] err " + e); }
+                    }
+                }
+            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back BackForwardList err " + e); }
+            android.util.Log.d(TAG_DIAG, "Back diag wv!=null canGoBack=" + canBack + " url=" + url + " orig=" + orig + " size=" + size + " idx=" + idx + " " + lifecycleSnapshot());
+
+            final boolean finalCanBack = canBack;
+            final android.webkit.WebView finalWv = wv;
+            String jsState = "(function(){try{"
+                    + "var m=document.getElementById('modal');"
+                    + "var n=document.getElementById('nowplaying');"
+                    + "var isModal=m&&!m.classList.contains('hidden');"
+                    + "var isNow=n&&!n.classList.contains('hidden');"
+                    + "var pane=document.querySelector('.np-pane.active');"
+                    + "var paneId=pane?pane.id:null;"
+                    + "var tabEl=document.querySelector('.np-tab.active');"
+                    + "var activeTab=tabEl?tabEl.dataset.nptab:null;"
+                    + "if(!activeTab&&paneId){if(paneId==='np-player')activeTab='player';else if(paneId==='np-lyrics')activeTab='lyrics';else if(paneId==='np-queue')activeTab='queue';else if(paneId==='np-related')activeTab='related';}"
+                    + "return JSON.stringify({modalOpen:!!isModal,nowOpen:!!isNow,activeTab:activeTab,activePane:paneId,href:location.href,hash:location.hash,historyLen:history.length});"
+                    + "}catch(e){return JSON.stringify({error:String(e)});}})()";
+            try {
+                finalWv.evaluateJavascript(jsState, value -> {
+                    try {
+                        String raw = value;
+                        android.util.Log.d(TAG_DIAG, "Back JS state raw=" + raw);
+                        String cleaned = raw;
+                        if (cleaned != null && cleaned.length() >= 2 && cleaned.charAt(0) == '\"' && cleaned.charAt(cleaned.length() - 1) == '\"') {
+                            cleaned = cleaned.substring(1, cleaned.length() - 1).replace("\\\\", "\\").replace("\\\"", "\"");
+                        }
+                        if (cleaned == null || cleaned.equals("null") || cleaned.trim().isEmpty()) {
+                            android.util.Log.d(TAG_DIAG, "Back JS state empty, fallback native canGoBack=" + finalCanBack);
+                            if (finalCanBack) { finalWv.goBack(); return; }
+                            moveTaskToBack(true);
+                            return;
+                        }
+                        org.json.JSONObject obj = new org.json.JSONObject(cleaned);
+                        if (obj.has("error")) android.util.Log.d(TAG_DIAG, "Back JS error " + obj.optString("error"));
+                        boolean modalOpen = obj.optBoolean("modalOpen", false);
+                        boolean nowOpen = obj.optBoolean("nowOpen", false);
+                        String activeTab = obj.isNull("activeTab") ? null : obj.optString("activeTab", null);
+                        String activePane = obj.isNull("activePane") ? null : obj.optString("activePane", null);
+                        int historyLen = obj.optInt("historyLen", 1);
+                        String hash = obj.optString("hash", "");
+                        String href = obj.optString("href", "");
+                        android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
+                        if (modalOpen) {
+                            android.util.Log.d(TAG_DIAG, "Back: closeModal modalOpen=true");
+                            finalWv.evaluateJavascript("try{closeModal()}catch(e){}", null);
+                            return;
+                        }
+                        if (nowOpen) {
+                            if (activeTab != null && !"player".equals(activeTab)) {
+                                android.util.Log.d(TAG_DIAG, "Back: switchNPTab(player) from " + activeTab);
+                                finalWv.evaluateJavascript("try{switchNPTab('player')}catch(e){}", null);
+                                return;
+                            } else {
+                                android.util.Log.d(TAG_DIAG, "Back: closeNowPlaying nowOpen player");
+                                finalWv.evaluateJavascript("try{closeNowPlaying()}catch(e){}", null);
+                                return;
+                            }
+                        }
+                        if (finalCanBack) {
+                            android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash);
+                            finalWv.goBack();
+                            return;
+                        }
+                        if (historyLen > 1) {
+                            android.util.Log.d(TAG_DIAG, "Back: JS history.back() fallback historyLen=" + historyLen + " hash=" + hash);
+                            finalWv.evaluateJavascript("try{history.back()}catch(e){}", null);
+                            return;
+                        }
+                        android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack no overlay/history hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
+                        moveTaskToBack(true);
+                    } catch (Exception e) {
+                        android.util.Log.d(TAG_DIAG, "Back JS callback err " + e + " raw=" + value);
+                        try { if (finalCanBack) { finalWv.goBack(); return; } } catch (Exception ex) {}
+                        moveTaskToBack(true);
+                    }
+                });
+                return;
+            } catch (Exception e) {
+                android.util.Log.d(TAG_DIAG, "Back JS eval err " + e);
+            }
+            if (canBack) {
+                android.util.Log.d(TAG_DIAG, "Back: goBack fallback sync canGoBack=true");
+                wv.goBack();
+                return;
+            }
+            android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack fallback sync");
+            moveTaskToBack(true);
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "Back handler err " + e);
+            try { moveTaskToBack(true); } catch (Exception ex) {}
         }
-        android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack canGoBack=false " + lifecycleSnapshot());
-        moveTaskToBack(true);
     }
 
     @Override
