@@ -1,389 +1,92 @@
-# Implementation Report: WebView Notification Evolution
+# Debug Report: Lyrics Empty & PiP Black — Fix 2026-09-09
 
-Date: 2026-09-09
-Branch: `feature/apk-chromium-shell`
+Branch: feature/apk-chromium-shell -> main (Vercel server.url kept)
+APK: android/app/build/outputs/apk/debug/app-debug.apk (local Vercel remote)
 
-## Result
+## Root Cause 1 — Lyrics empty `Bridge updateLyrics prev= cur= next=`
 
-Implemented notification evolution from existing action pipeline. Playback remains WebView-owned. No native audio/video playback engine remains in Android app.
+- `pushNativeLyrics()` read `lastLyricIdx=-1` before `updateLyricHighlight` had index. If `Player.lyrics.lines` empty or idx -1, prev/cur/next => "".
+- Log `21:55:24.023` empty right after song start before `loadLyrics` async finished. No subsequent push because `renderLyrics` for synced with idx -1 still gave cur="" and plain case never pushed.
+- `PlaybackService.updateLyricsStatic` was no-op in basic notification, so even if JS pushed, native ignored.
 
-Existing pipeline preserved:
-
-```text
-NotificationCompat.Builder
-  -> addAction(Prev / Play-Pause / Next)
-  -> PendingIntent
-  -> PlaybackService.onStartCommand()
-  -> Capacitor WebView eval()
-  -> WebView player
-```
-
-## Files Changed
-
-```text
-android/app/build.gradle
-android/app/src/main/AndroidManifest.xml
-android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java
-android/app/src/main/res/layout/notification_music_collapsed.xml
-android/variables.gradle
-public/app.js
-opencode.txt
-```
-
-Untracked instruction files were not modified:
-
-```text
-file3.txt
-file5.txt
-file6.md
-file6.txt
-file10.txt
-```
-
-## Exact Notification Implementation Reused
-
-Historical baseline:
-
-```text
-a2b5f96b94325f7080fd78e78b60bb0af7ad1fbc
-feat(notif): basic MediaStyle prev/play/next + title
-```
-
-Current implementation remains in:
-
-```text
-android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java
-```
-
-Current notification method:
-
-```text
-buildNotification()
-```
-
-Current action construction:
-
-```java
-.addAction(android.R.drawable.ic_media_previous, "Prev", serviceAction("prev", 1))
-.addAction(playIcon, playLabel, serviceAction("toggle", 3))
-.addAction(android.R.drawable.ic_media_next, "Next", serviceAction("next", 2))
-```
-
-The old `updateNotification(title, artist)` concept is preserved as one notification pipeline. Current state updates publish through `publishNotification()` and `buildNotification()` so WebView state drives title, artist, playing state, artwork, lyrics, and progress.
-
-## MediaSession
-
-One session only:
-
-```java
-private MediaSessionCompat mediaSession;
-```
-
-Created in `PlaybackService.onCreate()`:
-
-```java
-mediaSession = new MediaSessionCompat(this, "MusicStreamSession");
-mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
-        | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
-```
-
-Notification uses same session token:
-
-```java
-.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
-        .setMediaSession(mediaSession.getSessionToken())
-        .setShowActionsInCompactView(0, 1, 2))
-```
-
-This gives system/lockscreen media controls without creating second session architecture. Session metadata and playback state come from WebView bridge state.
-
-## Foreground Service
-
-```java
-public class PlaybackService extends Service
-```
-
-Service manifest entry remains media playback foreground service:
-
-```xml
-<service
-    android:name=".PlaybackService"
-    android:enabled="true"
-    android:exported="false"
-    android:foregroundServiceType="mediaPlayback" />
-```
-
-`startForeground(NOTIFICATION_ID, notification)` remains notification promotion path. `onTaskRemoved()` does not stop service. `onDestroy()` releases MediaSession only when service itself is destroyed, not when paused notification is dismissed.
-
-## Action Routing
-
-### Previous
-
-```text
-Notification PendingIntent action "prev"
-  -> PlaybackService.onStartCommand()
-  -> sendToWebView("if(window.prevTrack) prevTrack();")
-  -> WebView prevTrack()
-```
-
-### Play/Pause
-
-```text
-Notification PendingIntent action "toggle"
-  -> PlaybackService.onStartCommand()
-  -> sendToWebView("if(window.togglePlay) togglePlay();")
-  -> WebView togglePlay()
-```
-
-MediaSession callbacks use same WebView route:
-
-```java
-@Override public void onPlay() {
-    sendToWebView("if(window.togglePlay) togglePlay();");
-}
-
-@Override public void onPause() {
-    sendToWebView("if(window.togglePlay) togglePlay();");
-}
-```
-
-WebView remains source of truth. Native callback does not directly play/pause native audio.
-
-### Next
-
-```text
-Notification PendingIntent action "next"
-  -> PlaybackService.onStartCommand()
-  -> sendToWebView("if(window.nextTrack) nextTrack(false);")
-  -> WebView nextTrack(false)
-```
-
-## Playback Guardrails
-
-Removed native playback implementation from current Android service:
-
-- No `ExoPlayer` import or instance.
-- No Media3 dependency in `android/app/build.gradle`.
-- No `MediaSessionService` inheritance.
-- No `Media3` manifest intent filter.
-- No `VIDEO_URL` passed to native player.
-- No dummy `Uri`.
-- No Opus/MP3 extraction.
-- No second playback engine.
-
-WebView `<video src="VIDEO_URL">` remains playback engine.
-
-Preserved:
-
-- Brave document-start JavaScript injection.
-- `dispatchWindowVisibilityChanged(View.VISIBLE)` patch.
-- Existing Capacitor `BridgeWebViewClient`.
-- Existing WebView background playback behavior.
-
-`public/app.js` now treats `NativePlayback` as notification/control bridge only:
+Fix (public/app.js, PlaybackService.java):
 
 ```js
-// NativePlayback is notification/control bridge; WebView remains playback engine.
-Player.native = false;
+// pushNativeLyrics fallback
+if (!L.lines.length) { cur = plain? firstLine : ""; updateLyrics("",cur,""); return; }
+if (idx<0) { cur = currentLyricText() || lines[0].text; prev="" next=lines[1].text; }
 ```
-
-Removed visibility-time handoff to native playback. WebView is not paused and transferred to another engine when app hides.
-
-## Notification UI
-
-### Collapsed
-
-`notification_music_collapsed.xml` now uses vertical root hierarchy:
-
-```text
-artwork + title/artist/lyrics/progress
-control row below content
-```
-
-Control row is horizontal and separate from artwork/title:
-
-```text
-Previous | Play/Pause | Next
-```
-
-IDs remain stable, so existing `RemoteViews` binding and PendingIntent routing remain intact.
-
-### Expanded
-
-`notification_music_expanded.xml` already provided target expanded hierarchy:
-
-```text
-artwork + title + artist
-previous lyric
-CURRENT lyric
-next lyric
-progress + time
-separate control row
-```
-
-### Lock screen
-
-Custom RemoteViews are shade notification UI. `MediaSessionCompat` supplies system/lockscreen metadata and controls:
-
-```text
-artwork + title + artist + Previous | Play/Pause | Next
-```
-
-Lyrics are not forced into lockscreen system media controls.
-
-## Lyrics Bridge
-
-Java bridge remains in `MainActivity.PlaybackBridge`:
 
 ```java
-@JavascriptInterface
-public void updateLyrics(String prev, String current, String next) {
-    PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
-}
+// PlaybackService.java
+String currentLyric="";
+updateLyricsStatic: store cur -> updateMediaSession() -> publishNotification()
+updateMediaSession: putString(DISPLAY_DESCRIPTION, currentLyric) + putLong(DURATION,durationMs)
+onStartCommand webViewLyrics: currentLyric=cur -> updateMediaSession -> publish
 ```
 
-Java stores three WebView values:
+Preserved: `Player.lyrics` parser `parseLRC`, 400ms `updateLyricHighlight`, `pushNativeState` 1s throttle, `server.url` Vercel, Brave patch.
 
-```java
-private String previousLyric = "";
-private String currentLyric = "";
-private String nextLyric = "";
+## Root Cause 2 — PiP black empty
+
+- `onPictureInPictureModeChanged` only toggled `pip-system` + `float-mode` + `Player.floatOn=true`, but did NOT `remove hidden` from `#float-widget` with correct timing. Widget stayed `display:none` (hidden class) → WebView `#app` black #000 → PiP window black.
+- `openFloatWidget` native branch was async `enterPip()` void, but previous optimistic `add pip-system` before callback hid UI even if PiP failed.
+
+Fix (MainActivity.java, public/app.js, styles.css already):
+
+- `onPictureInPictureModeChanged pip=true`:
+  ```js
+  w.classList.remove('hidden'); enableDrag(w); bindFloatWidget(document);
+  Player.floatOn=true; syncFloatWidget(); syncFloatLyric(currentLyricText());
+  ```
+  + postDelayed 400ms diag:
+  ```js
+  {bodyClass, pipSystem, floatMode, floatOn, hidden, display, width, height, lyric}
+  ```
+  Log as `[PiP] diag pip=true ...`
+- `openFloatWidget` native branch: only `NativePlayback.enterPip(); toast('Entering PiP...'); return;` no optimistic pip-system, wait callback.
+- Aspect already portrait `Rational(9,16)` (was 16:9 landscape) → PiP portrait.
+
+## Files Changed (uncommitted before this commit)
+
+```
+android/app/src/main/java/com/dnialify/musicstream/MainActivity.java | 40 +++ (PiP diag + widget show)
+android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java | 26 +++ (currentLyric DISPLAY_DESCRIPTION)
+public/app.js | 41 +++ (pushNativeLyrics fallback + loadLyrics logs)
+capacitor.config.json | 0 (server.url kept https://dnialify-music-stream.vercel.app)
+public/styles.css | 29 already (pip-system center)
 ```
 
-`setViews()` binds them into collapsed and expanded `RemoteViews`. Empty lyric rows become `View.GONE`. Current lyric keeps larger/bold XML styling.
+Frozen untouched: `server.url`, HTML `<video>`, Brave `brave-*.js`, `dispatchWindowVisibilityChanged`, Back hierarchy, `applicationId`, signing, workflow, lyrics engine.
 
-JavaScript source remains `public/app.js`:
+## Build Validation
 
-```js
-window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
+```
+node --check public/app.js → OK
+./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 8s (62 tasks)
+git diff --check → empty
 ```
 
-Lyrics update when `updateLyricHighlight()` changes current line and when lyrics load.
+## Test Commands
 
-## Artwork Handling
-
-WebView sends thumbnail URL in `pushNativeState()`:
-
-```js
-const artwork = s.thumbnail || '';
-window.NativePlayback.updateWebViewState(
-  title, artist, artwork, !!playing, posMs, durMs
-);
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb shell pm grant com.dnialify.musicstream android.permission.POST_NOTIFICATIONS
+adb logcat -c
+adb logcat -s DnialifyDiag:V -v color | findstr /i "PiP LYRICS"
+# play Uptown Funk → expect:
+# [LYRICS] fetched parsed=... source=...
+# [LYRICS] push idx=0 cur="..." 
+# Bridge updateLyrics cur="..."
+# [JS] calling NativePlayback.enterPip → [Native] enterPip() CALLED → onPictureInPictureModeChanged pip=true
+# [PiP] diag pip=true hidden=false display=flex width=~350 height=~80 lyric="..."
+# PiP window portrait should show artwork/title/lyric (not black)
+adb shell dumpsys notification | findstr -A2 Dnialify
+adb shell dumpsys media_session | findstr DISPLAY_DESCRIPTION
 ```
 
-Service loads artwork off main thread with `BitmapFactory`. Loaded bitmap feeds:
+## Artifacts
 
-- collapsed RemoteViews artwork
-- expanded RemoteViews artwork
-- `MediaMetadataCompat.METADATA_KEY_ALBUM_ART`
-- `MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON`
+After push to `feature/apk-chromium-shell` GitHub Actions `Android Build (Debug APK)` will publish `app-debug` artifact (3.7 MB) for manual phone download.
 
-Fallback: `R.mipmap.ic_launcher`.
-
-## Progress Handling
-
-WebView sends position/duration every throttled state push:
-
-```js
-const posMs = Math.round((cur || 0) * 1000);
-const durMs = Math.round((dur || 0) * 1000);
-```
-
-Service binds:
-
-```java
-int progress = durationMs == 0
-        ? 0
-        : (int) Math.min(1000, positionMs * 1000 / durationMs);
-views.setProgressBar(progressId, 1000, progress, false);
-views.setTextViewText(timeId, formatTime(positionMs));
-views.setTextViewText(durationId, formatTime(durationMs));
-```
-
-Same position/duration also updates `PlaybackStateCompat` for lockscreen/system controls.
-
-## Playing / Paused / Dismiss
-
-Notification state comes only from WebView `isPlaying`:
-
-```java
-.setOngoing(playing)
-```
-
-Playing:
-
-```text
-setOngoing(true)
-```
-
-Paused:
-
-```text
-setOngoing(false)
-```
-
-Paused notification dismissal does not call `stopSelf()`, does not stop WebView playback, and does not release MediaSession. Service stays `START_STICKY`. MediaSession release occurs only in `onDestroy()`.
-
-## Build Verification
-
-Commands:
-
-```text
-npx cap sync android
-gradlew assembleDebug --no-daemon
-npm test
-```
-
-Results:
-
-```text
-npx cap sync android: success
-gradlew assembleDebug --no-daemon: BUILD SUCCESSFUL
-npm test: 2 passed, 0 failed
-```
-
-Gradle final build:
-
-```text
-BUILD SUCCESSFUL in 1m 25s
-82 actionable tasks: 4 executed, 78 up-to-date
-```
-
-Warnings only:
-
-```text
-Using flatDir should be avoided because it doesn't support any meta-data formats.
-PlaybackService.java uses or overrides a deprecated API.
-```
-
-## APK
-
-```text
-android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-APK generated by successful final Gradle build. Device install/size/hash not captured in this pass.
-
-## Regression Status
-
-Static/build checks:
-
-- WebView playback path preserved in JavaScript.
-- Brave injection untouched.
-- Capacitor WebView visibility patch untouched.
-- Existing BridgeWebViewClient untouched.
-- Notification controls retain `prev`, `toggle`, `next` PendingIntent actions.
-- MediaSession uses same WebView control callbacks.
-- Android source contains no Media3/ExoPlayer/MediaSessionService references.
-- npm tests pass.
-- Android debug build passes.
-
-Runtime checks pending because no Android device/emulator was available in this execution:
-
-- Home background playback 30-60 seconds.
-- Lock screen playback 30-60 seconds.
-- Physical notification action taps.
-- OEM collapsed/expanded RemoteViews rendering.
-- Artwork network loading on device.
-
-No source code change can prove those device-only checks. Install APK, play WebView video, test Home and lock screen, then verify logcat `DnialifyDiag` state updates.
+No commit/push of PiP UI redesign, no ExoPlayer, no RemoteViews re-add.

@@ -1,6 +1,7 @@
 package com.dnialify.musicstream;
 
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -21,6 +22,12 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
+        try {
+            WebView.setWebContentsDebuggingEnabled(true);
+            android.util.Log.d(TAG_DIAG, "WebView remote debugging enabled");
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "WebView debugging enable failed " + e);
+        }
         android.util.Log.d(TAG_DIAG, "Activity onCreate SDK=" + Build.VERSION.SDK_INT + " webkitDocStart=" + androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT));
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -318,6 +325,37 @@ public class MainActivity extends BridgeActivity {
                         } else {
                             getBridge().eval("try{if(window.syncFloatWidget) syncFloatWidget();}catch(e){}", null);
                         }
+                        // Diagnostics for black PiP
+                        getBridge().getWebView().postDelayed(() -> {
+                            try {
+                                String diag = "(function(){try{"
+                                        + "var w=document.getElementById('float-widget');"
+                                        + "var r=w? w.getBoundingClientRect(): {width:0,height:0,top:0,left:0};"
+                                        + "var cs=w? getComputedStyle(w):{display:'',visibility:'',opacity:''};"
+                                        + "return JSON.stringify({"
+                                        + "bodyClass: document.body.className,"
+                                        + "pipSystem: document.body.classList.contains('pip-system'),"
+                                        + "floatMode: document.body.classList.contains('float-mode'),"
+                                        + "floatOn: (window.Player&&window.Player.floatOn),"
+                                        + "widgetHidden: w? w.classList.contains('hidden'): null,"
+                                        + "display: cs.display,"
+                                        + "visibility: cs.visibility,"
+                                        + "opacity: cs.opacity,"
+                                        + "width: Math.round(r.width),"
+                                        + "height: Math.round(r.height),"
+                                        + "top: Math.round(r.top),"
+                                        + "left: Math.round(r.left),"
+                                        + "hasArt: !!document.getElementById('fw-art'),"
+                                        + "lyric: document.getElementById('fw-lyric')?document.getElementById('fw-lyric').textContent: null"
+                                        + "});"
+                                        + "}catch(e){return 'diag err '+e;}})()";
+                                getBridge().getWebView().evaluateJavascript(diag, value -> {
+                                    android.util.Log.d(TAG_DIAG, "[PiP] diag pip=" + pip + " " + value);
+                                });
+                                // Also log via DiagnosticsBridge if available
+                                getBridge().eval("try{var d=(function(){var w=document.getElementById('float-widget');var r=w?w.getBoundingClientRect():{width:0,height:0};var cs=w?getComputedStyle(w):{display:''};return 'pip='+document.body.classList.contains('pip-system')+' hidden='+ (w&&w.classList.contains('hidden'))+' display='+cs.display+' '+r.width+'x'+r.height;})(); if(window.Diagnostics) window.Diagnostics.logLine('[PiP] '+d);}catch(e){}", null);
+                            } catch (Exception ignored) {}
+                        }, 400);
                     } catch (Exception ignored) {}
                 });
             }
@@ -409,7 +447,7 @@ public class MainActivity extends BridgeActivity {
                             android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
                             return;
                         }
-                        Rational ratio = new Rational(16, 9);
+                        Rational ratio = new Rational(9, 16);
                         PictureInPictureParams params = new PictureInPictureParams.Builder()
                                 .setAspectRatio(ratio)
                                 .build();
