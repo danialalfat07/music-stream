@@ -1,5 +1,18 @@
 apply plugin: 'com.android.application'
 
+def computedVersionCode = {
+    // Monotonic versionCode: base 2 + GITHUB_RUN_NUMBER (CI) else 2
+    def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toInteger() ?: 0
+    def base = 2
+    return base + runNum
+}()
+def computedVersionName = {
+    def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toString() ?: ""
+    def base = "1.0.1"
+    if (runNum) return base + "-build." + runNum
+    return base + "-bd1b3d1"
+}()
+
 android {
     namespace "com.dnialify.musicstream"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +20,8 @@ android {
         applicationId "com.dnialify.musicstream"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode computedVersionCode
+        versionName computedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +29,39 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        debug {
+            // Persistent debug keystore for update-install; if android/app/debug.keystore exists use it,
+            // else Gradle generates ephemeral one (will warn). Workflow should provide it via secret.
+            def debugStore = file('debug.keystore')
+            if (debugStore.exists()) {
+                storeFile debugStore
+                storePassword System.getenv("DEBUG_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias System.getenv("DEBUG_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword System.getenv("DEBUG_KEY_PASSWORD") ?: "android"
+            }
+        }
+        release {
+            def releaseStore = file('release.keystore')
+            if (releaseStore.exists()) {
+                storeFile releaseStore
+                storePassword System.getenv("KEYSTORE_PASSWORD") ?: System.getenv("DEBUG_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias System.getenv("KEY_ALIAS") ?: System.getenv("DEBUG_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword System.getenv("KEY_PASSWORD") ?: System.getenv("DEBUG_KEY_PASSWORD") ?: "android"
+            }
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+            // Ensure debug uses persistent store if available
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (file('release.keystore').exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -35,9 +77,9 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     implementation project(':capacitor-android')
-    implementation "androidx.media3:media3-exoplayer:$media3Version"
-    implementation "androidx.media3:media3-session:$media3Version"
+    implementation "androidx.media:media:1.7.0"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

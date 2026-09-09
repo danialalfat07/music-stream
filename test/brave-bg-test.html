@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Brave BG Test - Stage1</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui;background:#111;color:#0f0;padding:12px}video{width:100%;max-width:480px;background:#000}pre{background:#222;padding:8px;white-space:pre-wrap;word-break:break-all}button{padding:8px 12px;margin:4px}</style>
+</head>
+<body>
+<h3>Brave BG Test Stage1 - YouTube IFrame fallback</h3>
+<p>Sumber YouTube tetap, Player.yt.loadVideoById fallback. Test apakah Brave JS document-start cukup di stock WebView.</p>
+<video id="bg-audio" controls playsinline style="display:none"></video>
+<div id="yt-player" style="width:320px;height:180px;background:#000"></div>
+<div>
+  <button onclick="playYT()">Play YT</button>
+  <button onclick="checkState()">Check State</button>
+  <button onclick="clearLog()">Clear</button>
+</div>
+<pre id="log"></pre>
+<script>
+const logEl = document.getElementById('log');
+function log(m){ const t=new Date().toISOString().slice(11,19); logEl.textContent+=`[${t}] ${m}\n`; console.log(m); }
+function checkState(){
+  const yt = window.Player && window.Player.yt;
+  const st = yt && yt.getPlayerState ? yt.getPlayerState() : 'no yt';
+  const ct = yt && yt.getCurrentTime ? yt.getCurrentTime().toFixed(1) : '-';
+  log(`check hidden=${document.hidden} visibilityState=${document.visibilityState} webkitHidden=${document.webkitHidden} hasFocus=${document.hasFocus()} ytState=${st} currentTime=${ct} NativePlayback=${!!window.NativePlayback} Player.native=${window.Player?Player.native:'?'} currentTime native=${window.NativePlayback?window.NativePlayback.currentTime():''}`);
+}
+function clearLog(){ logEl.textContent=''; }
+let ytReady=false;
+window.onYouTubeIframeAPIReady = function(){
+  log('iframe_api ready hidden='+document.hidden+' visibilityState='+document.visibilityState);
+  window.Player = window.Player || {};
+  window.Player.yt = new YT.Player('yt-player', {
+    height:'180', width:'320',
+    host:'https://www.youtube.com',
+    videoId: 'jNQXAC9IVRw', // first youtube video
+    playerVars:{ playsinline:1, controls:1, origin: location.origin },
+    events: {
+      onReady: ()=>{ ytReady=true; log('YT onReady hidden='+document.hidden+' visibilityState='+document.visibilityState); },
+      onStateChange: (e)=>{
+        const names={ '-1':'unstarted','0':'ended','1':'playing','2':'paused','3':'buffering','5':'cued'};
+        log(`YT onStateChange ${e.data} ${names[e.data]||''} hidden=${document.hidden} visibilityState=${document.visibilityState}`);
+      },
+      onError:(e)=>log('YT onError '+JSON.stringify(e))
+    }
+  });
+};
+(function injectYT(){ var s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api'; document.head.appendChild(s); })();
+function playYT(){
+  if(!ytReady){ log('YT not ready'); return; }
+  log('playYT click hidden='+document.hidden+' visibilityState='+document.visibilityState);
+  window.Player.yt.loadVideoById({videoId:'jNQXAC9IVRw'});
+  window.Player.yt.playVideo();
+  // also update native notif if available
+  if(window.NativePlayback && window.NativePlayback.updateNotification){
+    try{ window.NativePlayback.updateNotification('Test YT brave-bg', 'Brave Stage1'); log('called updateNotification'); }catch(e){ log('updateNotification err '+e); }
+  }
+}
+let lastTime=-1;
+setInterval(()=>{
+  const yt = window.Player && window.Player.yt;
+  let ct='-';
+  try{ ct = yt && yt.getCurrentTime ? yt.getCurrentTime().toFixed(1) : '-'; }catch(e){}
+  let playing=false;
+  try{ playing = yt && yt.getPlayerState && yt.getPlayerState()===1; }catch(e){}
+  if(playing && ct!==lastTime){ log(`tick playing=${playing} currentTime=${ct} hidden=${document.hidden} visibilityState=${document.visibilityState}`); lastTime=ct; }
+  // also log even if paused every 5s
+  if(!playing && Date.now()%5000<400) log(`tick paused check hidden=${document.hidden} visibilityState=${document.visibilityState} ct=${ct}`);
+},1000);
+document.addEventListener('visibilitychange', ()=>{ log(`DOC visibilitychange hidden=${document.hidden} visibilityState=${document.visibilityState}`); });
+document.addEventListener('webkitvisibilitychange', ()=>{ log(`DOC webkitvisibilitychange hidden=${document.hidden}`); });
+log('page loaded hidden='+document.hidden+' visibilityState='+document.visibilityState+' NativePlayback='+(!!window.NativePlayback));
+</script>
+</body>
+</html>

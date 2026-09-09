@@ -1,8 +1,8 @@
-﻿<!doctype html>
+<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Diag BG ΓÇö YouTube IFrame background diagnosis</title>
+<title>Diag BG — YouTube IFrame background diagnosis</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{font-family:system-ui;background:#0a0a0a;color:#d8d8d8;padding:12px;margin:0}
@@ -20,7 +20,7 @@ window.__diagBoot = { t0: Date.now(), p0: performance.now(), hiddenAtBoot: docum
 </script>
 </head>
 <body>
-<h3>Diag BG ΓÇö YouTube IFrame background diagnosis (test-only)</h3>
+<h3>Diag BG — YouTube IFrame background diagnosis (test-only)</h3>
 <div class="row">
   <span class="badge" id="badgeKeep">KeepRunning: ?</span>
   <span class="badge" id="badgeDoc">hidden=? vs=?</span>
@@ -170,7 +170,7 @@ setInterval(()=>{
   // forward sparse to native logcat: every 2s or on stall/throttle
   if(tickCount % 8 === 0 || e.ctStalledMs>0 || dt>600) nativeLogLine(Object.assign({type:"tick"}, e));
   updateBadges();
-  // periodic batch flush every 2s (still when JS throttled, will be delayed ΓÇö that delay IS the signal)
+  // periodic batch flush every 2s (still when JS throttled, will be delayed — that delay IS the signal)
   if(tickCount % 8 === 0) flushRingToNative();
   // reset rafDeltaMax window
   if(tickCount % 8 === 0) rafDeltaMax = 0;
@@ -205,7 +205,7 @@ try{
 function updateBadges(){
   try{
     badgeDoc.textContent = `hidden=${document.hidden} vs=${document.visibilityState} focus=${document.hasFocus?document.hasFocus():'?'}`;
-    badgeRAF.textContent = `rAF=${rAFTick} ╬ömax=${Math.round(rafDeltaMax)}ms`;
+    badgeRAF.textContent = `rAF=${rAFTick} Δmax=${Math.round(rafDeltaMax)}ms`;
     const ct=safeCT(); badgeCT.textContent = `ct=${ct} st=${safeState()} tu=${lastTU}`;
     if(window.Diagnostics) badgeKeep.textContent = 'Diagnostics: ok';
     else badgeKeep.textContent = 'Diagnostics: no bridge (need native)';
@@ -251,7 +251,7 @@ document.getElementById('btnClear').addEventListener('click', ()=>{
   pushRing(e); uiLog(e);
 });
 document.getElementById('btnBack').addEventListener('click', ()=>{
-  const u='/';
+  const u='https://dnialify-music-stream.vercel.app';
   try{ window.location.href=u; }catch(e){ location.assign(u); }
 });
 

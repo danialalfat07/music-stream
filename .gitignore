@@ -12,3 +12,13 @@ signing.keystore
 *.keystore
 *.jks
 
+# apk-chromium-shell local only
+bare-browser/
+file.txt
+file1.txt
+ci-monitor.log
+# APK — jangan commit binary ke Git, pakai Artifacts/Releases
+*.apk
+release/
+app-debug.apk
+

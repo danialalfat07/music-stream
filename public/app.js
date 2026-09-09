@@ -24,6 +24,35 @@ const api = async (path) => {
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 };
+// Bare/Brave spoof: keep YT IFrame fallback playing in background on Android Capacitor
+// Mirrors Bare 0043/0050 + Brave background_video_playback.js — must run before YT iframe loads
+(function(){
+  try {
+    if (!window.NativePlayback) return;
+    function spoof(doc, win) {
+      try { Object.defineProperty(doc, 'hidden', { get: () => false, configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'visibilityState', { get: () => 'visible', configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'webkitHidden', { get: () => false, configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'webkitVisibilityState', { get: () => 'visible', configurable: true }); } catch(e) {}
+      try { Object.defineProperty(doc, 'hasFocus', { value: () => true, configurable: true }); } catch(e) {}
+      try { win.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { doc.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { win.addEventListener('webkitvisibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+      try { doc.addEventListener('webkitvisibilitychange', function(e){ e.stopImmediatePropagation(); }, true); } catch(e) {}
+    }
+    spoof(document, window);
+    try {
+      var obs = new MutationObserver(function(muts){
+        muts.forEach(function(m){
+          m.addedNodes.forEach(function(n){
+            if (n.tagName === 'IFRAME' && n.contentWindow) { try { spoof(n.contentDocument, n.contentWindow); } catch(e) {} }
+          });
+        });
+      });
+      obs.observe(document.documentElement, { childList:true, subtree:true });
+    } catch(e) {}
+  } catch(e) {}
+})();
 
 const fmtTime = (s) => {
   s = Math.max(0, Math.floor(s || 0));
@@ -274,9 +303,11 @@ function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
   Player.audio = a;
-  // Keep stable WebView playback until native bridge exposes async player state.
+  // On Android Capacitor, prefer ExoPlayer via NativePlayback for background (like Brave/Bare: keep audio in native layer)
+  // NativePlayback is notification/control bridge; WebView remains playback engine.
   Player.native = false;
   Player.audioReady = true;
+  if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
   a.addEventListener('ended', ()=>{ nextTrack(true); });
@@ -317,41 +348,7 @@ function initAudio(){
       try{ navigator.mediaSession.setPositionState({duration: a.duration || 0, playbackRate: a.playbackRate, position: 0}); }catch{}
     }
   });
-  document.addEventListener('visibilitychange', async ()=>{
-    if (document.visibilityState !== 'hidden' || Player.native || !Player.audio || !Player.wasPlaying || !Player.current || !window.NativePlayback) return;
-    const song = Player.current;
-    const position = Player.audio.currentTime || 0;
-    // ExoPlayer reads signed googlevideo URL more reliably than server stream proxy.
-    const url = Player.nativeUrl || `${location.origin}/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
-    try {
-      window.NativePlayback.play(url, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
-      window.NativePlayback.speed(Player.speed);
-      window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
-      Player.audioUrl = url;
-      // Media3 prepare is async. Stop WebView only after native actually plays.
-      let attempts = 0;
-      const waitForNative = setInterval(()=>{
-        attempts++;
-        try {
-          if (window.NativePlayback.isPlaying()) {
-            clearInterval(waitForNative);
-            Player.audio.pause();
-            Player.native = true;
-            window.NativePlayback.seek(position);
-            renderPlayButtons();
-          } else if (attempts >= 20) {
-            clearInterval(waitForNative);
-            console.warn('native playback did not start');
-          }
-        } catch (e) {
-          clearInterval(waitForNative);
-          console.warn('native background handoff unavailable', e);
-        }
-      }, 250);
-    } catch (e) {
-      console.warn('native background handoff unavailable', e);
-    }
-  });
+  // Background playback stays inside WebView; native bridge only mirrors state and controls.
 }
 function updateMediaSessionState(state){
   if(!('mediaSession' in navigator)) return;
@@ -799,6 +796,13 @@ function startCurrent() {
         setTimeout(applyPlaybackQuality, 1600);
       };
       tryPlay();
+      // YT fallback still needs native notif so Home shows title/artist even when audio is WebView
+      if (window.NativePlayback) {
+        try {
+          if (window.NativePlayback.updateNotification) window.NativePlayback.updateNotification(displayTitle(s.title) || s.title, s.artist || s.subtitle || '');
+          else window.NativePlayback.arm();
+        } catch {}
+      }
       if ('mediaSession' in navigator) {
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
@@ -995,8 +999,37 @@ function toggleNowPlayingPlay() {
   togglePlay();
 }
 
+/* bridge WebView state to native notification (incremental, minimal) */
+function pushNativeState(cur, dur, playing) {
+  try {
+    if (!window.NativePlayback || !window.NativePlayback.updateWebViewState) return;
+    const s = Player.current;
+    if (!s) return;
+    const title = displayTitle(s.title) || s.title || '';
+    const artist = s.artist || s.subtitle || '';
+    const artwork = s.thumbnail || '';
+    const posMs = Math.round((cur || 0) * 1000);
+    const durMs = Math.round((dur || 0) * 1000);
+    window.NativePlayback.updateWebViewState(title, artist, artwork, !!playing, posMs, durMs);
+  } catch {}
+}
+function pushNativeLyrics() {
+  try {
+    if (!window.NativePlayback || !window.NativePlayback.updateLyrics) return;
+    const L = Player.lyrics;
+    if (!L || !L.lines.length) { window.NativePlayback.updateLyrics("", "", ""); return; }
+    let idx = -1;
+    // derive idx from lastLyricIdx
+    idx = lastLyricIdx;
+    const prev = idx > 0 ? L.lines[idx-1].text : "";
+    const cur = idx >= 0 ? L.lines[idx].text : "";
+    const next = idx >= 0 && idx+1 < L.lines.length ? L.lines[idx+1].text : "";
+    window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
+  } catch {}
+}
 /* progress loop */
 let _lastTick = null;
+let _lastNativePush = 0;
 setInterval(() => {
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
@@ -1043,11 +1076,13 @@ setInterval(() => {
     const ndur = document.getElementById('np-dur'); if(ndur) ndur.textContent = fmtTime(dur);
   }
   if (!isPreviewing()) updateLyricHighlight(cur);
-  syncFloatProgress(pct);
+   syncFloatProgress(pct);
   if (Player.floatOn) drawPipFrame(pct);
   if(isAudio && 'mediaSession' in navigator && dur){
      try{ navigator.mediaSession.setPositionState({duration: dur, playbackRate: Player.native ? Player.speed : Player.audio.playbackRate, position: cur}); }catch{}
   }
+  // Push WebView state to native notification (throttled 1s)
+  if (Date.now() - _lastNativePush > 1000) { _lastNativePush = Date.now(); pushNativeState(cur, dur, playing); }
 }, 400);
 
 function renderPlayButtons() {
@@ -1227,6 +1262,7 @@ function renderLyrics() {
     $('#np-lyric-preview').textContent = '';
     syncFloatLyric('');
   }
+  pushNativeLyrics();
 }
 let lastLyricIdx = -1;
 function updateLyricHighlight(cur) {
@@ -1250,6 +1286,7 @@ function updateLyricHighlight(cur) {
   const line = idx >= 0 ? L.lines[idx].text : '';
   $('#np-lyric-preview').textContent = line;
   syncFloatLyric(line);
+  pushNativeLyrics();
 }
 
 /* ================= now playing UI ================= */
@@ -4123,6 +4160,10 @@ $('#miniplayer').addEventListener('click', (e) => {
 Player.pipWin = null;
 Player.floatOn = false;
 
+function hasDocumentPiP() {
+  return 'documentPictureInPicture' in window && typeof window.documentPictureInPicture?.requestWindow === 'function';
+}
+
 const FW_CSS = `
   :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: #121212; color: #fff;
@@ -4244,16 +4285,26 @@ function enableDrag(el) {
     el.style.top = 'auto';
   }
   let drag = null;
+  let activePid = null;
+  const point = (e) => (e.touches ? e.touches[0] : e);
   const down = (e) => {
-    if (e.target.closest('button, .fw-bar')) return;
+    if (e.target.closest('button, .fw-bar, a')) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const pt = point(e);
+    if (!pt || !Number.isFinite(pt.clientX)) return;
     const r = el.getBoundingClientRect();
-    const pt = e.touches ? e.touches[0] : e;
     drag = { dx: pt.clientX - r.left, dy: pt.clientY - r.top };
     el.classList.add('dragging');
+    if (e.pointerId !== undefined && el.setPointerCapture) {
+      activePid = e.pointerId;
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    }
+    if (e.cancelable) e.preventDefault();
   };
   const move = (e) => {
     if (!drag) return;
-    const pt = e.touches ? e.touches[0] : e;
+    const pt = point(e);
+    if (!pt || !Number.isFinite(pt.clientX)) return;
     const x = Math.max(
       8,
       Math.min(window.innerWidth - el.offsetWidth - 8, pt.clientX - drag.dx),
@@ -4268,19 +4319,32 @@ function enableDrag(el) {
     el.style.bottom = 'auto';
     if (e.cancelable) e.preventDefault();
   };
-  const up = () => {
+  const up = (e) => {
     if (!drag) return;
+    if (e && e.pointerId !== undefined && activePid !== null && e.pointerId !== activePid) return;
     drag = null;
     el.classList.remove('dragging');
+    if (activePid !== null && el.releasePointerCapture) {
+      try { el.releasePointerCapture(activePid); } catch {}
+      activePid = null;
+    }
     const r = el.getBoundingClientRect();
     store.set('fw_pos', { l: r.left, t: r.top });
   };
+  const cancel = () => {
+    if (!drag) return;
+    drag = null;
+    el.classList.remove('dragging');
+    activePid = null;
+  };
   el.addEventListener('pointerdown', down);
-  window.addEventListener('pointermove', move);
+  window.addEventListener('pointermove', move, { passive: false });
   window.addEventListener('pointerup', up);
-  el.addEventListener('touchstart', down, { passive: true });
+  window.addEventListener('pointercancel', cancel);
+  el.addEventListener('touchstart', down, { passive: false });
   window.addEventListener('touchmove', move, { passive: false });
   window.addEventListener('touchend', up);
+  window.addEventListener('touchcancel', cancel);
 }
 
 async function openPipWidget() {
@@ -4529,16 +4593,47 @@ async function startSystemPip() {
 }
 
 async function openFloatWidget() {
+  try { console.log('[JS] openFloatWidget'); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] openFloatWidget'); } catch {}
   if (!Player.current) {
     toast('Play a song first');
+    try { console.log('[JS] openFloatWidget abort no current'); } catch {}
     return;
+  }
+  // 1. Android native System PiP via bridge — primary for WebView (Activity.enterPictureInPictureMode)
+  // enterPip is async; UI state (pip-system, widget visible, Player.floatOn) is delivered via onPictureInPictureModeChanged
+  try { console.log('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
+  let _enterPipType = 'undefined';
+  try { _enterPipType = typeof (window.NativePlayback && window.NativePlayback.enterPip); } catch {}
+  try { console.log('[JS] enterPip type=' + _enterPipType); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] enterPip type=' + _enterPipType); } catch {}
+  if (window.NativePlayback && typeof window.NativePlayback.enterPip === 'function') {
+    try {
+      try { console.log('[JS] calling NativePlayback.enterPip'); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] calling NativePlayback.enterPip'); } catch {}
+      window.NativePlayback.enterPip();
+      try { console.log('[JS] NativePlayback.enterPip called, waiting onPictureInPictureModeChanged'); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback.enterPip called'); } catch {}
+      toast('Entering PiP...');
+      return;
+    } catch (e) {
+      try { console.log('[JS] enterPip threw ' + e); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] enterPip threw ' + e); } catch {}
+    }
+  } else {
+    try { console.log('[JS] native PiP branch not taken, fallback to hasDocumentPiP'); } catch {}
   }
   Player.floatOn = true;
   closeNowPlaying();
   document.body.classList.add('float-mode');
   drawPipFrame();
-  const sysOk = await startSystemPip();
-  const docOk = sysOk ? false : await openPipWidget();
+  let sysOk = false;
+  let docOk = false;
+  if (hasDocumentPiP()) {
+    sysOk = await startSystemPip();
+    if (!sysOk) docOk = await openPipWidget();
+  }
   const el = $('#float-widget');
   if (sysOk) {
     el.classList.add('hidden');
@@ -4557,6 +4652,7 @@ async function openFloatWidget() {
 function closeFloatWidget() {
   Player.floatOn = false;
   document.body.classList.remove('float-mode');
+  document.body.classList.remove('pip-system');
   $('#float-widget').classList.add('hidden');
   if (Player.pipWin && !Player.pipWin.closed) {
     try {

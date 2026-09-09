@@ -970,6 +970,35 @@ html[data-theme="light"] .pl-pick-name { color: #121212; }
 }
 #float-widget.hidden { display: none; }
 #float-widget.dragging { cursor: grabbing; animation: none; }
+body.pip-system #sidebar,
+body.pip-system #main,
+body.pip-system #miniplayer,
+body.pip-system #nav-mobile,
+body.pip-system #nowplaying,
+body.pip-system #modal,
+body.pip-system #settings-modal,
+body.pip-system #help-modal,
+body.pip-system #toast,
+body.pip-system #yt-holder {
+  display: none !important;
+}
+body.pip-system {
+  background: #000;
+}
+body.pip-system #app {
+  padding: 0;
+  background: #000;
+  height: 100vh;
+}
+body.pip-system #float-widget {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100vw - 16px);
+  max-width: 400px;
+  margin: 0;
+}
 #fw-art {
   width: 64px; height: 64px; border-radius: 8px; object-fit: cover;
   background: var(--elevated); flex-shrink: 0;
