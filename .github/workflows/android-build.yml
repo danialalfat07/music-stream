@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
-      DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS }}
-      DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
+      DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD != '' && secrets.DEBUG_KEYSTORE_PASSWORD || 'android' }}
+      DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS != '' && secrets.DEBUG_KEY_ALIAS || 'androiddebugkey' }}
+      DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD != '' && secrets.DEBUG_KEY_PASSWORD || 'android' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,8 +66,45 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
-          echo "versionCode/versionName from build:"
-          aapt dump badging app/build/outputs/apk/debug/app-debug.apk | grep -E "package:"
+
+      - name: Verify APK (applicationId/versionCode/versionName/SHA-256)
+        working-directory: android
+        run: |
+          set -e
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          echo "APK exists: $(ls -lh "$APK")"
+          # Locate aapt/aapt2 from SDK
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "SDK_ROOT=$SDK_ROOT"
+          AAPT2="$(find "$SDK_ROOT/build-tools" -name "aapt2" -type f 2>/dev/null | head -n1 || true)"
+          AAPT="$(find "$SDK_ROOT/build-tools" -name "aapt" -type f 2>/dev/null | head -n1 || true)"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -name "apksigner" -type f 2>/dev/null | head -n1 || true)"
+          echo "found aapt2=$AAPT2"
+          echo "found aapt=$AAPT"
+          echo "found apksigner=$APKSIGNER"
+          echo "--- applicationId / versionCode / versionName ---"
+          if [ -n "$AAPT2" ]; then
+            "$AAPT2" dump badging "$APK" 2>&1 | grep -E "package:" || true
+          elif [ -n "$AAPT" ]; then
+            "$AAPT" dump badging "$APK" 2>&1 | grep -E "package:" || true
+          else
+            echo "::warning::aapt/aapt2 not found, fallback to apkanalyzer"
+            APKANL=""; [ -n "$SDK_ROOT" ] && APKANL="$(find "$SDK_ROOT/cmdline-tools" -name "apkanalyzer" -type f 2>/dev/null | head -n1 || true)"
+            if [ -n "$APKANL" ]; then "$APKANL" manifest version-code "$APK" 2>&1 || true; "$APKANL" manifest version-name "$APK" 2>&1 || true; fi
+          fi
+          echo "--- SHA-256 signing certificate ---"
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK" 2>&1 || true
+          fi
+          # keytool fallback (always available)
+          echo "--- keytool fallback ---"
+          keytool -printcert -jarfile "$APK" 2>&1 | grep -E "Owner|SHA256|Valid" || true
+          echo "--- debug keystore used (if persistent) ---"
+          if [ -f "app/debug.keystore" ]; then
+            keytool -list -v -keystore "app/debug.keystore" -storepass "${DEBUG_KEYSTORE_PASSWORD:-android}" 2>&1 | grep -E "Alias|SHA256|Valid" | head -n 20 || true
+          else
+            echo "app/debug.keystore not found (ephemeral Gradle debug keystore was used)"
+          fi
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
