@@ -174,14 +174,20 @@ public class MainActivity extends BridgeActivity {
             String jsState = "(function(){try{"
                     + "var m=document.getElementById('modal');"
                     + "var n=document.getElementById('nowplaying');"
+                    + "var s=document.getElementById('settings-modal');"
+                    + "var h=document.getElementById('help-modal');"
                     + "var isModal=m&&!m.classList.contains('hidden');"
                     + "var isNow=n&&!n.classList.contains('hidden');"
+                    + "var isSettings=s&&!s.classList.contains('hidden');"
+                    + "var isHelp=h&&!h.classList.contains('hidden');"
                     + "var pane=document.querySelector('.np-pane.active');"
                     + "var paneId=pane?pane.id:null;"
                     + "var tabEl=document.querySelector('.np-tab.active');"
                     + "var activeTab=tabEl?tabEl.dataset.nptab:null;"
                     + "if(!activeTab&&paneId){if(paneId==='np-player')activeTab='player';else if(paneId==='np-lyrics')activeTab='lyrics';else if(paneId==='np-queue')activeTab='queue';else if(paneId==='np-related')activeTab='related';}"
-                    + "return JSON.stringify({modalOpen:!!isModal,nowOpen:!!isNow,activeTab:activeTab,activePane:paneId,href:location.href,hash:location.hash,historyLen:history.length});"
+                    + "var hash=location.hash||'';"
+                    + "var isHome=hash==='#/home'||hash==='#/'||hash===''||hash==='#';"
+                    + "return JSON.stringify({modalOpen:!!isModal,nowOpen:!!isNow,settingsOpen:!!isSettings,helpOpen:!!isHelp,activeTab:activeTab,activePane:paneId,href:location.href,hash:hash,historyLen:history.length,isHome:isHome});"
                     + "}catch(e){return JSON.stringify({error:String(e)});}})()";
             try {
                 finalWv.evaluateJavascript(jsState, value -> {
@@ -202,12 +208,15 @@ public class MainActivity extends BridgeActivity {
                         if (obj.has("error")) android.util.Log.d(TAG_DIAG, "Back JS error " + obj.optString("error"));
                         boolean modalOpen = obj.optBoolean("modalOpen", false);
                         boolean nowOpen = obj.optBoolean("nowOpen", false);
+                        boolean settingsOpen = obj.optBoolean("settingsOpen", false);
+                        boolean helpOpen = obj.optBoolean("helpOpen", false);
                         String activeTab = obj.isNull("activeTab") ? null : obj.optString("activeTab", null);
                         String activePane = obj.isNull("activePane") ? null : obj.optString("activePane", null);
                         int historyLen = obj.optInt("historyLen", 1);
                         String hash = obj.optString("hash", "");
                         String href = obj.optString("href", "");
-                        android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
+                        boolean isHome = obj.optBoolean("isHome", false);
+                        android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " settingsOpen=" + settingsOpen + " helpOpen=" + helpOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " isHome=" + isHome + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
                         if (modalOpen) {
                             android.util.Log.d(TAG_DIAG, "Back: closeModal modalOpen=true");
                             finalWv.evaluateJavascript("try{closeModal()}catch(e){}", null);
@@ -223,6 +232,21 @@ public class MainActivity extends BridgeActivity {
                                 finalWv.evaluateJavascript("try{closeNowPlaying()}catch(e){}", null);
                                 return;
                             }
+                        }
+                        if (settingsOpen) {
+                            android.util.Log.d(TAG_DIAG, "Back: closeSettingsModal settingsOpen=true");
+                            finalWv.evaluateJavascript("try{closeSettingsModal()}catch(e){}", null);
+                            return;
+                        }
+                        if (helpOpen) {
+                            android.util.Log.d(TAG_DIAG, "Back: closeHelpModal helpOpen=true");
+                            finalWv.evaluateJavascript("try{closeHelpModal()}catch(e){}", null);
+                            return;
+                        }
+                        if (isHome) {
+                            android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
+                            moveTaskToBack(true);
+                            return;
                         }
                         if (finalCanBack) {
                             android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash);
