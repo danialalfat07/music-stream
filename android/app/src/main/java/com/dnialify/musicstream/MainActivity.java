@@ -143,10 +143,37 @@ public class MainActivity extends BridgeActivity {
             if (getBridge() != null) {
                 wv = getBridge().getWebView();
             }
-            if (wv != null && wv.canGoBack()) {
-                android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true " + lifecycleSnapshot());
-                wv.goBack();
-                return;
+            if (wv != null) {
+                boolean canBack = false;
+                String url = "null";
+                String orig = "null";
+                int size = -1;
+                int idx = -1;
+                try { canBack = wv.canGoBack(); } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back canGoBack err " + e); }
+                try { url = String.valueOf(wv.getUrl()); } catch (Exception e) { url = "err:" + e.getMessage(); }
+                try { orig = String.valueOf(wv.getOriginalUrl()); } catch (Exception e) { orig = "err:" + e.getMessage(); }
+                try {
+                    android.webkit.WebBackForwardList list = wv.copyBackForwardList();
+                    if (list != null) {
+                        size = list.getSize();
+                        idx = list.getCurrentIndex();
+                        for (int i = 0; i < size; i++) {
+                            try { String itemUrl = list.getItemAtIndex(i).getUrl(); android.util.Log.d(TAG_DIAG, "Back history[" + i + "]=" + itemUrl); }
+                            catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back history[" + i + "] err " + e); }
+                        }
+                    }
+                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back BackForwardList err " + e); }
+                android.util.Log.d(TAG_DIAG, "Back diag wv!=null canGoBack=" + canBack + " url=" + url + " orig=" + orig + " size=" + size + " idx=" + idx + " " + lifecycleSnapshot());
+                try {
+                    wv.evaluateJavascript("(function(){try{return JSON.stringify({href:location.href,hash:location.hash,historyLen:history.length});}catch(e){return 'js err:'+e}})()", value -> android.util.Log.d(TAG_DIAG, "Back JS history=" + value));
+                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back JS eval err " + e); }
+                if (canBack) {
+                    android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true " + lifecycleSnapshot());
+                    wv.goBack();
+                    return;
+                }
+            } else {
+                android.util.Log.d(TAG_DIAG, "Back diag wv null " + lifecycleSnapshot());
             }
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "Back handler err " + e);
