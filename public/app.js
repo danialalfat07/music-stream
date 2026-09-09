@@ -4585,30 +4585,41 @@ async function startSystemPip() {
 }
 
 async function openFloatWidget() {
+  try { console.log('[JS] openFloatWidget'); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] openFloatWidget'); } catch {}
   if (!Player.current) {
     toast('Play a song first');
+    try { console.log('[JS] openFloatWidget abort no current'); } catch {}
     return;
+  }
+  // 1. Android native System PiP via bridge — primary for WebView (Activity.enterPictureInPictureMode)
+  // enterPip is async; UI state (pip-system, widget visible, Player.floatOn) is delivered via onPictureInPictureModeChanged
+  try { console.log('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
+  let _enterPipType = 'undefined';
+  try { _enterPipType = typeof (window.NativePlayback && window.NativePlayback.enterPip); } catch {}
+  try { console.log('[JS] enterPip type=' + _enterPipType); } catch {}
+  try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] enterPip type=' + _enterPipType); } catch {}
+  if (window.NativePlayback && typeof window.NativePlayback.enterPip === 'function') {
+    try {
+      try { console.log('[JS] calling NativePlayback.enterPip'); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] calling NativePlayback.enterPip'); } catch {}
+      window.NativePlayback.enterPip();
+      try { console.log('[JS] NativePlayback.enterPip called, waiting onPictureInPictureModeChanged'); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback.enterPip called'); } catch {}
+      toast('Entering PiP...');
+      return;
+    } catch (e) {
+      try { console.log('[JS] enterPip threw ' + e); } catch {}
+      try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] enterPip threw ' + e); } catch {}
+    }
+  } else {
+    try { console.log('[JS] native PiP branch not taken, fallback to hasDocumentPiP'); } catch {}
   }
   Player.floatOn = true;
   closeNowPlaying();
   document.body.classList.add('float-mode');
   drawPipFrame();
-  // 1. Android native System PiP via bridge — primary for WebView (Activity.enterPictureInPictureMode)
-  // enterPip is async (runOnUiThread); state is delivered via onPictureInPictureModeChanged -> pip-system class
-  if (window.NativePlayback && typeof window.NativePlayback.enterPip === 'function') {
-    try {
-      window.NativePlayback.enterPip();
-      document.body.classList.add('pip-system');
-      const el = $('#float-widget');
-      el.classList.remove('hidden');
-      enableDrag(el);
-      bindFloatWidget(document);
-      toast('PiP — floating window');
-      syncFloatWidget();
-      syncFloatLyric(currentLyricText());
-      return;
-    } catch (e) {}
-  }
   let sysOk = false;
   let docOk = false;
   if (hasDocumentPiP()) {

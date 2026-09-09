@@ -296,19 +296,27 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
         android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
         try {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 final boolean pip = isInPictureInPictureMode;
                 getBridge().getWebView().post(() -> {
                     try {
-                        String js = "try{document.body.classList.toggle('pip-system', " + pip + ");"
-                                + "if(" + pip + ") document.body.classList.add('float-mode');"
-                                + "else document.body.classList.remove('pip-system');"
+                        String js = "try{"
+                                + "document.body.classList.toggle('pip-system', " + pip + ");"
+                                + "if(" + pip + "){"
+                                + "document.body.classList.add('float-mode');"
+                                + "var w=document.getElementById('float-widget'); if(w){w.classList.remove('hidden'); try{if(window.enableDrag) enableDrag(w)}catch(e){} try{if(window.bindFloatWidget) bindFloatWidget(document)}catch(e){}}"
+                                + "}else{"
+                                + "document.body.classList.remove('pip-system');"
+                                + "}"
                                 + "}catch(e){}";
                         getBridge().getWebView().evaluateJavascript(js, null);
                         if (pip) {
-                            getBridge().eval("try{Player.floatOn=true; if(window.syncFloatWidget) syncFloatWidget();}catch(e){}", null);
+                            getBridge().eval("try{Player.floatOn=true; if(window.syncFloatWidget) syncFloatWidget(); if(window.syncFloatLyric && window.currentLyricText) syncFloatLyric(currentLyricText());}catch(e){}", null);
+                        } else {
+                            getBridge().eval("try{if(window.syncFloatWidget) syncFloatWidget();}catch(e){}", null);
                         }
                     } catch (Exception ignored) {}
                 });
@@ -393,18 +401,26 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void enterPip() {
+            android.util.Log.d(TAG_DIAG, "[Native] enterPip() CALLED sdk=" + Build.VERSION.SDK_INT + " " + lifecycleSnapshot());
             runOnUiThread(() -> {
                 try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        if (isInPictureInPictureMode()) return;
+                        if (isInPictureInPictureMode()) {
+                            android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
+                            return;
+                        }
                         Rational ratio = new Rational(16, 9);
                         PictureInPictureParams params = new PictureInPictureParams.Builder()
                                 .setAspectRatio(ratio)
                                 .build();
-                        enterPictureInPictureMode(params);
+                        boolean result = enterPictureInPictureMode(params);
+                        android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode result=" + result + " " + lifecycleSnapshot());
+                    } else {
+                        android.util.Log.d(TAG_DIAG, "[Native] enterPip skipped SDK<26");
                     }
                 } catch (Exception e) {
-                    android.util.Log.d(TAG_DIAG, "enterPip failed " + e);
+                    android.util.Log.d(TAG_DIAG, "[Native] enterPip failed exception=" + e);
+                    android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode exception " + e);
                 }
             });
         }
