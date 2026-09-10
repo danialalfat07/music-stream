@@ -335,17 +335,32 @@ async function applyVersionUpdate(latest) {
   try {
     await clearWebsiteCacheOnly();
   } catch {}
+  let controllerChanged = false;
   try {
     if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+      await Promise.all(regs.map(async (r) => {
+        await r.update().catch(() => {});
+        const worker = r.installing || r.waiting;
+        if (worker) worker.postMessage({ type: 'SKIP_WAITING' });
+      }));
+      if (navigator.serviceWorker.controller) {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 5000);
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            controllerChanged = true;
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+      }
     }
   } catch {}
   try {
     if (latest) localStorage.setItem('dnialify_version', latest);
   } catch {}
   toast('Updating to v' + (latest || APP_VERSION) + '…');
-  setTimeout(() => location.reload(), 600);
+  setTimeout(() => location.reload(), controllerChanged ? 150 : 600);
 }
 
 async function checkAppVersion({ silent = true, force = false } = {}) {
