@@ -603,6 +603,7 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 #mini-artist.linkish { cursor: pointer; }
 #mini-artist.linkish:hover { color: var(--text); text-decoration: underline; }
 #mini-like { font-size: 16px; }
+#mini-close { margin-left: auto; }
 
 .pb-center {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -1221,6 +1222,7 @@ body.hq-audio #yt-player {
   body.has-player #main { margin-bottom: 0; padding-bottom: calc(var(--navm-h) + 92px); }
   body.float-mode.has-player #main { padding-bottom: calc(var(--navm-h) + 16px); }
   .pb-left { flex: 1; }
+  #mini-close { margin-left: 0; }
   #mini-art { width: 44px; height: 44px; }
   .pb-center { flex-direction: row; max-width: none; width: auto; }
   .pb-seek { position: absolute; left: 8px; right: 8px; bottom: 0; }
