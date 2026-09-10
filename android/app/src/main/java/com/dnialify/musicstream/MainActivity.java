@@ -336,7 +336,7 @@ public class MainActivity extends BridgeActivity {
             tv.setBackgroundColor(Color.parseColor("#D32F2F")); // opaque red high contrast
             tv.setGravity(Gravity.CENTER);
             tv.setPadding(32, 32, 32, 32);
-            tv.setVisibility(View.VISIBLE);
+            tv.setVisibility(View.GONE);
             tv.setAlpha(1f);
             // attach to existing hierarchy — not overlay Window, not new Activity, not replacing WebView
             FrameLayout.LayoutParams lp;
@@ -346,15 +346,12 @@ public class MainActivity extends BridgeActivity {
             } else {
                 lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             }
-            // Ensure WebView stays, overlay added as sibling last on top
+            // Ensure WebView stays, overlay added as sibling last on top but GONE so WebView usable
             content.addView(tv, lp);
             pipDiagnosticView = tv;
-            tv.bringToFront();
-            // Log immediately
-            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attached parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
-            logPipOverlay("overlayAttached");
-            // Ensure visible in normal activity before PiP as required
-            tv.setVisibility(View.VISIBLE);
+            // Log immediately — keep GONE during normal browsing
+            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attached GONE parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
+            logPipOverlay("overlayAttached:GONE");
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attach err " + e);
         }
@@ -419,8 +416,20 @@ public class MainActivity extends BridgeActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
         android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
-        // Phase 10 — keep HELLO WORLD visible in PiP, log state
-        try { ensurePipDiagnosticOverlay(); if (pipDiagnosticView != null) { pipDiagnosticView.setVisibility(View.VISIBLE); pipDiagnosticView.bringToFront(); pipDiagnosticView.invalidate(); } } catch (Exception ignored) {}
+        // Phase 10 — keep HELLO WORLD visible only in PiP, GONE otherwise
+        try {
+            ensurePipDiagnosticOverlay();
+            if (pipDiagnosticView != null) {
+                if (isInPictureInPictureMode) {
+                    pipDiagnosticView.setVisibility(View.VISIBLE);
+                    pipDiagnosticView.bringToFront();
+                    pipDiagnosticView.requestLayout();
+                    pipDiagnosticView.invalidate();
+                } else {
+                    pipDiagnosticView.setVisibility(View.GONE);
+                }
+            }
+        } catch (Exception ignored) {}
         logPipOverlay("onPictureInPictureModeChanged:" + isInPictureInPictureMode);
         try { android.os.Handler hh = new android.os.Handler(android.os.Looper.getMainLooper()); hh.postDelayed(() -> logPipOverlay("pipDelayed400"), 400); hh.postDelayed(() -> logPipOverlay("pipDelayed800"), 800); hh.postDelayed(() -> { try { if(pipDiagnosticView!=null){pipDiagnosticView.bringToFront(); pipDiagnosticView.invalidate(); logPipOverlay("pipBringFront600");}}catch(Exception ignored){} }, 600); } catch(Exception ignored){}
         try {
@@ -601,12 +610,27 @@ public class MainActivity extends BridgeActivity {
                             android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
                             return;
                         }
+                        // Phase 10 — show HELLO WORLD immediately before PiP entry (existing hierarchy, no overlay Window)
+                        try {
+                            ensurePipDiagnosticOverlay();
+                            if (pipDiagnosticView != null) {
+                                pipDiagnosticView.setVisibility(View.VISIBLE);
+                                pipDiagnosticView.bringToFront();
+                                pipDiagnosticView.requestLayout();
+                                pipDiagnosticView.invalidate();
+                                // parent force layout
+                                ViewGroup parent = (ViewGroup) pipDiagnosticView.getParent();
+                                if (parent != null) { parent.requestLayout(); parent.invalidate(); }
+                            }
+                            logPipOverlay("enterPip:VISIBLE before enter");
+                        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PiPDebug] enterPip show err " + e); }
                         Rational ratio = new Rational(9, 16);
                         PictureInPictureParams params = new PictureInPictureParams.Builder()
                                 .setAspectRatio(ratio)
                                 .build();
                         boolean result = enterPictureInPictureMode(params);
                         android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode result=" + result + " " + lifecycleSnapshot());
+                        logPipOverlay("enterPip:afterEnter result=" + result);
                     } else {
                         android.util.Log.d(TAG_DIAG, "[Native] enterPip skipped SDK<26");
                     }
