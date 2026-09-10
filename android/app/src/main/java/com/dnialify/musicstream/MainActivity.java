@@ -30,11 +30,14 @@ public class MainActivity extends BridgeActivity {
     // DiagnosticsBridge receives batched JSON logs from diag-bg.html during background
     private final DiagnosticsBridge diagnosticsBridge = new DiagnosticsBridge();
     // Phase 11 — native PiP renderer (mirrors WebView state, no second playback engine)
+    // Phase 11 refinement: MINI LYRIC PLAYER 10-line viewport, no card/box
     private ViewGroup pipNativeView;
-    private ImageView pipArtView;
+    private ImageView pipArtView; // kept but hidden for PiP (spec: no big artwork)
     private TextView pipTitleView;
     private TextView pipArtistView;
-    private TextView pipLyricView;
+    private java.util.List<TextView> pipLyricLineViews = new java.util.ArrayList<>();
+    private java.util.List<String> pipLyricLines = new java.util.ArrayList<>();
+    private int pipLyricActiveIdx = -1;
     private String pipTitle = "Dnialify Music Stream";
     private String pipArtist = "MusicStream";
     private String pipArtworkUrl = "";
@@ -330,6 +333,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     // Phase 11 — native PiP renderer (portrait 9:16, artwork bg + dark overlay + title/artist/lyric)
+    // Phase 11 refinement: MINI LYRIC PLAYER — 10 lines, active centered green, no card/box, dark bg, tiny title
     private void ensurePipNativeView() {
         try {
             if (pipNativeView != null) return;
@@ -344,76 +348,83 @@ public class MainActivity extends BridgeActivity {
             }
             FrameLayout root = new FrameLayout(this);
             root.setVisibility(View.GONE);
-            root.setBackgroundColor(Color.BLACK);
-            // artwork
+            root.setBackgroundColor(Color.BLACK); // solid dark, no artwork bg per spec (10 lines > big artwork)
+            // keep hidden ImageView for fallback if needed but GONE to save lyric space
             ImageView art = new ImageView(this);
             art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            art.setVisibility(View.VISIBLE);
+            art.setVisibility(View.GONE);
             FrameLayout.LayoutParams artLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             root.addView(art, artLp);
-            // dark translucent overlay for readability
-            View overlay = new View(this);
-            overlay.setBackgroundColor(Color.parseColor("#66000000"));
-            FrameLayout.LayoutParams ovLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            root.addView(overlay, ovLp);
-            // text container at bottom
-            LinearLayout container = new LinearLayout(this);
-            container.setOrientation(LinearLayout.VERTICAL);
-            container.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
-            int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 16, getResources().getDisplayMetrics());
-            int padBottom = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20, getResources().getDisplayMetrics());
-            container.setPadding(pad, pad, pad, padBottom);
-            container.setGravity(Gravity.CENTER);
-            FrameLayout.LayoutParams contLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            contLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-            // title
+            // main vertical container: title + artist (tiny top 10-15%) + lyrics window fills rest
+            LinearLayout outer = new LinearLayout(this);
+            outer.setOrientation(LinearLayout.VERTICAL);
+            outer.setGravity(Gravity.CENTER_HORIZONTAL);
+            outer.setBackgroundColor(Color.BLACK);
+            int outerPadH = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, getResources().getDisplayMetrics());
+            int outerPadV = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8, getResources().getDisplayMetrics());
+            outer.setPadding(outerPadH, outerPadV, outerPadH, outerPadV);
+            FrameLayout.LayoutParams outerLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(outer, outerLp);
+            // header small — title
             TextView titleTv = new TextView(this);
             titleTv.setText(pipTitle);
             titleTv.setTextColor(Color.WHITE);
-            titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             titleTv.setTypeface(null, android.graphics.Typeface.BOLD);
             titleTv.setGravity(Gravity.CENTER);
-            titleTv.setMaxLines(2);
+            titleTv.setMaxLines(1);
             titleTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            titleTv.setAlpha(0.95f);
             LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            tLp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 4, getResources().getDisplayMetrics());
-            container.addView(titleTv, tLp);
-            // artist
+            outer.addView(titleTv, tLp);
+            // artist — even smaller gray muted
             TextView artistTv = new TextView(this);
             artistTv.setText(pipArtist);
-            artistTv.setTextColor(Color.parseColor("#E0FFFFFF"));
-            artistTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            artistTv.setTextColor(Color.parseColor("#9E9E9E"));
+            artistTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
             artistTv.setGravity(Gravity.CENTER);
             artistTv.setMaxLines(1);
             artistTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            aLp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, getResources().getDisplayMetrics());
-            container.addView(artistTv, aLp);
-            // lyric — visual focus
-            TextView lyricTv = new TextView(this);
-            lyricTv.setText(pipCurrentLyric.isEmpty() ? "♪" : pipCurrentLyric);
-            lyricTv.setTextColor(Color.WHITE);
-            lyricTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-            lyricTv.setTypeface(null, android.graphics.Typeface.BOLD);
-            lyricTv.setGravity(Gravity.CENTER);
-            lyricTv.setMaxLines(3);
-            lyricTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            lyricTv.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-            lyricTv.setBackgroundColor(Color.parseColor("#33000000"));
-            int lyricPad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8, getResources().getDisplayMetrics());
-            lyricTv.setPadding(lyricPad, lyricPad, lyricPad, lyricPad);
-            LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            container.addView(lyricTv, lLp);
-            root.addView(container, contLp);
+            aLp.topMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 2, getResources().getDisplayMetrics());
+            aLp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8, getResources().getDisplayMetrics());
+            outer.addView(artistTv, aLp);
+            // divider subtle? no — keep minimal
+            // lyrics window — 10 lines, active centered, no card
+            LinearLayout lyricsContainer = new LinearLayout(this);
+            lyricsContainer.setOrientation(LinearLayout.VERTICAL);
+            lyricsContainer.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lyricsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+            outer.addView(lyricsContainer, lyricsLp);
+            pipLyricLineViews.clear();
+            for (int i = 0; i < 10; i++) {
+                TextView tv = new TextView(this);
+                tv.setText("");
+                tv.setGravity(Gravity.CENTER);
+                tv.setMaxLines(1);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setSingleLine(true);
+                // default non-active style — gray muted, small
+                tv.setTextColor(Color.parseColor("#8A8A8A"));
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                tv.setTypeface(null, android.graphics.Typeface.NORMAL);
+                tv.setAlpha(0.85f);
+                // no background/box/shadow/border
+                tv.setBackgroundColor(Color.TRANSPARENT);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 1, getResources().getDisplayMetrics());
+                lp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 1, getResources().getDisplayMetrics());
+                lyricsContainer.addView(tv, lp);
+                pipLyricLineViews.add(tv);
+            }
             FrameLayout.LayoutParams rootLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             content.addView(root, rootLp);
             pipNativeView = root;
             pipArtView = art;
             pipTitleView = titleTv;
             pipArtistView = artistTv;
-            pipLyricView = lyricTv;
-            android.util.Log.d(TAG_DIAG, "[PipNative] attached GONE parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
-            logPipNative("attached:GONE");
+            android.util.Log.d(TAG_DIAG, "[PipNative] attached GONE 10-line parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
+            logPipNative("attached:GONE 10line");
             updatePipNativeView();
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "[PipNative] attach err " + e);
@@ -422,25 +433,98 @@ public class MainActivity extends BridgeActivity {
 
     private void updatePipNativeView() {
         try {
-            if (pipNativeView == null || pipTitleView == null) return;
+            if (pipNativeView == null || pipTitleView == null || pipLyricLineViews.isEmpty()) return;
             runOnUiThread(() -> {
                 try {
                     pipTitleView.setText(pipTitle == null || pipTitle.isEmpty() ? "Dnialify Music Stream" : pipTitle);
                     pipArtistView.setText(pipArtist == null || pipArtist.isEmpty() ? "MusicStream" : pipArtist);
-                    String lyric = pipCurrentLyric == null || pipCurrentLyric.trim().isEmpty() ? "♪" : pipCurrentLyric;
-                    pipLyricView.setText(lyric);
-                    String url = pipArtworkUrl;
-                    boolean hasArt = url != null && !url.isEmpty();
-                    if (hasArt && !url.equals(pipLoadedArtworkUrl)) {
-                        loadArtworkNative(url);
-                    } else if (!hasArt) {
-                        pipArtView.setImageDrawable(null);
-                        pipNativeView.setBackgroundColor(Color.parseColor("#121212"));
+                    // 10-line window — active centered
+                    java.util.List<String> lines = pipLyricLines;
+                    int active = pipLyricActiveIdx;
+                    int size = lines == null ? 0 : lines.size();
+                    // fallback: if we only have single current lyric and no window, show single centered with neighbors empty
+                    if (size == 0) {
+                        String cur = pipCurrentLyric == null ? "" : pipCurrentLyric.trim();
+                        if (cur.isEmpty()) cur = "♪";
+                        // fill 10 with empty, active at 5 (center)
+                        for (int i = 0; i < 10; i++) {
+                            TextView tv = pipLyricLineViews.get(i);
+                            boolean isActive = i == 5;
+                            tv.setText(isActive ? cur : "");
+                            applyLyricLineStyle(tv, isActive, isActive ? 0 : Math.abs(i - 5));
+                            tv.setVisibility(isActive || !cur.equals("♪") ? View.VISIBLE : View.INVISIBLE);
+                        }
+                        android.util.Log.d(TAG_DIAG, "[PipNative] update 10line fallback lyric=" + cur + " size=0 activeIdx=" + active);
+                        return;
                     }
-                    android.util.Log.d(TAG_DIAG, "[PipNative] update title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + hasArt + " lyric=" + lyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs + " playing=" + pipIsPlaying);
+                    if (active < 0 || active >= size) active = 0;
+                    // compute window 10 lines centered around active: 5 above, active, 4 below
+                    int start = active - 5;
+                    int end = active + 4; // inclusive 10
+                    if (start < 0) { end += -start; start = 0; }
+                    if (end >= size) { start -= (end - size + 1); end = size - 1; }
+                    if (start < 0) start = 0;
+                    // ensure window size at most 10, fill
+                    int winSize = Math.min(10, size);
+                    // if size <10, center active as best possible — keep active near middle index 5 but clamp
+                    // adjust start to keep size winSize
+                    if (size >= 10) {
+                        // already 10
+                    } else {
+                        start = 0; end = size - 1;
+                    }
+                    for (int i = 0; i < 10; i++) {
+                        TextView tv = pipLyricLineViews.get(i);
+                        int srcIdx = start + i;
+                        if (srcIdx < 0 || srcIdx > end || srcIdx >= size) {
+                            tv.setText("");
+                            tv.setVisibility(View.INVISIBLE);
+                            continue;
+                        }
+                        String txt = lines.get(srcIdx);
+                        if (txt == null) txt = "";
+                        txt = txt.trim();
+                        if (txt.isEmpty()) txt = "♪";
+                        boolean isActive = srcIdx == active;
+                        tv.setText(txt);
+                        tv.setVisibility(View.VISIBLE);
+                        // single line ellipsis already
+                        int dist = Math.abs(srcIdx - active);
+                        applyLyricLineStyle(tv, isActive, dist);
+                    }
+                    android.util.Log.d(TAG_DIAG, "[PipNative] update 10line title=" + pipTitle + " artist=" + pipArtist + " activeIdx=" + active + " window=" + start + "-" + end + " size=" + size + " lyric=" + pipCurrentLyric);
                 } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update err " + e); }
             });
         } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update outer err " + e); }
+    }
+
+    private void applyLyricLineStyle(TextView tv, boolean isActive, int dist) {
+        try {
+            if (isActive) {
+                tv.setTextColor(Color.parseColor("#1ED760")); // Spotify green
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                tv.setTypeface(null, android.graphics.Typeface.BOLD);
+                tv.setAlpha(1f);
+                // no background/box/shadow/border
+                tv.setBackgroundColor(Color.TRANSPARENT);
+            } else {
+                // distance-based muted gray — readable but distinct from active
+                // 1 neighbor: slightly brighter, farther: dimmer
+                int color;
+                float alpha;
+                float size;
+                if (dist == 1) { color = Color.parseColor("#B3B3B3"); alpha = 0.90f; size = 13f; }
+                else if (dist == 2) { color = Color.parseColor("#9E9E9E"); alpha = 0.80f; size = 13f; }
+                else if (dist <= 4) { color = Color.parseColor("#7A7A7A"); alpha = 0.70f; size = 12.5f; }
+                else { color = Color.parseColor("#6A6A6A"); alpha = 0.60f; size = 12f; }
+                tv.setTextColor(color);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+                tv.setTypeface(null, android.graphics.Typeface.NORMAL);
+                tv.setAlpha(alpha);
+                tv.setBackgroundColor(Color.TRANSPARENT);
+            }
+            tv.setShadowLayer(0,0,0,0);
+        } catch (Exception ignored) {}
     }
 
     private void loadArtworkNative(String url) {
@@ -666,13 +750,31 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void updateLyrics(String prev, String current, String next) {
             android.util.Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
-            // Phase 11 — lyric mirror (do not reimplement parser, just display current)
+            // Phase 11 — lyric mirror (single fallback, 10-line window via updateLyricWindow)
             try {
                 pipCurrentLyric = current == null ? "" : current;
                 android.util.Log.d(TAG_DIAG, "[PipNative] lyricUpdate current=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " title=" + pipTitle);
-                updatePipNativeView();
+                // if window not yet set, update single view
+                if (pipLyricLines == null || pipLyricLines.isEmpty()) updatePipNativeView();
             } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] lyric mirror err " + e); }
             PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
+        }
+
+        @JavascriptInterface
+        public void updateLyricWindow(String jsonLines, int activeIdx) {
+            try {
+                android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow activeIdx=" + activeIdx + " jsonLen=" + (jsonLines==null?0:jsonLines.length()));
+                java.util.List<String> lines = new java.util.ArrayList<>();
+                if (jsonLines != null && !jsonLines.isEmpty()) {
+                    org.json.JSONArray arr = new org.json.JSONArray(jsonLines);
+                    for (int i = 0; i < arr.length(); i++) lines.add(arr.optString(i, ""));
+                }
+                pipLyricLines = lines;
+                pipLyricActiveIdx = activeIdx;
+                if (activeIdx >= 0 && activeIdx < lines.size()) pipCurrentLyric = lines.get(activeIdx);
+                android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow size=" + lines.size() + " active=" + activeIdx + " cur=" + pipCurrentLyric);
+                updatePipNativeView();
+            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow err " + e); }
         }
 
         @JavascriptInterface

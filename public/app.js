@@ -1046,6 +1046,58 @@ function pushNativeLyrics() {
     window.NativePlayback.updateLyrics(prev || "", cur || "", next || "");
   } catch (e) { try { console.log('[LYRICS] push error '+e); } catch {} }
 }
+
+function renderPipLyricWindow() {
+  try {
+    const docs = widgetDocs();
+    for (const doc of docs) {
+      const widget = doc.getElementById('float-widget');
+      if (!widget) continue;
+      let win = doc.getElementById('fw-lyrics-window');
+      const isPip = doc.body && doc.body.classList.contains('pip-system');
+      // create lazily only in pip-system, remove otherwise
+      if (!isPip) { if (win) win.remove(); const single = doc.getElementById('fw-lyric'); if(single) single.style.display=''; continue; }
+      if (!win) {
+        win = doc.createElement('div');
+        win.id = 'fw-lyrics-window';
+        const meta = doc.querySelector('.fw-meta');
+        if (meta) meta.appendChild(win);
+        else widget.appendChild(win);
+      }
+      const lines = pipLyricLines();
+      if (!lines.length) { win.innerHTML = '<div class="fw-lyric-line active">\u266A</div>'; const s=doc.getElementById('fw-lyric'); if(s) s.style.display='none'; continue; }
+      let idx = currentLyricIndex();
+      if (idx < 0) idx = 0;
+      let start = idx - 5, end = idx + 4;
+      if (start < 0) { end += -start; start = 0; }
+      if (end >= lines.length) { start -= (end - lines.length + 1); end = lines.length - 1; }
+      if (start < 0) start = 0;
+      win.innerHTML = '';
+      const to = Math.min(end, start+9);
+      for (let i = start; i <= to; i++) {
+        const div = doc.createElement('div');
+        div.className = 'fw-lyric-line' + (i===idx?' active':'');
+        div.textContent = (lines[i]||'\u266A').trim() || '\u266A';
+        win.appendChild(div);
+      }
+      const single = doc.getElementById('fw-lyric');
+      if (single) single.style.display = 'none';
+    }
+  } catch {}
+}
+
+function pushNativeLyricWindow() {
+  try {
+    if (!window.NativePlayback || !window.NativePlayback.updateLyricWindow) return;
+    const lines = pipLyricLines();
+    if (!lines.length) { window.NativePlayback.updateLyricWindow("[]", -1); return; }
+    let idx = currentLyricIndex();
+    if (idx < 0) idx = 0;
+    try { window.NativePlayback.updateLyricWindow(JSON.stringify(lines), idx); } catch (e) { try{console.log('[LYRICS] window push err '+e)}catch{} }
+  } catch {}
+}
+
+
 /* progress loop */
 let _lastTick = null;
 let _lastNativePush = 0;
@@ -1286,6 +1338,8 @@ function renderLyrics() {
     syncFloatLyric('');
   }
   pushNativeLyrics();
+  pushNativeLyricWindow();
+  renderPipLyricWindow();
 }
 let lastLyricIdx = -1;
 function updateLyricHighlight(cur) {
@@ -1310,6 +1364,8 @@ function updateLyricHighlight(cur) {
   $('#np-lyric-preview').textContent = line;
   syncFloatLyric(line);
   pushNativeLyrics();
+  pushNativeLyricWindow();
+  renderPipLyricWindow();
 }
 
 /* ================= now playing UI ================= */
