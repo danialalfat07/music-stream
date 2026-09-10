@@ -329,6 +329,17 @@ try {
       </div>
     </div>
   </div>
+  <!-- Version Update Modal — mandatory (website cache vs user data separated) -->
+  <div id="version-update-modal" class="hidden">
+    <div class="modal-card">
+      <h3 style="margin:0 0 8px">Update required</h3>
+      <p style="color:var(--muted);margin:0 0 12px">Versi website kamu <b id="vu-current"></b> sudah lama. Versi terbaru <b id="vu-version"></b> wajib dipakai biar fitur & lirik tetap jalan. Data kamu (history, playlist, favorites, queue) <b>tidak akan hilang</b>.</p>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Klik Update untuk hapus cache website saja (CacheStorage <code>dnialify-assets-*</code>) dan reload. Data pengguna di <code>localStorage smw_*</code> tetap aman.</p>
+      <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+        <button id="vu-update" class="pill-btn primary">Update sekarang</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="hidden"></div>
 
   <!-- Floating mini widget (in-page fallback; also cloned into Document PiP) -->
@@ -356,22 +367,27 @@ try {
   <video id="pip-video" muted playsinline autoplay></video>
 </div>
 <script>
-// Dnialify versioning: auto clear cache when version differs (keep history/library)
+// Dnialify versioning: website cache vs user data separated
 (function(){
   try{
     var VER="1.2.1";
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
     if(cur !== VER){
+      // ONLY website assets (dnialify-), NEVER user data (smw_* in localStorage)
       if(window.caches && caches.keys){
-        caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf("dnialify")===0) caches.delete(k); }); }).catch(function(){});
-        caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf("smw-")===0) caches.delete(k); }); }).catch(function(){});
+        caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf("dnialify-")===0) caches.delete(k); }); }).catch(function(){});
       }
       localStorage.setItem(KEY, VER);
+      if(!localStorage.getItem('smw_user_data_version')){
+        try{ localStorage.setItem('smw_user_data_version','1'); }catch(e){}
+      }
       if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
         navigator.serviceWorker.getRegistrations().then(function(rs){ rs.forEach(function(r){ try{ r.update(); }catch(e){} }); }).catch(function(){});
       }
       if(cur !== null){ setTimeout(function(){ location.reload(); }, 400); }
+    } else if(!localStorage.getItem('smw_user_data_version')){
+      try{ localStorage.setItem('smw_user_data_version','1'); }catch(e){}
     }
   }catch(e){}
 })();

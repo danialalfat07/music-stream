@@ -267,6 +267,148 @@ const Library = {
   },
 };
 
+/* ================= versioning — website vs user data (separated) ================= */
+// Website assets live in CacheStorage: dnialify-assets-vX
+// User data lives in localStorage: smw_* — NEVER cleared on website update
+const USER_DATA_VERSION = 1;
+const VERSION_CHECK_INTERVAL = 5 * 60 * 1000; // 5min cooldown
+let _lastVersionCheck = 0;
+let _pendingVersionUpdate = null;
+
+function isNewerVersion(latest, current) {
+  const a = String(latest || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const b = String(current || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (av > bv) return true;
+    if (av < bv) return false;
+  }
+  return false;
+}
+
+async function fetchAppVersion() {
+  try {
+    const r = await fetch('/api/app-version', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j && j.version) return j;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function showVersionUpdateModal(latest) {
+  const m = $('#version-update-modal');
+  if (!m) return;
+  const vEl = $('#vu-version');
+  if (vEl) vEl.textContent = latest || '';
+  const cEl = $('#vu-current');
+  if (cEl) cEl.textContent = APP_VERSION || '';
+  m.classList.remove('hidden');
+}
+
+function hideVersionUpdateModal() {
+  const m = $('#version-update-modal');
+  if (m) m.classList.add('hidden');
+}
+
+async function clearWebsiteCacheOnly() {
+  // ONLY website assets — NEVER smw_* (user data)
+  if (window.caches && caches.keys) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k.startsWith('dnialify-'))
+          .map((k) => caches.delete(k)),
+      );
+    } catch {}
+  }
+}
+
+async function applyVersionUpdate(latest) {
+  if (_pendingVersionUpdate) return;
+  _pendingVersionUpdate = latest || APP_VERSION;
+  try {
+    await clearWebsiteCacheOnly();
+  } catch {}
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    }
+  } catch {}
+  try {
+    if (latest) localStorage.setItem('dnialify_version', latest);
+  } catch {}
+  toast('Updating to v' + (latest || APP_VERSION) + '…');
+  setTimeout(() => location.reload(), 600);
+}
+
+async function checkAppVersion({ silent = true, force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - _lastVersionCheck < VERSION_CHECK_INTERVAL) return { ok: true, version: APP_VERSION };
+  _lastVersionCheck = now;
+  // offline → keep current cache, don't break user data
+  if (!navigator.onLine) return { ok: true, offline: true, version: APP_VERSION };
+  const data = await fetchAppVersion();
+  if (!data || !data.version) return { ok: true, version: APP_VERSION };
+  if (data.version === APP_VERSION) {
+    try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
+    return { ok: true, version: APP_VERSION };
+  }
+  if (isNewerVersion(data.version, APP_VERSION)) {
+    if (!silent) showVersionUpdateModal(data.version);
+    else {
+      // silent check but mandatory — show modal so user can't play stale build
+      showVersionUpdateModal(data.version);
+    }
+    return { ok: false, needsUpdate: true, latest: data.version, minVersion: data.minVersion };
+  }
+  // local is newer (dev) — just sync stored version
+  try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
+  return { ok: true, version: APP_VERSION };
+}
+
+async function ensureAppVersionBeforePlay() {
+  const res = await checkAppVersion({ silent: false, force: true });
+  if (res && res.needsUpdate) {
+    // mandatory — block play until updated
+    return false;
+  }
+  return true;
+}
+
+function migrateUserDataIfNeeded() {
+  // NEVER localStorage.clear() — only migrate schema
+  try {
+    const stored = parseInt(localStorage.getItem('smw_user_data_version') || '0', 10) || 0;
+    if (stored < USER_DATA_VERSION) {
+      // future migrations: v1 → v2 etc. For now just bump marker, preserve all smw_* keys
+      localStorage.setItem('smw_user_data_version', String(USER_DATA_VERSION));
+    } else if (!localStorage.getItem('smw_user_data_version')) {
+      localStorage.setItem('smw_user_data_version', String(USER_DATA_VERSION));
+    }
+  } catch {}
+}
+
+function setupVersionChecks() {
+  // startup is called separately; this sets foreground re-check
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkAppVersion({ silent: true }).catch(() => {});
+    }
+  });
+  window.addEventListener('online', () => checkAppVersion({ silent: true }).catch(() => {}));
+  // also re-check when app comes back from bfcache
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) checkAppVersion({ silent: true, force: true }).catch(() => {});
+  });
+}
+
 /* ================= player state ================= */
 const Player = {
   yt: null,
@@ -617,8 +759,13 @@ window.onYouTubeIframeAPIReady = () => {
   document.head.appendChild(s);
 })();
 
-function playSong(song, queue = null, index = null) {
+async function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
+  // mandatory version check before any play — uses cache/no-store fetch with 5min cooldown
+  try {
+    const ok = await ensureAppVersionBeforePlay();
+    if (!ok) return;
+  } catch {}
   song = normalizeSong(song);
   Player.cued = false;
   Player.pending = null;
@@ -4812,13 +4959,6 @@ setInterval(() => {
   }
 }, 1500);
 
-/* Dnialify: keep SW registered (PWA) - only clean old smw- caches */
-if (window.caches)
-  caches
-    .keys()
-    .then((ks) => ks.forEach((k) => k.startsWith('smw-') && caches.delete(k)))
-    .catch(() => {});
-
 /* boot */
 (() => {
   const splash = $('#splash');
@@ -4834,14 +4974,24 @@ if (window.caches)
 renderNav();
 renderSideQueue();
 updateThemeIcon();
-// version check (keep history, clear cache)
-try{
-  var _v = localStorage.getItem('dnialify_version');
-  if(_v && _v !== APP_VERSION){
-    if(window.caches) caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf('dnialify')===0 || k.indexOf('smw-')===0) caches.delete(k); }); });
-    localStorage.setItem('dnialify_version', APP_VERSION);
-  } else if(!_v) localStorage.setItem('dnialify_version', APP_VERSION);
-}catch(e){}
+// versioning — website vs user data separated, mandatory update checks
+migrateUserDataIfNeeded();
+setupVersionChecks();
+try {
+  const stored = localStorage.getItem('dnialify_version');
+  if (stored && stored !== APP_VERSION) {
+    // only website assets, NEVER smw_* (user data)
+    clearWebsiteCacheOnly().catch(() => {});
+    try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
+  } else if (!stored) {
+    try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
+  }
+  if (!localStorage.getItem('smw_user_data_version')) {
+    try { localStorage.setItem('smw_user_data_version', String(USER_DATA_VERSION)); } catch {}
+  }
+} catch {}
+// server-authoritative version check (no-store, 5min cooldown, mandatory before play)
+checkAppVersion({ silent: true }).catch(() => {});
 $('#theme-toggle').addEventListener('click', toggleTheme);
 $('#settings-btn')?.addEventListener('click', () => openSettingsModal('about'));
 $('#help-btn')?.addEventListener('click', openHelpModal);
@@ -4860,6 +5010,16 @@ $('#footer-settings')?.addEventListener('click', (e) => {
 $('#footer-about')?.addEventListener('click', (e) => {
   e.preventDefault();
   openSettingsModal('about');
+});
+$('#vu-update')?.addEventListener('click', () => {
+  const v = $('#vu-version')?.textContent?.trim() || null;
+  applyVersionUpdate(v);
+});
+$('#version-update-modal')?.addEventListener('click', (e) => {
+  // mandatory — only close via Update button, ignore backdrop click
+  if (e.target.id === 'version-update-modal') {
+    e.stopPropagation();
+  }
 });
 $('#mc-settings')?.addEventListener('click', ()=>openSettingsModal('settings'));
 $('#mc-help')?.addEventListener('click', openHelpModal);

@@ -4,6 +4,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { Readable } = require('stream');
 
+const PKG = (() => { try { return require('./package.json'); } catch { return { version: '1.2.1' }; } })();
+const APP_VERSION_SERVER = PKG.version || '1.2.1';
 const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
@@ -1282,11 +1284,23 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+app.get('/api/app-version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  res.json({
+    version: APP_VERSION_SERVER,
+    assetCache: `dnialify-assets-v${APP_VERSION_SERVER}`,
+    minVersion: '1.2.0',
+    updatedAt: new Date().toISOString(),
+  });
+});
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     app: 'dnialify-music-stream',
-    version: '1.2.1',
+    version: APP_VERSION_SERVER,
     uptime: process.uptime(),
   });
 });
