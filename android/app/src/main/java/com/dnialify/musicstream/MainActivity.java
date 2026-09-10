@@ -14,18 +14,36 @@ import java.util.Collections;
 import com.getcapacitor.BridgeActivity;
 import android.widget.TextView;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.util.TypedValue;
 
 public class MainActivity extends BridgeActivity {
     public static MainActivity current;
     private static final String TAG_DIAG = "DnialifyDiag";
     // DiagnosticsBridge receives batched JSON logs from diag-bg.html during background
     private final DiagnosticsBridge diagnosticsBridge = new DiagnosticsBridge();
-    // Phase 10 — temporary native HELLO WORLD diagnostic (no WebView dependency)
-    private TextView pipDiagnosticView;
+    // Phase 11 — native PiP renderer (mirrors WebView state, no second playback engine)
+    private ViewGroup pipNativeView;
+    private ImageView pipArtView;
+    private TextView pipTitleView;
+    private TextView pipArtistView;
+    private TextView pipLyricView;
+    private String pipTitle = "Dnialify Music Stream";
+    private String pipArtist = "MusicStream";
+    private String pipArtworkUrl = "";
+    private String pipCurrentLyric = "";
+    private long pipPositionMs = 0;
+    private long pipDurationMs = 0;
+    private boolean pipIsPlaying = false;
+    private Bitmap pipArtworkBitmap;
+    private String pipLoadedArtworkUrl = "";
 
     @Override
     public void onCreate(android.os.Bundle state) {
@@ -85,9 +103,9 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "onStart inject error " + e);
         }
-        // Phase 10 — HELLO WORLD native overlay (existing hierarchy, no overlay Window, no new Activity)
-        ensurePipDiagnosticOverlay();
-        logPipOverlay("onStart");
+        // Phase 11 — native PiP view (GONE until PiP, mirrors WebView state)
+        ensurePipNativeView();
+        logPipNative("onStart");
     }
 
     @Override
@@ -95,25 +113,24 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         logLifecycle("onResume");
         logKeepRunning();
-        logPipOverlay("onResume");
+        logPipNative("onResume");
     }
 
     @Override
     public void onPause() {
         logLifecycle("onPause");
         logKeepRunning();
-        logPipOverlay("onPause");
+        logPipNative("onPause");
         super.onPause();
-        // log after super to catch visibility after pause dispatch
-        logPipOverlay("onPause:afterSuper");
+        logPipNative("onPause:afterSuper");
     }
 
     @Override
     public void onStop() {
         logLifecycle("onStop");
-        logPipOverlay("onStop:beforeSuper");
+        logPipNative("onStop:beforeSuper");
         super.onStop();
-        logPipOverlay("onStop:afterSuper");
+        logPipNative("onStop:afterSuper");
     }
 
     @Override
@@ -126,7 +143,7 @@ public class MainActivity extends BridgeActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         android.util.Log.d(TAG_DIAG, "Activity onWindowFocusChanged hasFocus=" + hasFocus + " " + lifecycleSnapshot());
-        logPipOverlay("onWindowFocusChanged:" + hasFocus);
+        logPipNative("onWindowFocusChanged:" + hasFocus);
     }
 
     @Override
@@ -134,7 +151,7 @@ public class MainActivity extends BridgeActivity {
         // API29+ — top resumed indicates true foreground
         super.onTopResumedActivityChanged(isTopResumed);
         android.util.Log.d(TAG_DIAG, "Activity onTopResumedActivityChanged isTopResumed=" + isTopResumed + " " + lifecycleSnapshot());
-        logPipOverlay("onTopResumed:" + isTopResumed);
+        logPipNative("onTopResumed:" + isTopResumed);
     }
 
     private void logLifecycle(String event) {
@@ -312,96 +329,163 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // Phase 10 — temporary diagnostic overlay: native HELLO WORLD panel in existing hierarchy
-    private void ensurePipDiagnosticOverlay() {
+    // Phase 11 — native PiP renderer (portrait 9:16, artwork bg + dark overlay + title/artist/lyric)
+    private void ensurePipNativeView() {
         try {
-            if (pipDiagnosticView != null) {
-                // already attached
-                android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay already attached");
-                return;
-            }
+            if (pipNativeView != null) return;
             ViewGroup content = findViewById(android.R.id.content);
             if (content == null) {
                 View decor = getWindow() != null ? getWindow().getDecorView() : null;
                 if (decor instanceof ViewGroup) content = (ViewGroup) decor;
             }
             if (content == null) {
-                android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attach failed: content null");
+                android.util.Log.d(TAG_DIAG, "[PipNative] attach failed: content null");
                 return;
             }
-            TextView tv = new TextView(this);
-            tv.setText("HELLO WORLD");
-            tv.setTextSize(28);
-            tv.setTextColor(Color.WHITE);
-            tv.setBackgroundColor(Color.parseColor("#D32F2F")); // opaque red high contrast
-            tv.setGravity(Gravity.CENTER);
-            tv.setPadding(32, 32, 32, 32);
-            tv.setVisibility(View.GONE);
-            tv.setAlpha(1f);
-            // attach to existing hierarchy — not overlay Window, not new Activity, not replacing WebView
-            FrameLayout.LayoutParams lp;
-            if (content instanceof FrameLayout) {
-                lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-                lp.gravity = Gravity.CENTER;
-            } else {
-                lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            }
-            // Ensure WebView stays, overlay added as sibling last on top but GONE so WebView usable
-            content.addView(tv, lp);
-            pipDiagnosticView = tv;
-            // Log immediately — keep GONE during normal browsing
-            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attached GONE parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
-            logPipOverlay("overlayAttached:GONE");
+            FrameLayout root = new FrameLayout(this);
+            root.setVisibility(View.GONE);
+            root.setBackgroundColor(Color.BLACK);
+            // artwork
+            ImageView art = new ImageView(this);
+            art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            art.setVisibility(View.VISIBLE);
+            FrameLayout.LayoutParams artLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(art, artLp);
+            // dark translucent overlay for readability
+            View overlay = new View(this);
+            overlay.setBackgroundColor(Color.parseColor("#66000000"));
+            FrameLayout.LayoutParams ovLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(overlay, ovLp);
+            // text container at bottom
+            LinearLayout container = new LinearLayout(this);
+            container.setOrientation(LinearLayout.VERTICAL);
+            container.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+            int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 16, getResources().getDisplayMetrics());
+            int padBottom = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20, getResources().getDisplayMetrics());
+            container.setPadding(pad, pad, pad, padBottom);
+            container.setGravity(Gravity.CENTER);
+            FrameLayout.LayoutParams contLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            contLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            // title
+            TextView titleTv = new TextView(this);
+            titleTv.setText(pipTitle);
+            titleTv.setTextColor(Color.WHITE);
+            titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            titleTv.setTypeface(null, android.graphics.Typeface.BOLD);
+            titleTv.setGravity(Gravity.CENTER);
+            titleTv.setMaxLines(2);
+            titleTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tLp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 4, getResources().getDisplayMetrics());
+            container.addView(titleTv, tLp);
+            // artist
+            TextView artistTv = new TextView(this);
+            artistTv.setText(pipArtist);
+            artistTv.setTextColor(Color.parseColor("#E0FFFFFF"));
+            artistTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            artistTv.setGravity(Gravity.CENTER);
+            artistTv.setMaxLines(1);
+            artistTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            aLp.bottomMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, getResources().getDisplayMetrics());
+            container.addView(artistTv, aLp);
+            // lyric — visual focus
+            TextView lyricTv = new TextView(this);
+            lyricTv.setText(pipCurrentLyric.isEmpty() ? "♪" : pipCurrentLyric);
+            lyricTv.setTextColor(Color.WHITE);
+            lyricTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+            lyricTv.setTypeface(null, android.graphics.Typeface.BOLD);
+            lyricTv.setGravity(Gravity.CENTER);
+            lyricTv.setMaxLines(3);
+            lyricTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            lyricTv.setShadowLayer(6f, 0f, 2f, Color.BLACK);
+            lyricTv.setBackgroundColor(Color.parseColor("#33000000"));
+            int lyricPad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8, getResources().getDisplayMetrics());
+            lyricTv.setPadding(lyricPad, lyricPad, lyricPad, lyricPad);
+            LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            container.addView(lyricTv, lLp);
+            root.addView(container, contLp);
+            FrameLayout.LayoutParams rootLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            content.addView(root, rootLp);
+            pipNativeView = root;
+            pipArtView = art;
+            pipTitleView = titleTv;
+            pipArtistView = artistTv;
+            pipLyricView = lyricTv;
+            android.util.Log.d(TAG_DIAG, "[PipNative] attached GONE parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
+            logPipNative("attached:GONE");
+            updatePipNativeView();
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attach err " + e);
+            android.util.Log.d(TAG_DIAG, "[PipNative] attach err " + e);
         }
     }
 
-    private void logPipOverlay(String phase) {
+    private void updatePipNativeView() {
         try {
-            if (pipDiagnosticView == null) {
-                boolean isPip = false;
-                try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
-                android.util.Log.d(TAG_DIAG, "[PiPDebug] " + phase + " overlay=null isInPip=" + isPip);
-                return;
-            }
-            String visStr = "UNKNOWN";
-            int vis = pipDiagnosticView.getVisibility();
-            if (vis == View.VISIBLE) visStr = "VISIBLE";
-            else if (vis == View.INVISIBLE) visStr = "INVISIBLE";
-            else if (vis == View.GONE) visStr = "GONE";
-            else visStr = String.valueOf(vis);
+            if (pipNativeView == null || pipTitleView == null) return;
+            runOnUiThread(() -> {
+                try {
+                    pipTitleView.setText(pipTitle == null || pipTitle.isEmpty() ? "Dnialify Music Stream" : pipTitle);
+                    pipArtistView.setText(pipArtist == null || pipArtist.isEmpty() ? "MusicStream" : pipArtist);
+                    String lyric = pipCurrentLyric == null || pipCurrentLyric.trim().isEmpty() ? "♪" : pipCurrentLyric;
+                    pipLyricView.setText(lyric);
+                    String url = pipArtworkUrl;
+                    boolean hasArt = url != null && !url.isEmpty();
+                    if (hasArt && !url.equals(pipLoadedArtworkUrl)) {
+                        loadArtworkNative(url);
+                    } else if (!hasArt) {
+                        pipArtView.setImageDrawable(null);
+                        pipNativeView.setBackgroundColor(Color.parseColor("#121212"));
+                    }
+                    android.util.Log.d(TAG_DIAG, "[PipNative] update title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + hasArt + " lyric=" + lyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs + " playing=" + pipIsPlaying);
+                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update err " + e); }
+            });
+        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update outer err " + e); }
+    }
+
+    private void loadArtworkNative(String url) {
+        try {
+            if (url == null || url.isEmpty()) return;
+            String target = url;
+            new Thread(() -> {
+                try {
+                    Bitmap bmp = BitmapFactory.decodeStream(new java.net.URL(target).openStream());
+                    if (bmp != null) {
+                        runOnUiThread(() -> {
+                            try {
+                                if (pipArtView != null && target.equals(pipArtworkUrl)) {
+                                    pipArtView.setImageBitmap(bmp);
+                                    pipArtworkBitmap = bmp;
+                                    pipLoadedArtworkUrl = target;
+                                    android.util.Log.d(TAG_DIAG, "[PipNative] artwork loaded " + bmp.getWidth() + "x" + bmp.getHeight() + " url=" + target);
+                                }
+                            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] set bmp err " + e); }
+                        });
+                    } else {
+                        android.util.Log.d(TAG_DIAG, "[PipNative] artwork decode null url=" + target);
+                    }
+                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] artwork load err " + e + " url=" + target); }
+            }).start();
+        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] loadArt outer err " + e); }
+    }
+
+    private void logPipNative(String phase) {
+        try {
             boolean isPip = false;
             try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
-            int w = pipDiagnosticView.getWidth();
-            int h = pipDiagnosticView.getHeight();
-            int mw = pipDiagnosticView.getMeasuredWidth();
-            int mh = pipDiagnosticView.getMeasuredHeight();
-            boolean shown = pipDiagnosticView.isShown();
-            float alpha = pipDiagnosticView.getAlpha();
+            String vis = pipNativeView == null ? "null" : (pipNativeView.getVisibility()==View.VISIBLE?"VISIBLE":pipNativeView.getVisibility()==View.GONE?"GONE":"INVISIBLE");
+            boolean shown = pipNativeView != null && pipNativeView.isShown();
+            int w = pipNativeView != null ? pipNativeView.getWidth() : -1;
+            int h = pipNativeView != null ? pipNativeView.getHeight() : -1;
             String parentInfo = "null";
             try {
-                ViewGroup p = (ViewGroup) pipDiagnosticView.getParent();
-                if (p != null) {
-                    String pVis = p.getVisibility() == View.VISIBLE ? "VISIBLE" : p.getVisibility() == View.GONE ? "GONE" : "INVISIBLE";
-                    parentInfo = p.getClass().getSimpleName() + " vis=" + pVis + " shown=" + p.isShown() + " size=" + p.getWidth() + "x" + p.getHeight() + " childIdx=" + p.indexOfChild(pipDiagnosticView) + "/" + p.getChildCount();
-                    // grandparent one level
-                    if (p.getParent() instanceof ViewGroup) {
-                        ViewGroup gp = (ViewGroup) p.getParent();
-                        String gpVis = gp.getVisibility() == View.VISIBLE ? "VISIBLE" : gp.getVisibility() == View.GONE ? "GONE" : "INVISIBLE";
-                        parentInfo += " gp=" + gp.getClass().getSimpleName() + " vis=" + gpVis + " size=" + gp.getWidth() + "x" + gp.getHeight();
-                    }
-                    // root hierarchy depth
-                    int depth = 0;
-                    View v = pipDiagnosticView;
-                    while (v.getParent() instanceof View) { depth++; v = (View) v.getParent(); if (depth>10) break; }
-                    parentInfo += " depth=" + depth;
+                if (pipNativeView != null && pipNativeView.getParent() instanceof ViewGroup) {
+                    ViewGroup p = (ViewGroup) pipNativeView.getParent();
+                    parentInfo = p.getClass().getSimpleName() + " vis=" + (p.getVisibility()==View.VISIBLE?"VISIBLE":"GONE") + " size=" + p.getWidth() + "x" + p.getHeight() + " idx=" + p.indexOfChild(pipNativeView) + "/" + p.getChildCount();
                 }
-            } catch (Exception e) { parentInfo = "err:" + e; }
-            android.util.Log.d(TAG_DIAG, "[PiPDebug] " + phase + " isInPip=" + isPip + " visibility=" + visStr + " shown=" + shown + " alpha=" + alpha + " size=" + w + "x" + h + " measured=" + mw + "x" + mh + " parent=" + parentInfo);
-        } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "[PiPDebug] log err " + e);
-        }
+            } catch (Exception e) { parentInfo = "err:"+e; }
+            android.util.Log.d(TAG_DIAG, "[PipNative] " + phase + " isInPip=" + isPip + " visibility=" + vis + " shown=" + shown + " size=" + w + "x" + h + " parent=" + parentInfo + " title=" + pipTitle + " artist=" + pipArtist + " lyric=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()));
+        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] log err " + e); }
     }
 
     @Override
@@ -416,22 +500,25 @@ public class MainActivity extends BridgeActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
         android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
-        // Phase 10 — keep HELLO WORLD visible only in PiP, GONE otherwise
+        // Phase 11 — native PiP view visible only in PiP
         try {
-            ensurePipDiagnosticOverlay();
-            if (pipDiagnosticView != null) {
+            ensurePipNativeView();
+            if (pipNativeView != null) {
                 if (isInPictureInPictureMode) {
-                    pipDiagnosticView.setVisibility(View.VISIBLE);
-                    pipDiagnosticView.bringToFront();
-                    pipDiagnosticView.requestLayout();
-                    pipDiagnosticView.invalidate();
+                    updatePipNativeView();
+                    pipNativeView.setVisibility(View.VISIBLE);
+                    pipNativeView.bringToFront();
+                    pipNativeView.requestLayout();
+                    pipNativeView.invalidate();
+                    ViewGroup parent = (ViewGroup) pipNativeView.getParent();
+                    if (parent != null) { parent.requestLayout(); parent.invalidate(); }
                 } else {
-                    pipDiagnosticView.setVisibility(View.GONE);
+                    pipNativeView.setVisibility(View.GONE);
                 }
             }
         } catch (Exception ignored) {}
-        logPipOverlay("onPictureInPictureModeChanged:" + isInPictureInPictureMode);
-        try { android.os.Handler hh = new android.os.Handler(android.os.Looper.getMainLooper()); hh.postDelayed(() -> logPipOverlay("pipDelayed400"), 400); hh.postDelayed(() -> logPipOverlay("pipDelayed800"), 800); hh.postDelayed(() -> { try { if(pipDiagnosticView!=null){pipDiagnosticView.bringToFront(); pipDiagnosticView.invalidate(); logPipOverlay("pipBringFront600");}}catch(Exception ignored){} }, 600); } catch(Exception ignored){}
+        logPipNative("onPictureInPictureModeChanged:" + isInPictureInPictureMode);
+        try { android.os.Handler hh = new android.os.Handler(android.os.Looper.getMainLooper()); hh.postDelayed(() -> logPipNative("pipDelayed400"), 400); hh.postDelayed(() -> logPipNative("pipDelayed800"), 800); hh.postDelayed(() -> { try { if(pipNativeView!=null){pipNativeView.bringToFront(); pipNativeView.invalidate(); logPipNative("pipBringFront600");}}catch(Exception ignored){} }, 600); } catch(Exception ignored){}
         try {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 final boolean pip = isInPictureInPictureMode;
@@ -562,12 +649,29 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, double positionMs, double durationMs) {
             android.util.Log.d("DnialifyDiag", "Bridge updateWebViewState title=" + title + " artist=" + artist + " playing=" + isPlaying + " pos=" + positionMs + " dur=" + durationMs);
+            // Phase 11 — mirror to native PiP (WebView is source of truth, no second playback system)
+            try {
+                if (title != null) pipTitle = title;
+                if (artist != null) pipArtist = artist;
+                if (artwork != null) pipArtworkUrl = artwork;
+                pipIsPlaying = isPlaying;
+                pipPositionMs = (long) positionMs;
+                pipDurationMs = (long) durationMs;
+                android.util.Log.d(TAG_DIAG, "[PipNative] stateUpdate title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " lyric=" + pipCurrentLyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs);
+                updatePipNativeView();
+            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] updateWebViewState mirror err " + e); }
             PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, (long) positionMs, (long) durationMs);
         }
 
         @JavascriptInterface
         public void updateLyrics(String prev, String current, String next) {
             android.util.Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
+            // Phase 11 — lyric mirror (do not reimplement parser, just display current)
+            try {
+                pipCurrentLyric = current == null ? "" : current;
+                android.util.Log.d(TAG_DIAG, "[PipNative] lyricUpdate current=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " title=" + pipTitle);
+                updatePipNativeView();
+            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] lyric mirror err " + e); }
             PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
         }
 
@@ -610,27 +714,27 @@ public class MainActivity extends BridgeActivity {
                             android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
                             return;
                         }
-                        // Phase 10 — show HELLO WORLD immediately before PiP entry (existing hierarchy, no overlay Window)
+                        // Phase 11 — show native PiP (artwork+title+artist+lyric) immediately before PiP entry
                         try {
-                            ensurePipDiagnosticOverlay();
-                            if (pipDiagnosticView != null) {
-                                pipDiagnosticView.setVisibility(View.VISIBLE);
-                                pipDiagnosticView.bringToFront();
-                                pipDiagnosticView.requestLayout();
-                                pipDiagnosticView.invalidate();
-                                // parent force layout
-                                ViewGroup parent = (ViewGroup) pipDiagnosticView.getParent();
+                            ensurePipNativeView();
+                            updatePipNativeView();
+                            if (pipNativeView != null) {
+                                pipNativeView.setVisibility(View.VISIBLE);
+                                pipNativeView.bringToFront();
+                                pipNativeView.requestLayout();
+                                pipNativeView.invalidate();
+                                ViewGroup parent = (ViewGroup) pipNativeView.getParent();
                                 if (parent != null) { parent.requestLayout(); parent.invalidate(); }
                             }
-                            logPipOverlay("enterPip:VISIBLE before enter");
-                        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PiPDebug] enterPip show err " + e); }
+                            logPipNative("enterPip:VISIBLE before enter");
+                        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] enterPip show err " + e); }
                         Rational ratio = new Rational(9, 16);
                         PictureInPictureParams params = new PictureInPictureParams.Builder()
                                 .setAspectRatio(ratio)
                                 .build();
                         boolean result = enterPictureInPictureMode(params);
                         android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode result=" + result + " " + lifecycleSnapshot());
-                        logPipOverlay("enterPip:afterEnter result=" + result);
+                        logPipNative("enterPip:afterEnter result=" + result);
                     } else {
                         android.util.Log.d(TAG_DIAG, "[Native] enterPip skipped SDK<26");
                     }
