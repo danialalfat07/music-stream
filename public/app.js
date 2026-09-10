@@ -677,6 +677,35 @@ function clearUserQueue() {
   renderQueue();
   toast('Queue cleared');
 }
+function scrambleRadioQueue() {
+  const indices = [];
+  Player.queue.forEach((q, i) => {
+    if (i > Player.index && !q._user) indices.push(i);
+  });
+  if (indices.length < 2) {
+    toast('Not enough radio tracks to scramble');
+    return;
+  }
+  const items = indices.map((i) => Player.queue[i]);
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+  indices.forEach((idx, k) => {
+    Player.queue[idx] = items[k];
+  });
+  renderQueue();
+  toast('Radio queue scrambled');
+}
+function removeRadioQueued(i) {
+  if (i === Player.index || i < 0 || i >= Player.queue.length) return;
+  if (i < Player.index) Player.index--;
+  Player.queue.splice(i, 1);
+  renderQueue();
+  toast('Removed from radio');
+}
 function slimSong(s) {
   if (!s || !s.videoId) return null;
   return {
@@ -1524,9 +1553,9 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    html += `<div class="q-head">From radio · ${radio.length}</div>`;
+    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button></div>`;
     html += radio
-      .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false))
+      .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false, `<button class="tbtn btn-rrm" data-qi="${i}" title="Remove from radio">${icon('i-x')}</button>`))
       .join('');
   }
   el.innerHTML = html;
@@ -1640,6 +1669,14 @@ function renderQueue() {
   }
   const clr = $('#q-clear', el);
   if (clr) clr.addEventListener('click', clearUserQueue);
+  const sc = $('#q-scramble', el);
+  if (sc) sc.addEventListener('click', scrambleRadioQueue);
+  $$('.btn-rrm', el).forEach((b) =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeRadioQueued(Number(b.dataset.qi));
+    }),
+  );
   persistQueue();
 }
 async function loadRelated(force = false) {

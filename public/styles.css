@@ -786,6 +786,9 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 .q-head-row { display: flex; align-items: center; justify-content: space-between; }
 .q-clear { font-size: 12px; font-weight: 700; color: var(--accent-bright); text-transform: none; letter-spacing: 0; }
 .q-clear:hover { color: var(--text); }
+#q-scramble { display:inline-flex; align-items:center; gap:6px; }
+#q-scramble .ic { width:14px; height:14px; fill:currentColor; }
+@media (max-width: 480px) { #q-scramble span { display:none; } }
 .q-note {
   font-size: 12.5px; color: var(--muted); font-weight: 600; line-height: 1.45;
   padding: 4px 8px 2px;
