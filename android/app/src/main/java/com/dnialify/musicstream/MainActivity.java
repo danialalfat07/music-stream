@@ -348,20 +348,25 @@ public class MainActivity extends BridgeActivity {
             }
             FrameLayout root = new FrameLayout(this);
             root.setVisibility(View.GONE);
-            root.setBackgroundColor(Color.BLACK); // solid dark, no artwork bg per spec (10 lines > big artwork)
-            // keep hidden ImageView for fallback if needed but GONE to save lyric space
+            root.setBackgroundColor(Color.BLACK); // fallback if artwork missing
+            // artwork as background — visible, fills PiP, not removed (spec: jangan hilang)
             ImageView art = new ImageView(this);
             art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            art.setVisibility(View.GONE);
+            art.setVisibility(View.VISIBLE);
             FrameLayout.LayoutParams artLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             root.addView(art, artLp);
-            // main vertical container: title + artist (tiny top 10-15%) + lyrics window fills rest
+            // darkening scrim menyatu — full-screen gradient-like, bukan card/box di belakang lyric
+            View scrim = new View(this);
+            scrim.setBackgroundColor(Color.parseColor("#B3000000")); // ~70% black, menyatu dengan artwork, bukan rectangle kuno
+            FrameLayout.LayoutParams scrimLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(scrim, scrimLp);
+            // main vertical container: title + artist (tiny top) + lyrics window — transparent agar artwork terlihat
             LinearLayout outer = new LinearLayout(this);
             outer.setOrientation(LinearLayout.VERTICAL);
             outer.setGravity(Gravity.CENTER_HORIZONTAL);
-            outer.setBackgroundColor(Color.BLACK);
-            int outerPadH = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, getResources().getDisplayMetrics());
-            int outerPadV = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8, getResources().getDisplayMetrics());
+            outer.setBackgroundColor(Color.TRANSPARENT);
+            int outerPadH = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 6, getResources().getDisplayMetrics());
+            int outerPadV = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 6, getResources().getDisplayMetrics());
             outer.setPadding(outerPadH, outerPadV, outerPadH, outerPadV);
             FrameLayout.LayoutParams outerLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             root.addView(outer, outerLp);
@@ -438,6 +443,19 @@ public class MainActivity extends BridgeActivity {
                 try {
                     pipTitleView.setText(pipTitle == null || pipTitle.isEmpty() ? "Dnialify Music Stream" : pipTitle);
                     pipArtistView.setText(pipArtist == null || pipArtist.isEmpty() ? "MusicStream" : pipArtist);
+                    // artwork as background — keep visible, fallback black only if missing (spec: jangan hitam polos)
+                    try {
+                        String url = pipArtworkUrl;
+                        boolean hasArt = url != null && !url.isEmpty();
+                        if (hasArt) {
+                            pipArtView.setVisibility(View.VISIBLE);
+                            if (!url.equals(pipLoadedArtworkUrl)) loadArtworkNative(url);
+                        } else {
+                            pipArtView.setImageDrawable(null);
+                            pipArtView.setVisibility(View.GONE);
+                            pipNativeView.setBackgroundColor(Color.BLACK);
+                        }
+                    } catch (Exception ignored) {}
                     // 10-line window — active centered
                     java.util.List<String> lines = pipLyricLines;
                     int active = pipLyricActiveIdx;
@@ -500,30 +518,26 @@ public class MainActivity extends BridgeActivity {
 
     private void applyLyricLineStyle(TextView tv, boolean isActive, int dist) {
         try {
+            // Optimize width first: use full MATCH_PARENT, minimal padding, singleLine, ellipsize already
+            // Font sizes tuned for ~30 chars per line in 9:16 PiP (~360dp width minus 12dp padding)
             if (isActive) {
-                tv.setTextColor(Color.parseColor("#1ED760")); // Spotify green
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                tv.setTextColor(Color.parseColor("#1ED760")); // Spotify green solid
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14); // slightly larger but not huge → ~30 chars fit
                 tv.setTypeface(null, android.graphics.Typeface.BOLD);
                 tv.setAlpha(1f);
-                // no background/box/shadow/border
                 tv.setBackgroundColor(Color.TRANSPARENT);
+                tv.setLineSpacing(0, 1.1f);
             } else {
-                // distance-based muted gray — readable but distinct from active
-                // 1 neighbor: slightly brighter, farther: dimmer
-                int color;
-                float alpha;
-                float size;
-                if (dist == 1) { color = Color.parseColor("#B3B3B3"); alpha = 0.90f; size = 13f; }
-                else if (dist == 2) { color = Color.parseColor("#9E9E9E"); alpha = 0.80f; size = 13f; }
-                else if (dist <= 4) { color = Color.parseColor("#7A7A7A"); alpha = 0.70f; size = 12.5f; }
-                else { color = Color.parseColor("#6A6A6A"); alpha = 0.60f; size = 12f; }
-                tv.setTextColor(color);
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+                // all non-active solid #8A8A8A per spec (bukan opacity rendah)
+                tv.setTextColor(Color.parseColor("#8A8A8A"));
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12); // compact to fit 30+ chars
                 tv.setTypeface(null, android.graphics.Typeface.NORMAL);
-                tv.setAlpha(alpha);
+                tv.setAlpha(1f);
                 tv.setBackgroundColor(Color.TRANSPARENT);
+                tv.setLineSpacing(0, 1.15f);
             }
             tv.setShadowLayer(0,0,0,0);
+            tv.setPadding(0,0,0,0);
         } catch (Exception ignored) {}
     }
 
