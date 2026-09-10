@@ -38,6 +38,7 @@ public class MainActivity extends BridgeActivity {
     private java.util.List<TextView> pipLyricLineViews = new java.util.ArrayList<>();
     private java.util.List<String> pipLyricLines = new java.util.ArrayList<>();
     private int pipLyricActiveIdx = -1;
+    private int lastPipRenderedActiveIdx = -999;
     private android.widget.ScrollView pipLyricsScroll;
     private LinearLayout pipLyricsContainer;
     private String pipTitle = "Dnialify Music Stream";
@@ -448,29 +449,22 @@ public class MainActivity extends BridgeActivity {
             if (pipNativeView == null) return;
             int h = pipNativeView.getHeight();
             if (h <= 0) h = getResources().getDisplayMetrics().heightPixels / 3;
-            // windowHeight * factor — title 6%, artist 4.5%, lyric 3.5%
-            float titlePx = h * 0.06f;
-            float artistPx = h * 0.045f;
-            float lyricPx = h * 0.035f;
-            float activePx = lyricPx * 1.18f; // 18% larger + bold
-            // clamp for readability
-            titlePx = Math.max(10 * getResources().getDisplayMetrics().scaledDensity, Math.min(titlePx, 18 * getResources().getDisplayMetrics().scaledDensity));
-            artistPx = Math.max(9 * getResources().getDisplayMetrics().scaledDensity, Math.min(artistPx, 14 * getResources().getDisplayMetrics().scaledDensity));
-            lyricPx = Math.max(11 * getResources().getDisplayMetrics().scaledDensity, Math.min(lyricPx, 16 * getResources().getDisplayMetrics().scaledDensity));
-            activePx = Math.max(13 * getResources().getDisplayMetrics().scaledDensity, Math.min(activePx, 18 * getResources().getDisplayMetrics().scaledDensity));
-            if (pipTitleView != null) pipTitleView.setTextSize(TypedValue.COMPLEX_UNIT_PX, titlePx);
-            if (pipArtistView != null) pipArtistView.setTextSize(TypedValue.COMPLEX_UNIT_PX, artistPx);
-            // apply to lyric lines
-            for (int i=0;i<pipLyricLineViews.size();i++) {
-                TextView tv = pipLyricLineViews.get(i);
-                boolean isActive = false;
-                try { isActive = pipLyricLines != null && pipLyricActiveIdx >=0 && (pipLyricLines.get(pipLyricActiveIdx).equals(tv.getText().toString())); } catch (Exception ignored) {}
-                // actual active check via index, but after update we know dist; for scaling just set base, active will override
-                // keep generic; active style will be reapplied in updatePipNativeView
-            }
-            // store for applyLyricLineStyle
-            pipDynamicTitlePx = titlePx; pipDynamicArtistPx = artistPx; pipDynamicLyricPx = lyricPx; pipDynamicActivePx = activePx;
-            android.util.Log.d(TAG_DIAG, "[PipNative] scaling h=" + h + " titlePx=" + titlePx + " artistPx=" + artistPx + " lyricPx=" + lyricPx + " activePx=" + activePx);
+            float density = getResources().getDisplayMetrics().scaledDensity;
+            // FIX Bug1: gunakan SP dengan pembagi density, multiplier 1/4 dari sebelumnya
+            float titleSp = (h * 0.015f) / density;
+            float artistSp = (h * 0.011f) / density;
+            float lyricSp = (h * 0.009f) / density;
+            float activeSp = lyricSp * 1.18f;
+            // clamp baru: Title max 14sp, Artist 11sp, Inactive 10sp, Active 12sp
+            titleSp = Math.max(10f, Math.min(titleSp, 14f));
+            artistSp = Math.max(8f, Math.min(artistSp, 11f));
+            lyricSp = Math.max(8f, Math.min(lyricSp, 10f));
+            activeSp = Math.max(10f, Math.min(activeSp, 12f));
+            if (pipTitleView != null) pipTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp);
+            if (pipArtistView != null) pipArtistView.setTextSize(TypedValue.COMPLEX_UNIT_SP, artistSp);
+            // store SP values (nama variabel tetap Px untuk kompatibilitas)
+            pipDynamicTitlePx = titleSp; pipDynamicArtistPx = artistSp; pipDynamicLyricPx = lyricSp; pipDynamicActivePx = activeSp;
+            android.util.Log.d(TAG_DIAG, "[PipNative] scaling FIX h=" + h + " density=" + density + " titleSp=" + titleSp + " artistSp=" + artistSp + " lyricSp=" + lyricSp + " activeSp=" + activeSp + " PX_vs_SP=SP_benar");
         } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] scaling err " + e); }
     }
     private float pipDynamicTitlePx = -1, pipDynamicArtistPx = -1, pipDynamicLyricPx = -1, pipDynamicActivePx = -1;
@@ -547,6 +541,14 @@ public class MainActivity extends BridgeActivity {
                     } else {
                         start = 0; end = size - 1;
                     }
+                    // COMPREHENSIVE DEBUG
+                    boolean _isPip = false; try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) _isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
+                    android.util.Log.d(TAG_DIAG, "[PipNative] update DEBUG size=" + size + " activeIdx=" + active + " start=" + start + " end=" + end + " window=10 isInPip=" + _isPip);
+                    for (int dbg=0; dbg<10; dbg++) {
+                        int src = start + dbg;
+                        String txt = (src>=0 && src<size ? pipLyricLines.get(src) : "OUT_OF_BOUNDS");
+                        android.util.Log.d(TAG_DIAG, "[PipNative] line["+dbg+"] srcIdx="+src+" text=\""+txt+"\" isActive="+(src==active)+" visibility="+(src<0||src>end||src>=size?"INVISIBLE":"VISIBLE"));
+                    }
                     for (int i = 0; i < 10; i++) {
                         TextView tv = pipLyricLineViews.get(i);
                         int srcIdx = start + i;
@@ -561,24 +563,25 @@ public class MainActivity extends BridgeActivity {
                         if (txt.isEmpty()) txt = "♪";
                         boolean isActive = srcIdx == active;
                         tv.setText(txt);
-                        tv.setVisibility(View.VISIBLE);
+                        tv.setVisibility(View.VISIBLE); // FIX Bug2: prev/next VISIBLE dengan alpha 0.4, bukan GONE/INVISIBLE
                         int dist = Math.abs(srcIdx - active);
                         applyLyricLineStyle(tv, isActive, dist);
                     }
-                    // smooth auto-scroll active centered (only when active changes, not every ms — caller throttled)
+                    // FIX Bug2: postDelayed 150ms agar layout selesai measure sebelum getTop()
                     final int activeFinal = active;
                     final int startFinal = start;
-                    if (pipLyricsScroll != null) {
-                        pipLyricsScroll.post(() -> {
+                    boolean shouldScroll = activeFinal != lastPipRenderedActiveIdx;
+                    if (pipLyricsScroll != null && shouldScroll) {
+                        pipLyricsScroll.postDelayed(() -> {
                             try {
                                 int idxInWin = activeFinal - startFinal;
                                 if (idxInWin <0 || idxInWin >= pipLyricLineViews.size()) return;
                                 View av = pipLyricLineViews.get(idxInWin);
                                 int target = av.getTop() - (pipLyricsScroll.getHeight() - av.getHeight())/2;
                                 pipLyricsScroll.smoothScrollTo(0, Math.max(0, target));
-                            } catch (Exception ignored) {}
-                        });
-                        // scale transition 200ms
+                                android.util.Log.d(TAG_DIAG, "[PipNative] smoothScrollTo target=" + target + " activeTop=" + av.getTop());
+                            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] scroll err " + e); }
+                        }, 150);
                         try {
                             for (int i=0;i<pipLyricLineViews.size();i++) {
                                 TextView tv = pipLyricLineViews.get(i);
@@ -586,8 +589,11 @@ public class MainActivity extends BridgeActivity {
                                 tv.animate().scaleX(isA?1.07f:1f).scaleY(isA?1.07f:1f).setDuration(200).start();
                             }
                         } catch (Exception ignored) {}
+                        lastPipRenderedActiveIdx = activeFinal;
+                    } else {
+                        android.util.Log.d(TAG_DIAG, "[PipNative] skip scroll same activeIdx=" + activeFinal);
                     }
-                    android.util.Log.d(TAG_DIAG, "[PipNative] update 10line title=" + pipTitle + " artist=" + pipArtist + " activeIdx=" + active + " window=" + start + "-" + end + " size=" + size + " lyric=" + pipCurrentLyric);
+                    android.util.Log.d(TAG_DIAG, "[PipNative] update 10line title=" + pipTitle + " artist=" + pipArtist + " activeIdx=" + active + " window=" + start + "-" + end + " size=" + size + " lyric=" + pipCurrentLyric + " shouldScroll=" + shouldScroll);
                 } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update err " + e); }
             });
         } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update outer err " + e); }
@@ -595,25 +601,29 @@ public class MainActivity extends BridgeActivity {
 
     private void applyLyricLineStyle(TextView tv, boolean isActive, int dist) {
         try {
-            float lyricPx = pipDynamicLyricPx > 0 ? pipDynamicLyricPx : 12 * getResources().getDisplayMetrics().scaledDensity;
-            float activePx = pipDynamicActivePx > 0 ? pipDynamicActivePx : 14 * getResources().getDisplayMetrics().scaledDensity;
+            float lyricSp = pipDynamicLyricPx > 0 ? pipDynamicLyricPx : 10f;
+            float activeSp = pipDynamicActivePx > 0 ? pipDynamicActivePx : 12f;
             if (isActive) {
                 tv.setTextColor(Color.parseColor("#1DB954")); // bright green
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, activePx);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, activeSp);
                 tv.setTypeface(null, android.graphics.Typeface.BOLD);
                 tv.setAlpha(1f);
                 tv.setBackgroundColor(Color.TRANSPARENT);
                 tv.setLineSpacing(0, 1.15f);
-                tv.setMaxLines(2);
+                // FIX Bug1 wrapping: active boleh wrap 5 baris, HAPUS ellipsize
+                tv.setMaxLines(5);
+                tv.setEllipsize(null);
+                tv.setSingleLine(false);
                 tv.setScaleX(1.07f); tv.setScaleY(1.07f);
-                // smooth transition 200ms via ViewPropertyAnimator handled in update (scale)
             } else {
-                tv.setTextColor(Color.parseColor("#FFFFFF")); tv.setAlpha(0.42f); // inactive white 0.4 per spec (past/future)
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, lyricPx);
+                tv.setTextColor(Color.parseColor("#FFFFFF")); tv.setAlpha(0.42f); // inactive white 0.4 per spec, solid via alpha
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, lyricSp);
                 tv.setTypeface(null, android.graphics.Typeface.NORMAL);
                 tv.setBackgroundColor(Color.TRANSPARENT);
                 tv.setLineSpacing(0, 1.2f);
                 tv.setMaxLines(2);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setSingleLine(false);
                 tv.setScaleX(1f); tv.setScaleY(1f);
             }
             tv.setShadowLayer(0,0,0,0);
