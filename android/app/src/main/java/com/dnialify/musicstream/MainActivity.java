@@ -12,12 +12,20 @@ import java.io.InputStream;
 import java.util.Collections;
 
 import com.getcapacitor.BridgeActivity;
+import android.widget.TextView;
+import android.widget.FrameLayout;
+import android.graphics.Color;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 
 public class MainActivity extends BridgeActivity {
     public static MainActivity current;
     private static final String TAG_DIAG = "DnialifyDiag";
     // DiagnosticsBridge receives batched JSON logs from diag-bg.html during background
     private final DiagnosticsBridge diagnosticsBridge = new DiagnosticsBridge();
+    // Phase 10 — temporary native HELLO WORLD diagnostic (no WebView dependency)
+    private TextView pipDiagnosticView;
 
     @Override
     public void onCreate(android.os.Bundle state) {
@@ -77,6 +85,9 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "onStart inject error " + e);
         }
+        // Phase 10 — HELLO WORLD native overlay (existing hierarchy, no overlay Window, no new Activity)
+        ensurePipDiagnosticOverlay();
+        logPipOverlay("onStart");
     }
 
     @Override
@@ -84,19 +95,25 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         logLifecycle("onResume");
         logKeepRunning();
+        logPipOverlay("onResume");
     }
 
     @Override
     public void onPause() {
         logLifecycle("onPause");
         logKeepRunning();
+        logPipOverlay("onPause");
         super.onPause();
+        // log after super to catch visibility after pause dispatch
+        logPipOverlay("onPause:afterSuper");
     }
 
     @Override
     public void onStop() {
         logLifecycle("onStop");
+        logPipOverlay("onStop:beforeSuper");
         super.onStop();
+        logPipOverlay("onStop:afterSuper");
     }
 
     @Override
@@ -109,6 +126,7 @@ public class MainActivity extends BridgeActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         android.util.Log.d(TAG_DIAG, "Activity onWindowFocusChanged hasFocus=" + hasFocus + " " + lifecycleSnapshot());
+        logPipOverlay("onWindowFocusChanged:" + hasFocus);
     }
 
     @Override
@@ -116,6 +134,7 @@ public class MainActivity extends BridgeActivity {
         // API29+ — top resumed indicates true foreground
         super.onTopResumedActivityChanged(isTopResumed);
         android.util.Log.d(TAG_DIAG, "Activity onTopResumedActivityChanged isTopResumed=" + isTopResumed + " " + lifecycleSnapshot());
+        logPipOverlay("onTopResumed:" + isTopResumed);
     }
 
     private void logLifecycle(String event) {
@@ -293,6 +312,101 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // Phase 10 — temporary diagnostic overlay: native HELLO WORLD panel in existing hierarchy
+    private void ensurePipDiagnosticOverlay() {
+        try {
+            if (pipDiagnosticView != null) {
+                // already attached
+                android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay already attached");
+                return;
+            }
+            ViewGroup content = findViewById(android.R.id.content);
+            if (content == null) {
+                View decor = getWindow() != null ? getWindow().getDecorView() : null;
+                if (decor instanceof ViewGroup) content = (ViewGroup) decor;
+            }
+            if (content == null) {
+                android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attach failed: content null");
+                return;
+            }
+            TextView tv = new TextView(this);
+            tv.setText("HELLO WORLD");
+            tv.setTextSize(28);
+            tv.setTextColor(Color.WHITE);
+            tv.setBackgroundColor(Color.parseColor("#D32F2F")); // opaque red high contrast
+            tv.setGravity(Gravity.CENTER);
+            tv.setPadding(32, 32, 32, 32);
+            tv.setVisibility(View.VISIBLE);
+            tv.setAlpha(1f);
+            // attach to existing hierarchy — not overlay Window, not new Activity, not replacing WebView
+            FrameLayout.LayoutParams lp;
+            if (content instanceof FrameLayout) {
+                lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+                lp.gravity = Gravity.CENTER;
+            } else {
+                lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            }
+            // Ensure WebView stays, overlay added as sibling last on top
+            content.addView(tv, lp);
+            pipDiagnosticView = tv;
+            tv.bringToFront();
+            // Log immediately
+            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attached parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
+            logPipOverlay("overlayAttached");
+            // Ensure visible in normal activity before PiP as required
+            tv.setVisibility(View.VISIBLE);
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "[PiPDebug] overlay attach err " + e);
+        }
+    }
+
+    private void logPipOverlay(String phase) {
+        try {
+            if (pipDiagnosticView == null) {
+                boolean isPip = false;
+                try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
+                android.util.Log.d(TAG_DIAG, "[PiPDebug] " + phase + " overlay=null isInPip=" + isPip);
+                return;
+            }
+            String visStr = "UNKNOWN";
+            int vis = pipDiagnosticView.getVisibility();
+            if (vis == View.VISIBLE) visStr = "VISIBLE";
+            else if (vis == View.INVISIBLE) visStr = "INVISIBLE";
+            else if (vis == View.GONE) visStr = "GONE";
+            else visStr = String.valueOf(vis);
+            boolean isPip = false;
+            try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
+            int w = pipDiagnosticView.getWidth();
+            int h = pipDiagnosticView.getHeight();
+            int mw = pipDiagnosticView.getMeasuredWidth();
+            int mh = pipDiagnosticView.getMeasuredHeight();
+            boolean shown = pipDiagnosticView.isShown();
+            float alpha = pipDiagnosticView.getAlpha();
+            String parentInfo = "null";
+            try {
+                ViewGroup p = (ViewGroup) pipDiagnosticView.getParent();
+                if (p != null) {
+                    String pVis = p.getVisibility() == View.VISIBLE ? "VISIBLE" : p.getVisibility() == View.GONE ? "GONE" : "INVISIBLE";
+                    parentInfo = p.getClass().getSimpleName() + " vis=" + pVis + " shown=" + p.isShown() + " size=" + p.getWidth() + "x" + p.getHeight() + " childIdx=" + p.indexOfChild(pipDiagnosticView) + "/" + p.getChildCount();
+                    // grandparent one level
+                    if (p.getParent() instanceof ViewGroup) {
+                        ViewGroup gp = (ViewGroup) p.getParent();
+                        String gpVis = gp.getVisibility() == View.VISIBLE ? "VISIBLE" : gp.getVisibility() == View.GONE ? "GONE" : "INVISIBLE";
+                        parentInfo += " gp=" + gp.getClass().getSimpleName() + " vis=" + gpVis + " size=" + gp.getWidth() + "x" + gp.getHeight();
+                    }
+                    // root hierarchy depth
+                    int depth = 0;
+                    View v = pipDiagnosticView;
+                    while (v.getParent() instanceof View) { depth++; v = (View) v.getParent(); if (depth>10) break; }
+                    parentInfo += " depth=" + depth;
+                }
+            } catch (Exception e) { parentInfo = "err:" + e; }
+            android.util.Log.d(TAG_DIAG, "[PiPDebug] " + phase + " isInPip=" + isPip + " visibility=" + visStr + " shown=" + shown + " alpha=" + alpha + " size=" + w + "x" + h + " measured=" + mw + "x" + mh + " parent=" + parentInfo);
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "[PiPDebug] log err " + e);
+        }
+    }
+
     @Override
     public void onDestroy() {
         android.util.Log.d(TAG_DIAG, "Activity onDestroy " + lifecycleSnapshot());
@@ -305,6 +419,10 @@ public class MainActivity extends BridgeActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
         android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
+        // Phase 10 — keep HELLO WORLD visible in PiP, log state
+        try { ensurePipDiagnosticOverlay(); if (pipDiagnosticView != null) { pipDiagnosticView.setVisibility(View.VISIBLE); pipDiagnosticView.bringToFront(); pipDiagnosticView.invalidate(); } } catch (Exception ignored) {}
+        logPipOverlay("onPictureInPictureModeChanged:" + isInPictureInPictureMode);
+        try { android.os.Handler hh = new android.os.Handler(android.os.Looper.getMainLooper()); hh.postDelayed(() -> logPipOverlay("pipDelayed400"), 400); hh.postDelayed(() -> logPipOverlay("pipDelayed800"), 800); hh.postDelayed(() -> { try { if(pipDiagnosticView!=null){pipDiagnosticView.bringToFront(); pipDiagnosticView.invalidate(); logPipOverlay("pipBringFront600");}}catch(Exception ignored){} }, 600); } catch(Exception ignored){}
         try {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 final boolean pip = isInPictureInPictureMode;
