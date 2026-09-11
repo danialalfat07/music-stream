@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.4";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -4449,7 +4449,7 @@ $('#mini-close').addEventListener('click', (e) => {
   e.stopPropagation();
   closePlayer();
 });
-// swipe on miniplayer mobile = pause (not close+autoplay)
+// swipe on miniplayer mobile = pause + hide overlay + clear state + clear notif
 (() => {
   const mp = $('#miniplayer');
   if (!mp) return;
@@ -4469,13 +4469,12 @@ $('#mini-close').addEventListener('click', (e) => {
     if (absY > 10 || absX > 10) {
       didSwipe = true;
       if (absX > absY) {
-        mp.style.transform = `translateX(${dx * 0.3}px)`;
-        mp.style.opacity = String(Math.max(0.6, 1 - absX / 300));
+        mp.style.transform = `translateX(${dx * 0.35}px)`;
+        mp.style.opacity = String(Math.max(0.4, 1 - absX / 220));
       } else if (dy > 0) {
-        mp.style.transform = `translateY(${dy * 0.4}px)`;
-        mp.style.opacity = String(Math.max(0.6, 1 - dy / 200));
+        mp.style.transform = `translateY(${dy * 0.45}px)`;
+        mp.style.opacity = String(Math.max(0.4, 1 - dy / 160));
       }
-      // prevent scroll
       if (absX > 10 || absY > 10) e.preventDefault();
     }
   }, { passive: false });
@@ -4491,28 +4490,25 @@ $('#mini-close').addEventListener('click', (e) => {
     const dx = t.clientX - sx, dy = t.clientY - sy;
     const dt = Date.now() - startTime;
     const absX = Math.abs(dx), absY = Math.abs(dy);
-    let shouldPause = false;
-    if (absX > 70 && absX > absY) shouldPause = true;
-    else if (dy > 45 && absY > absX) shouldPause = true;
-    else if (absX > 50 && dt < 300 && absX > absY) shouldPause = true;
-    if (shouldPause && didSwipe) {
+    let shouldClose = false;
+    if (absX > 75 && absX > absY) shouldClose = true;
+    else if (dy > 50 && absY > absX) shouldClose = true;
+    else if (absX > 55 && dt < 300 && absX > absY) shouldClose = true;
+    if (shouldClose && didSwipe) {
       e.preventDefault(); e.stopPropagation();
-      mp.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
-      mp.style.transform = '';
-      mp.style.opacity = '';
-      setTimeout(resetMP, 180);
-      // pause, not close — avoid autoplay bug
-      try {
-        const isPaused = document.body.classList.contains('paused') || (Player.audio && Player.audio.paused);
-        // if already paused, do nothing; if playing, pause
-        if (!isPaused) togglePlay();
-        else toast('Paused');
-      } catch {}
+      mp.style.transition = 'transform 0.22s ease, opacity 0.22s ease';
+      mp.style.transform = absX > absY ? `translateX(${dx > 0 ? 120 : -120}%)` : `translateY(120%)`;
+      mp.style.opacity = '0';
+      setTimeout(() => {
+        mp.style.transition = '';
+        resetMP();
+        // true close: pause + hide overlay + clear queue/state + clear notif (no autoplay)
+        closePlayer();
+      }, 200);
       swiping = false;
-      // block next click that would open nowplaying
       const blockClick = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
       mp.addEventListener('click', blockClick, { capture: true, once: true });
-      setTimeout(() => mp.removeEventListener('click', blockClick, { capture: true }), 400);
+      setTimeout(() => mp.removeEventListener('click', blockClick, { capture: true }), 500);
       return;
     }
     mp.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
