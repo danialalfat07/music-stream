@@ -118,15 +118,10 @@ function closeNowPlaying() {
 function closePlayer() {
   // reset throttle so next play will push fresh, and de-bounce YT transient
   try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); } catch {}
-  // force native notif gone even when Player.current will be cleared — bypass pushNativeState guard
+  // force native notif gone — single stop, no extra updateWebViewState that could resurrect
   try {
-    if (window.NativePlayback) {
-      if (typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
-      else if (typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0);
-      else if (typeof window.NativePlayback.pause === 'function') window.NativePlayback.pause();
-      // extra direct clear via updateWebViewState with empty meta to ensure service cleared even if stop missed
-      try { if (typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0); } catch {}
-    }
+    if (window.NativePlayback && typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
+    else if (window.NativePlayback && typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0);
   } catch {}
   Player.pending = null;
   Player.queue = [];
@@ -1375,7 +1370,7 @@ setInterval(() => {
     cur = Player.native ? window.NativePlayback.currentTime() : Player.audio.currentTime || 0;
     dur = Player.native ? window.NativePlayback.duration() : Player.audio.duration || 0;
     playing = Player.native ? window.NativePlayback.isPlaying() : !Player.audio.paused;
-    if (Date.now() - _lastCloseMs < 1500) playing = false;
+    if (Date.now() - _lastCloseMs < 5000) playing = false;
     const now = Date.now();
     if (playing && _lastTick && Player.current) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
@@ -1392,7 +1387,7 @@ setInterval(() => {
       // if we were playing before close, force one final paused push via throttle logic below (need cur/dur 0)
       cur = 0; dur = 0; playing = false;
       // let UI reset already done in closePlayer, just handle notif de-bounce then return
-      if (Date.now() - _lastCloseMs < 1500) return;
+      if (Date.now() - _lastCloseMs < 5000) return;
       // fall through to notif push handling below then return
       const pct0 = 0;
       // update notif throttling for 0/0 case
@@ -1410,8 +1405,8 @@ setInterval(() => {
     }
     cur = Player.yt.getCurrentTime() || 0;
     const _playingRaw = Player.yt.getPlayerState && Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
-    // de-bounce close: YT may still report PLAYING for ~500ms after stopVideo → treat as paused
-    playing = (Date.now() - _lastCloseMs < 1500) ? false : _playingRaw;
+    // de-bounce close: YT may still report PLAYING after stopVideo → treat as paused 5s
+    playing = (Date.now() - _lastCloseMs < 5000) ? false : _playingRaw;
     const now = Date.now();
     if (playing && _lastTick) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;

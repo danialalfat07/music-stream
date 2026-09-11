@@ -38,9 +38,13 @@ public class PlaybackService extends Service {
     private long durationMs;
     private boolean dismissedPaused = false;
     private long lastStopMs = 0;
+    private boolean isStopped = false;
 
     public static void arm(Context context) {
-        if (instance != null) { instance.publishNotification(); return; }
+        if (instance != null) {
+            if (instance.isStopped) return;
+            instance.publishNotification(); return;
+        }
         start(context, ACTION_ARM);
     }
 
@@ -80,6 +84,7 @@ public class PlaybackService extends Service {
     public static void updateLyricsStatic(Context context, String previous, String current, String next) {
         String cur = current == null ? "" : current;
         if (instance != null) {
+            if (instance.isStopped) return;
             instance.currentLyric = cur;
             instance.updateMediaSession();
             instance.publishNotification();
@@ -149,19 +154,33 @@ public class PlaybackService extends Service {
     }
 
     private void handleState(Intent intent) {
+        // if truly stopped, ignore any state until next real play
+        if (isStopped) {
+            boolean np = intent.getBooleanExtra("isPlaying", false);
+            if (!np) return;
+            // real play after stop → clear stopped flag
+            isStopped = false;
+            dismissedPaused = false;
+        }
         String nextTitle = intent.getStringExtra(EXTRA_TITLE);
         String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
         String nextArtwork = intent.getStringExtra(EXTRA_ARTWORK);
-        if (nextTitle != null && !nextTitle.isEmpty()) title = nextTitle;
-        if (nextArtist != null && !nextArtist.isEmpty()) artist = nextArtist;
-        if (nextArtwork != null && !nextArtwork.equals(artworkUrl)) {
-            artworkUrl = nextArtwork;
-            loadArtwork(nextArtwork);
+        // explicit close sends empty title/artist/artwork → clear stored meta
+        if (nextTitle != null) {
+            if (nextTitle.isEmpty()) title = "Dnialify Music Stream";
+            else title = nextTitle;
+        }
+        if (nextArtist != null) {
+            if (nextArtist.isEmpty()) artist = "MusicStream";
+            else artist = nextArtist;
+        }
+        if (nextArtwork != null) {
+            if (nextArtwork.isEmpty()) { artworkUrl = ""; artwork = null; }
+            else if (!nextArtwork.equals(artworkUrl)) { artworkUrl = nextArtwork; loadArtwork(nextArtwork); }
         }
         boolean nextPlaying = intent.getBooleanExtra("isPlaying", false);
-        // de-bounce: YT may report PLAYING ~500ms after stopVideo → ignore transient playing after close
-        if (nextPlaying && System.currentTimeMillis() - lastStopMs < 1500) {
-            // treat as paused, keep service stopped
+        // de-bounce: YT may report PLAYING ~500ms after stopVideo → ignore transient playing after close (extend to 5s for safety)
+        if (nextPlaying && System.currentTimeMillis() - lastStopMs < 5000) {
             playing = false;
             updateMediaSession();
             return;
@@ -174,7 +193,7 @@ public class PlaybackService extends Service {
             updateMediaSession();
             return;
         }
-        if (nextPlaying) dismissedPaused = false;
+        if (nextPlaying) { dismissedPaused = false; isStopped = false; }
         playing = nextPlaying;
         positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
         durationMs = Math.max(0, intent.getLongExtra("durationMs", 0));
@@ -184,10 +203,12 @@ public class PlaybackService extends Service {
 
     private void loadArtwork(String url) {
         if (url == null || url.isEmpty()) return;
+        if (isStopped || dismissedPaused) return;
         new Thread(() -> {
             try {
                 Bitmap loaded = BitmapFactory.decodeStream(new java.net.URL(url).openStream());
                 if (loaded != null) {
+                    if (isStopped || dismissedPaused) return;
                     artwork = loaded;
                     updateMediaSession();
                     publishNotification();
@@ -256,6 +277,7 @@ public class PlaybackService extends Service {
     }
 
     private void publishNotification() {
+        if (isStopped) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         Notification notification = buildNotification();
         try { startForeground(NOTIFICATION_ID, notification); }
@@ -267,6 +289,7 @@ public class PlaybackService extends Service {
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
         else if ("webViewLyrics".equals(action)) {
+            if (isStopped) return;
             String cur = intent.getStringExtra("current");
             if (cur != null) {
                 currentLyric = cur;
@@ -279,7 +302,14 @@ public class PlaybackService extends Service {
             try { stopForeground(STOP_FOREGROUND_REMOVE); } catch (Exception ignored) { try { stopForeground(true); } catch (Exception ignored2) {} }
             try { getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID); } catch (Exception ignored) {}
             playing = false;
+            isStopped = true;
             lastStopMs = System.currentTimeMillis();
+            currentLyric = "";
+            // keep title/artist reset to defaults so next publish doesn't resurrect old song title
+            title = "Dnialify Music Stream";
+            artist = "MusicStream";
+            artworkUrl = "";
+            artwork = null;
             if ("dismiss".equals(action)) dismissedPaused = true;
             else dismissedPaused = true; // also for explicit stop, prevent re-push until next play
             // if explicit stop from closePlayer, also clear session state to NONE so lockscreen goes away
