@@ -116,8 +116,8 @@ function closeNowPlaying() {
   updateLikeButtons();
 }
 function closePlayer() {
-  // reset throttle so next play will push fresh, and de-bounce YT transient
-  try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); } catch {}
+  // true clear: no song queued, block autoplay until next explicit play
+  try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); _isClosed = true; Player.loadId++; } catch {}
   // force native notif gone — single stop, no extra updateWebViewState that could resurrect
   try {
     if (window.NativePlayback && typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
@@ -533,7 +533,7 @@ function initAudio(){
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
-  a.addEventListener('ended', ()=>{ if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
+  a.addEventListener('ended', ()=>{ if (_isClosed) return; if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
   a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
   a.addEventListener('pause', ()=>{ if (!Player.native) Player.wasPlaying = false; document.body.classList.add('paused'); renderPlayButtons(); updateMediaSessionState('paused'); });
   a.addEventListener('timeupdate', ()=>{
@@ -801,6 +801,7 @@ window.onYouTubeIframeAPIReady = () => {
       },
       onStateChange: (e) => {
         if (e.data === YT.PlayerState.ENDED) {
+          if (_isClosed) return;
           if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
           try {
             const vid =
@@ -848,6 +849,7 @@ async function playSong(song, queue = null, index = null) {
     const ok = await ensureAppVersionBeforePlay();
     if (!ok) return;
   } catch {}
+  try { _isClosed = false; } catch {}
   song = normalizeSong(song);
   Player.cued = false;
   Player.pending = null;
@@ -1028,6 +1030,7 @@ function moveQueued(i, dir) {
 }
 
 function startCurrent() {
+  if (_isClosed) return;
   Player.cued = false;
   Player.pending = null;
   const s = Player.current;
@@ -1126,6 +1129,7 @@ function startCurrent() {
 }
 
 async function fetchQueue(song) {
+  if (_isClosed) return;
   const vid = song && song.videoId;
   const loadId = Player.loadId;
   Player._queueFetching = true;
@@ -1160,6 +1164,7 @@ async function fetchQueue(song) {
 }
 
 function nextTrack(auto) {
+  if (_isClosed) return;
   if (auto && typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
   if (Player.cued) {
     if (auto) return;
@@ -1239,6 +1244,7 @@ function togglePlay() {
   else Player.yt.playVideo();
 }
 function playPendingSong() {
+  try { _isClosed = false; } catch {}
   const s = Player.pending;
   if (!s || !s.videoId) return togglePlay();
   Player.pending = null;
@@ -1363,6 +1369,7 @@ let _lastNativePush = 0;
 let _lastPushPlaying = null;
 let _lastPushPos = -1;
 let _lastCloseMs = 0;
+let _isClosed = false;
 setInterval(() => {
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
