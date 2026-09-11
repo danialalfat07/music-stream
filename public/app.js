@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.3.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -510,6 +510,8 @@ const Player = {
   pending: null,
   loadId: 0,
   audio: null,
+  audioContext: null,
+  audioGain: null,
   useAudio: true,
   audioReady: false,
   audioUrl: null,
@@ -521,6 +523,32 @@ const Player = {
   },
 };
 
+function setPlaybackVolume(value) {
+  const v = Math.min(200, Math.max(0, Number(value) || 0));
+  store.set('vol', v);
+  if (Player.audio) {
+    try {
+      if (!Player.audioGain && window.AudioContext) {
+        Player.audioContext = new AudioContext();
+        const source = Player.audioContext.createMediaElementSource(Player.audio);
+        Player.audioGain = Player.audioContext.createGain();
+        source.connect(Player.audioGain).connect(Player.audioContext.destination);
+      }
+      if (Player.audioGain) {
+        Player.audioGain.gain.value = v / 100;
+        Player.audio.volume = 1;
+      } else {
+        Player.audio.volume = Math.min(1, v / 100);
+      }
+      if (Player.audioContext?.state === 'suspended') Player.audioContext.resume().catch(() => {});
+    } catch {
+      Player.audio.volume = Math.min(1, v / 100);
+    }
+  }
+  if (Player.native && window.NativePlayback) window.NativePlayback.volume(Math.min(1, v / 100));
+  if (Player.yt && Player.ready) Player.yt.setVolume(Math.min(100, v));
+}
+
 function initAudio(){
   const a = document.getElementById('bg-audio');
   if(!a) return;
@@ -530,7 +558,7 @@ function initAudio(){
   Player.native = false;
   Player.audioReady = true;
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
-  a.volume = (store.get('vol',100)/100);
+  setPlaybackVolume(store.get('vol', 100));
   a.playbackRate = Player.speed;
   a.addEventListener('ended', ()=>{ if (_isClosed) return; if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
   a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
@@ -635,7 +663,7 @@ async function playViaAudio(song){
     try {
       window.NativePlayback.play(`${location.origin}${streamUrl}`, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
       window.NativePlayback.speed(Player.speed);
-      window.NativePlayback.volume(Number(store.get('vol', 100)) / 100);
+      setPlaybackVolume(store.get('vol', 100));
     } catch (e) {
       console.warn('native playback unavailable', e);
       Player.native = false;
@@ -787,7 +815,7 @@ window.onYouTubeIframeAPIReady = () => {
       onReady: () => {
         Player.ready = true;
         const v = store.get('vol', 100);
-        Player.yt.setVolume(Number(v));
+        setPlaybackVolume(v);
         applyPlaybackQuality();
         try {
           const iframe = Player.yt.getIframe && Player.yt.getIframe();
@@ -3543,7 +3571,7 @@ function restoreLibrary() {
             store.set('vol', d.settings.vol);
             $('#mini-volume').value = d.settings.vol;
             $('#np-volume').value = d.settings.vol;
-            if (Player.yt && Player.ready) Player.yt.setVolume(d.settings.vol);
+      setPlaybackVolume(d.settings.vol);
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -4077,7 +4105,7 @@ function openSettingsModal(tab = 'about') {
     vol.value = store.get('vol', 100);
     vol.oninput = (e) => {
       const v = Number(e.target.value);
-      if (Player.yt && Player.ready) Player.yt.setVolume(v);
+      setPlaybackVolume(v);
       $('#mini-volume').value = v;
       $('#np-volume').value = v;
       store.set('vol', v);
@@ -4428,9 +4456,7 @@ $('#mini-repeat').addEventListener('click', (e) => {
 /* volume on the bar */
 $('#mini-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
-  if(Player.audio) Player.audio.volume = v/100;
-  if(Player.native) window.NativePlayback.volume(v / 100);
-  if (Player.yt && Player.ready) Player.yt.setVolume(v);
+  setPlaybackVolume(v);
   $('#np-volume').value = e.target.value;
   store.set('vol', v);
 });
@@ -4612,9 +4638,7 @@ $('#np-quality').addEventListener('click', toggleQuality);
 $('#np-sb').addEventListener('click', toggleSB);
 $('#np-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
-  if(Player.audio) Player.audio.volume = v/100;
-  if(Player.native) window.NativePlayback.volume(v / 100);
-  if (Player.yt) Player.yt.setVolume(Number(e.target.value));
+  setPlaybackVolume(v);
   $('#mini-volume').value = e.target.value;
   store.set('vol', v);
 });
