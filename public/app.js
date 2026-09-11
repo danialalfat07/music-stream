@@ -1018,14 +1018,18 @@ function restoreQueue() {
   return true;
 }
 function moveQueued(i, dir) {
-  const to = i + dir;
-  if (!Number.isFinite(i) || i <= Player.index || to <= Player.index) return;
-  if (to >= Player.queue.length) return;
-  if (!Player.queue[i] || !Player.queue[i]._user) return;
-  if (!Player.queue[to] || !Player.queue[to]._user) return;
-  const [item] = Player.queue.splice(i, 1);
+  moveQueueItem(i, i + dir);
+}
+function moveQueueItem(from, to) {
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
+  if (from <= Player.index || to <= Player.index) return false;
+  const source = Player.queue[from];
+  const target = Player.queue[to];
+  if (!source || !target || !!source._user !== !!target._user) return false;
+  const [item] = Player.queue.splice(from, 1);
   Player.queue.splice(to, 0, item);
   renderQueue();
+  return true;
 }
 
 function startCurrent() {
@@ -1911,44 +1915,88 @@ function renderQueue() {
       moveQueued(Number(b.dataset.qi), 1);
     }),
   );
-  if (window.matchMedia('(min-width: 861px)').matches) {
-    $$('.track.q-user', el).forEach((row) => {
-      row.draggable = true;
-      row.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', row.dataset.qi);
-        e.dataTransfer.effectAllowed = 'move';
+  $$('.track.q-user, .track.q-radio', el).forEach((row) => {
+    const moreBtn = $('.btn-more', row);
+    if (!moreBtn) return;
+    let pressTimer = 0;
+    let dragging = false;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
+    const clearDragOver = () =>
+      $$('.track.drag-over', el).forEach((r) => r.classList.remove('drag-over'));
+    const finish = (e, cancelled = false) => {
+      if (pressTimer) clearTimeout(pressTimer);
+      pressTimer = 0;
+      if (!dragging) {
+        if (moved) moreBtn.dataset.skipClick = '1';
+        return;
+      }
+      if (e && e.cancelable) e.preventDefault();
+      const target = e && !cancelled
+        ? document.elementFromPoint(e.clientX, e.clientY)?.closest('.track')
+        : null;
+      const from = Number(row.dataset.qi);
+      const to = target && el.contains(target) ? Number(target.dataset.qi) : NaN;
+      row.classList.remove('dragging');
+      clearDragOver();
+      dragging = false;
+      if (moved) moreBtn.dataset.skipClick = '1';
+      if (!cancelled) moreBtn.dataset.dragged = '1';
+      if (target && target !== row) moveQueueItem(from, to);
+    };
+    moreBtn.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      moved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      if (moreBtn.setPointerCapture && e.pointerId !== undefined) {
+        try { moreBtn.setPointerCapture(e.pointerId); } catch {}
+      }
+      pressTimer = setTimeout(() => {
+        dragging = true;
         row.classList.add('dragging');
-      });
-      row.addEventListener('dragend', () => row.classList.remove('dragging'));
-      row.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        row.classList.add('drag-over');
-      });
-      row.addEventListener('dragleave', () =>
-        row.classList.remove('drag-over'),
-      );
-      row.addEventListener('drop', (e) => {
-        e.preventDefault();
-        row.classList.remove('drag-over');
-        const from = Number(e.dataTransfer.getData('text/plain'));
-        const to = Number(row.dataset.qi);
-        if (!Number.isFinite(from) || !Number.isFinite(to) || from === to)
-          return;
-        if (from <= Player.index || to <= Player.index) return;
-        if (
-          !Player.queue[from] ||
-          !Player.queue[from]._user ||
-          !Player.queue[to] ||
-          !Player.queue[to]._user
-        )
-          return;
-        const [item] = Player.queue.splice(from, 1);
-        Player.queue.splice(to, 0, item);
-        renderQueue();
-      });
+      }, 400);
     });
-  }
+    moreBtn.addEventListener('pointermove', (e) => {
+      if (!dragging) {
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+          clearTimeout(pressTimer);
+          pressTimer = 0;
+          moved = true;
+        }
+        return;
+      }
+      if (e.cancelable) e.preventDefault();
+      clearDragOver();
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.track');
+      const targetItem = target && el.contains(target)
+        ? Player.queue[Number(target.dataset.qi)]
+        : null;
+      const sourceItem = Player.queue[Number(row.dataset.qi)];
+      if (
+        target &&
+        el.contains(target) &&
+        target !== row &&
+        targetItem &&
+        sourceItem &&
+        !!targetItem._user === !!sourceItem._user
+      ) target.classList.add('drag-over');
+    }, { passive: false });
+    moreBtn.addEventListener('pointerup', (e) => finish(e));
+    moreBtn.addEventListener('pointercancel', () => finish(null, true));
+    moreBtn.addEventListener('click', (e) => {
+      if (moreBtn.dataset.dragged === '1') {
+        delete moreBtn.dataset.dragged;
+        e.preventDefault();
+        e.stopPropagation();
+      } else if (moreBtn.dataset.skipClick === '1') {
+        delete moreBtn.dataset.skipClick;
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+  });
   const clr = $('#q-clear', el);
   if (clr) clr.addEventListener('click', clearUserQueue);
   const sc = $('#q-scramble', el);
