@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -4059,29 +4059,43 @@ function openSettingsModal(tab = 'about') {
   const updLabel = $('#set-update-label');
   if (updBtn) {
     if (updLabel) updLabel.textContent = 'Check update';
+    let pendingWebUpdate = null;
     updBtn.onclick = async () => {
+      // if already have pending update, second tap directly applies (web update)
+      if (pendingWebUpdate) {
+        toast('Updating web to v' + pendingWebUpdate + '…');
+        closeSettingsModal();
+        await applyVersionUpdate(pendingWebUpdate);
+        return;
+      }
       if (updLabel) updLabel.textContent = 'Checking…';
       updBtn.disabled = true;
       try {
         const res = await checkAppVersion({ silent: false, force: true });
         if (res && res.needsUpdate) {
-          if (updLabel) updLabel.textContent = 'Update available';
-          toast('Update tersedia v' + res.latest + ' — tap Update');
+          pendingWebUpdate = res.latest;
+          if (updLabel) updLabel.textContent = 'Update to v' + res.latest;
+          toast('Web update tersedia v' + res.latest + ' — tap lagi untuk update web');
+          updBtn.disabled = false;
+          // also modal already shown via checkAppVersion → user can tap Update there
         } else if (res && res.offline) {
           if (updLabel) updLabel.textContent = 'Offline';
-          toast('Offline — tidak bisa cek update');
+          toast('Offline — tidak bisa cek update web');
           setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
+          updBtn.disabled = false;
         } else {
           if (updLabel) updLabel.textContent = 'Up to date ✓';
-          toast('Sudah versi terbaru v' + APP_VERSION);
+          toast('Web sudah versi terbaru v' + APP_VERSION);
           setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
+          updBtn.disabled = false;
         }
       } catch {
         if (updLabel) updLabel.textContent = 'Check update';
-        toast('Gagal cek update');
-      } finally {
+        toast('Gagal cek update web');
         updBtn.disabled = false;
+      } finally {
         if (updLabel && updLabel.textContent === 'Checking…') updLabel.textContent = 'Check update';
+        if (!pendingWebUpdate) updBtn.disabled = false;
       }
     };
   }
