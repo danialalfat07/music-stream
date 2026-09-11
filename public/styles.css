@@ -637,7 +637,7 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
   display: flex; align-items: center; gap: 10px; width: 100%;
   font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
 }
-.pb-bar { flex: 1; height: 4px; background: var(--bar-bg); border-radius: 2px; position: relative; cursor: pointer; }
+.pb-bar { flex: 1; height: 4px; background: var(--bar-bg); border-radius: 2px; position: relative; cursor: pointer; touch-action: none; user-select: none; }
 #mini-progress-fill { height: 100%; width: 0%; background: var(--bar-fill); border-radius: 2px; }
 .pb-bar:hover { height: 6px; }
 .pb-bar:hover #mini-progress-fill { background: var(--accent-bright); }

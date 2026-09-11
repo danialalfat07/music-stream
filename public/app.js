@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.8";
+const APP_VERSION = "1.2.9";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -4437,7 +4437,6 @@ $('#mini-volume').addEventListener('input', (e) => {
 /* click-to-seek on the bar */
 const miniBar = $('#mini-bar');
 function seekMiniBar(clientX) {
-  if (Player.cued) return;
   const r = miniBar.getBoundingClientRect();
   const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
   if (Player.native && window.NativePlayback) {
@@ -4455,37 +4454,28 @@ function seekMiniBar(clientX) {
 }
 miniBar.addEventListener('click', (e) => seekMiniBar(e.clientX));
 let miniSeekDragging = false;
-const onMiniSeekMove = (clientX) => {
-  if (!miniSeekDragging) return;
-  seekMiniBar(clientX);
+const onMiniSeekMove = (e) => {
+  if (!miniSeekDragging || e.pointerId !== miniSeekPointerId) return;
+  if (e.cancelable) e.preventDefault();
+  seekMiniBar(e.clientX);
 };
-const stopMiniSeek = () => {
+let miniSeekPointerId = null;
+const stopMiniSeek = (e) => {
+  if (miniSeekPointerId !== null && e && e.pointerId !== miniSeekPointerId) return;
   miniSeekDragging = false;
+  miniSeekPointerId = null;
 };
-miniBar.addEventListener('mousedown', (e) => {
+miniBar.addEventListener('pointerdown', (e) => {
+  if (e.button !== undefined && e.button !== 0) return;
   miniSeekDragging = true;
+  miniSeekPointerId = e.pointerId;
+  miniBar.setPointerCapture?.(e.pointerId);
+  if (e.cancelable) e.preventDefault();
   seekMiniBar(e.clientX);
 });
-miniBar.addEventListener(
-  'touchstart',
-  (e) => {
-    miniSeekDragging = true;
-    seekMiniBar(e.touches[0].clientX);
-    e.preventDefault();
-  },
-  { passive: false },
-);
-document.addEventListener('mousemove', (e) => onMiniSeekMove(e.clientX));
-document.addEventListener('mouseup', stopMiniSeek);
-document.addEventListener(
-  'touchmove',
-  (e) => {
-    onMiniSeekMove(e.touches[0].clientX);
-    if (miniSeekDragging) e.preventDefault();
-  },
-  { passive: false },
-);
-document.addEventListener('touchend', stopMiniSeek);
+miniBar.addEventListener('pointermove', onMiniSeekMove, { passive: false });
+miniBar.addEventListener('pointerup', stopMiniSeek);
+miniBar.addEventListener('pointercancel', stopMiniSeek);
 $('#np-close').addEventListener('click', closeNowPlaying);
 $('#mini-close').addEventListener('click', (e) => {
   e.stopPropagation();
