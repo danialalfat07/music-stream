@@ -289,7 +289,7 @@ public class PlaybackService extends Service {
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
         else if ("webViewLyrics".equals(action)) {
-            if (isStopped) return;
+            if (isStopped) return START_NOT_STICKY;
             String cur = intent.getStringExtra("current");
             if (cur != null) {
                 currentLyric = cur;
