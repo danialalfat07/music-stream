@@ -207,17 +207,17 @@ try {
         <button data-nptab="queue" class="np-tab"><svg class="ic"><use href="#i-queue"/></svg>Queue</button>
         <button data-nptab="related" class="np-tab"><svg class="ic"><use href="#i-radio"/></svg>Related</button>
       </div>
-      <div class="np-seek np-seek-global" id="np-seek-global">
-        <span id="np-cur">0:00</span>
-        <input type="range" id="np-range" min="0" max="1000" value="0" />
-        <span id="np-dur">0:00</span>
-      </div>
       <div class="np-body">
         <section id="np-player" class="np-pane active">
           <div class="np-art-wrap"><img id="np-art" alt="" /></div>
           <div class="np-meta">
             <div id="np-title">—</div>
             <div id="np-artist">—</div>
+          </div>
+          <div class="np-seek">
+            <span id="np-cur">0:00</span>
+            <input type="range" id="np-range" min="0" max="1000" value="0" />
+            <span id="np-dur">0:00</span>
           </div>
           <div class="np-controls">
             <button id="np-shuffle" class="icon-btn" title="Shuffle"><svg class="ic"><use href="#i-shuffle"/></svg></button>

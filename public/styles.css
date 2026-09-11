@@ -725,11 +725,8 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 #np-artist.linkish { cursor: pointer; }
 #np-artist.linkish:hover { color: #fff; text-decoration: underline; }
 .np-seek { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 520px; font-size: 11.5px; color: rgba(255,255,255,.65); font-variant-numeric: tabular-nums; }
-.np-seek-global { max-width: 520px; margin: 8px auto 4px; padding: 0 4px; cursor: pointer; }
-.np-seek-global #np-range { flex: 1; cursor: pointer; touch-action: none; }
-@media (max-width: 860px) {
-  .np-seek-global { margin: 6px 2px 2px; }
-}
+#np-player .np-seek { cursor: pointer; }
+#np-player .np-seek #np-range { flex: 1; cursor: pointer; touch-action: none; }
 #nowplaying .icon-btn { color: rgba(255,255,255,.82); }
 #nowplaying .icon-btn:hover { color: #fff; }
 #nowplaying .play-big { background: #fff !important; color: #111 !important; }

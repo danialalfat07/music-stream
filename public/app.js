@@ -116,6 +116,18 @@ function closeNowPlaying() {
   updateLikeButtons();
 }
 function closePlayer() {
+  // reset throttle so next play will push fresh, and de-bounce YT transient
+  try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); } catch {}
+  // force native notif gone even when Player.current will be cleared — bypass pushNativeState guard
+  try {
+    if (window.NativePlayback) {
+      if (typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
+      else if (typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0);
+      else if (typeof window.NativePlayback.pause === 'function') window.NativePlayback.pause();
+      // extra direct clear via updateWebViewState with empty meta to ensure service cleared even if stop missed
+      try { if (typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0); } catch {}
+    }
+  } catch {}
   Player.pending = null;
   Player.queue = [];
   Player.index = -1;
@@ -128,12 +140,6 @@ function closePlayer() {
     Player.sleepTimer = null;
   }
   try {
-    if (window.NativePlayback) {
-      if (typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
-      else if (typeof window.NativePlayback.pause === 'function') window.NativePlayback.pause();
-    }
-  } catch {}
-  try {
     if (Player.audio) {
       Player.audio.pause();
       Player.audio.currentTime = 0;
@@ -145,8 +151,10 @@ function closePlayer() {
   } catch {}
   try {
     if (Player.yt && Player.ready) {
-      Player.yt.stopVideo();
-      Player.yt.clearVideo && Player.yt.clearVideo();
+      try { Player.yt.pauseVideo(); } catch {}
+      try { Player.yt.stopVideo(); } catch {}
+      try { Player.yt.clearVideo && Player.yt.clearVideo(); } catch {}
+      try { Player.yt.seekTo(0, true); } catch {}
     }
   } catch {}
   // clear browser MediaSession → removes OS notification when stopped
@@ -174,7 +182,6 @@ function closePlayer() {
   updateLikeButtons();
   syncFloatWidget();
   syncFloatLyric('');
-  try { pushNativeState(0, 0, false); } catch {}
   persistQueue();
   document.title = 'Dnialify Music Stream';
   toast('Stopped');
@@ -1358,6 +1365,7 @@ let _lastTick = null;
 let _lastNativePush = 0;
 let _lastPushPlaying = null;
 let _lastPushPos = -1;
+let _lastCloseMs = 0;
 setInterval(() => {
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
@@ -1367,6 +1375,7 @@ setInterval(() => {
     cur = Player.native ? window.NativePlayback.currentTime() : Player.audio.currentTime || 0;
     dur = Player.native ? window.NativePlayback.duration() : Player.audio.duration || 0;
     playing = Player.native ? window.NativePlayback.isPlaying() : !Player.audio.paused;
+    if (Date.now() - _lastCloseMs < 1500) playing = false;
     const now = Date.now();
     if (playing && _lastTick && Player.current) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
@@ -1375,10 +1384,34 @@ setInterval(() => {
       return;
     }
   } else {
-    if (!Player.yt || !Player.ready || !Player.current || !Player.yt.getDuration) return;
+    if (!Player.yt || !Player.ready || !Player.current || !Player.yt.getDuration) {
+      // after close Player.current becomes null → ensure notif cleared once, don't resurrect via YT transient
+      if (_lastPushPlaying === true && Date.now() - _lastCloseMs > 1500) {
+        // edge: interval hit right after close before _lastCloseMs set → already forced via closePlayer stop, skip extra
+      }
+      // if we were playing before close, force one final paused push via throttle logic below (need cur/dur 0)
+      cur = 0; dur = 0; playing = false;
+      // let UI reset already done in closePlayer, just handle notif de-bounce then return
+      if (Date.now() - _lastCloseMs < 1500) return;
+      // fall through to notif push handling below then return
+      const pct0 = 0;
+      // update notif throttling for 0/0 case
+      {
+        const now = Date.now();
+        if (now - _lastNativePush > 200) {
+          const playingChanged = _lastPushPlaying !== false;
+          if (playingChanged) {
+            _lastNativePush = now; _lastPushPlaying = false; _lastPushPos = 0;
+            try { if (window.NativePlayback && window.NativePlayback.updateWebViewState) window.NativePlayback.updateWebViewState("", "", "", false, 0, 0); } catch {}
+          }
+        }
+      }
+      return;
+    }
     cur = Player.yt.getCurrentTime() || 0;
-    const _playing = Player.yt.getPlayerState && Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
-    playing = _playing;
+    const _playingRaw = Player.yt.getPlayerState && Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
+    // de-bounce close: YT may still report PLAYING for ~500ms after stopVideo → treat as paused
+    playing = (Date.now() - _lastCloseMs < 1500) ? false : _playingRaw;
     const now = Date.now();
     if (playing && _lastTick) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
@@ -4576,8 +4609,8 @@ range.addEventListener('change', () => {
   const frac = range.value / 1000;
   npDoSeek(frac);
 });
-// direct drag on track (click or drag anywhere on seek row) — makes overlay bar draggable without opening songbar first
-const npSeekRow = $('#np-seek-global');
+// direct drag on track (click or drag anywhere on seek row) — bar now back under Artist above Play
+const npSeekRow = document.querySelector('#np-player .np-seek');
 if (npSeekRow) {
   let npRowDragging = false;
   const npRowSeek = (clientX) => {

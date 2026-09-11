@@ -37,6 +37,7 @@ public class PlaybackService extends Service {
     private long positionMs;
     private long durationMs;
     private boolean dismissedPaused = false;
+    private long lastStopMs = 0;
 
     public static void arm(Context context) {
         if (instance != null) { instance.publishNotification(); return; }
@@ -158,6 +159,13 @@ public class PlaybackService extends Service {
             loadArtwork(nextArtwork);
         }
         boolean nextPlaying = intent.getBooleanExtra("isPlaying", false);
+        // de-bounce: YT may report PLAYING ~500ms after stopVideo → ignore transient playing after close
+        if (nextPlaying && System.currentTimeMillis() - lastStopMs < 1500) {
+            // treat as paused, keep service stopped
+            playing = false;
+            updateMediaSession();
+            return;
+        }
         // swipe-dismissed while paused → don't resurrect until next play
         if (dismissedPaused && !nextPlaying) {
             playing = false;
@@ -271,6 +279,7 @@ public class PlaybackService extends Service {
             try { stopForeground(STOP_FOREGROUND_REMOVE); } catch (Exception ignored) { try { stopForeground(true); } catch (Exception ignored2) {} }
             try { getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID); } catch (Exception ignored) {}
             playing = false;
+            lastStopMs = System.currentTimeMillis();
             if ("dismiss".equals(action)) dismissedPaused = true;
             else dismissedPaused = true; // also for explicit stop, prevent re-push until next play
             // if explicit stop from closePlayer, also clear session state to NONE so lockscreen goes away
