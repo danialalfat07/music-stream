@@ -7,10 +7,11 @@ node_modules/
 .cache/
 .arena/
 
-# PWA signing - keep private
+# PWA signing - keep private (release)
 signing.keystore
-*.keystore
 *.jks
+*.keystore
+!android/app/debug.keystore
 
 # apk-chromium-shell local only
 bare-browser/
