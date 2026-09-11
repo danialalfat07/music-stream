@@ -164,7 +164,6 @@ try {
       <button id="mini-like" class="icon-btn" title="Favorite"><svg class="ic"><use href="#i-heart-o"/></svg></button>
       <button id="mini-float" class="icon-btn" title="Floating widget"><svg class="ic"><use href="#i-pip"/></svg></button>
       <button id="mini-queue-m" class="icon-btn" title="Queue"><svg class="ic"><use href="#i-queue"/></svg></button>
-      <button id="mini-close" class="icon-btn" title="Close player"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="pb-center">
       <div class="pb-buttons">
@@ -185,6 +184,7 @@ try {
       <button id="mini-open" class="icon-btn sm" title="Now playing"><svg class="ic"><use href="#i-expand"/></svg></button>
       <span class="pb-vol-ic"><svg class="ic"><use href="#i-volume"/></svg></span>
       <input type="range" id="mini-volume" min="0" max="100" value="100" />
+      <button id="mini-close" class="icon-btn" title="Close player (stop)"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
   </div>
 
@@ -207,17 +207,17 @@ try {
         <button data-nptab="queue" class="np-tab"><svg class="ic"><use href="#i-queue"/></svg>Queue</button>
         <button data-nptab="related" class="np-tab"><svg class="ic"><use href="#i-radio"/></svg>Related</button>
       </div>
+      <div class="np-seek np-seek-global" id="np-seek-global">
+        <span id="np-cur">0:00</span>
+        <input type="range" id="np-range" min="0" max="1000" value="0" />
+        <span id="np-dur">0:00</span>
+      </div>
       <div class="np-body">
         <section id="np-player" class="np-pane active">
           <div class="np-art-wrap"><img id="np-art" alt="" /></div>
           <div class="np-meta">
             <div id="np-title">—</div>
             <div id="np-artist">—</div>
-          </div>
-          <div class="np-seek">
-            <span id="np-cur">0:00</span>
-            <input type="range" id="np-range" min="0" max="1000" value="0" />
-            <span id="np-dur">0:00</span>
           </div>
           <div class="np-controls">
             <button id="np-shuffle" class="icon-btn" title="Shuffle"><svg class="ic"><use href="#i-shuffle"/></svg></button>
@@ -300,6 +300,8 @@ try {
           <div class="settings-row"><span class="s-label">Playback speed</span><button id="set-speed" class="pill-btn"><span>1×</span></button></div>
           <div class="settings-row"><span class="s-label">Volume</span><input type="range" id="set-volume" min="0" max="100" value="100" /></div>
           <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
+          <div class="settings-row"><span class="s-label">App update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Current v<span id="set-version">1.2.1</span> · tap Check to see latest</div>
         </div>
         <div data-spane="social" class="s-pane">
           <div class="settings-contact">

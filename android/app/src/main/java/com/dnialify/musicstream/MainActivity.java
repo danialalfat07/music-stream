@@ -890,6 +890,9 @@ public class MainActivity extends BridgeActivity {
         public void pause() { PlaybackService.pause(MainActivity.this); }
 
         @JavascriptInterface
+        public void stop() { PlaybackService.stop(MainActivity.this); }
+
+        @JavascriptInterface
         public void seek(double seconds) { PlaybackService.seek(MainActivity.this, seconds); }
 
         @JavascriptInterface

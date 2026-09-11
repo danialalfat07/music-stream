@@ -603,7 +603,13 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 #mini-artist.linkish { cursor: pointer; }
 #mini-artist.linkish:hover { color: var(--text); text-decoration: underline; }
 #mini-like { font-size: 16px; }
-#mini-close { margin-left: auto; }
+#mini-close { margin-left: 8px; }
+@media (max-width: 860px) {
+  #mini-close { display: none !important; }
+}
+@media (min-width: 861px) {
+  #mini-close { display: inline-flex !important; }
+}
 
 .pb-center {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -719,6 +725,11 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 #np-artist.linkish { cursor: pointer; }
 #np-artist.linkish:hover { color: #fff; text-decoration: underline; }
 .np-seek { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 520px; font-size: 11.5px; color: rgba(255,255,255,.65); font-variant-numeric: tabular-nums; }
+.np-seek-global { max-width: 520px; margin: 8px auto 4px; padding: 0 4px; cursor: pointer; }
+.np-seek-global #np-range { flex: 1; cursor: pointer; touch-action: none; }
+@media (max-width: 860px) {
+  .np-seek-global { margin: 6px 2px 2px; }
+}
 #nowplaying .icon-btn { color: rgba(255,255,255,.82); }
 #nowplaying .icon-btn:hover { color: #fff; }
 #nowplaying .play-big { background: #fff !important; color: #111 !important; }
@@ -1222,7 +1233,6 @@ body.hq-audio #yt-player {
   body.has-player #main { margin-bottom: 0; padding-bottom: calc(var(--navm-h) + 92px); }
   body.float-mode.has-player #main { padding-bottom: calc(var(--navm-h) + 16px); }
   .pb-left { flex: 1; }
-  #mini-close { margin-left: 0; }
   #mini-art { width: 44px; height: 44px; }
   .pb-center { flex-direction: row; max-width: none; width: auto; }
   .pb-seek { position: absolute; left: 8px; right: 8px; bottom: 0; }

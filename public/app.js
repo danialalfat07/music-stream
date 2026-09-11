@@ -128,17 +128,34 @@ function closePlayer() {
     Player.sleepTimer = null;
   }
   try {
-    if (Player.native && window.NativePlayback) window.NativePlayback.pause();
+    if (window.NativePlayback) {
+      if (typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
+      else if (typeof window.NativePlayback.pause === 'function') window.NativePlayback.pause();
+    }
   } catch {}
   try {
     if (Player.audio) {
       Player.audio.pause();
+      Player.audio.currentTime = 0;
       Player.audio.removeAttribute('src');
       Player.audio.load();
+      Player.audioUrl = null;
+      Player.nativeUrl = null;
     }
   } catch {}
   try {
-    if (Player.yt && Player.ready) Player.yt.stopVideo();
+    if (Player.yt && Player.ready) {
+      Player.yt.stopVideo();
+      Player.yt.clearVideo && Player.yt.clearVideo();
+    }
+  } catch {}
+  // clear browser MediaSession → removes OS notification when stopped
+  try {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+      try { navigator.mediaSession.setPositionState({ duration: 0, playbackRate: 1, position: 0 }); } catch {}
+      try { navigator.mediaSession.metadata = null; } catch {}
+    }
   } catch {}
   closeNowPlaying();
   $('#miniplayer').classList.add('hidden');
@@ -156,8 +173,11 @@ function closePlayer() {
   renderPlayButtons();
   updateLikeButtons();
   syncFloatWidget();
+  syncFloatLyric('');
+  try { pushNativeState(0, 0, false); } catch {}
   persistQueue();
   document.title = 'Dnialify Music Stream';
+  toast('Stopped');
 }
 function focusedSong() {
   return Player.pending || Player.current;
@@ -1336,6 +1356,8 @@ function pushNativeLyricWindow() {
 /* progress loop */
 let _lastTick = null;
 let _lastNativePush = 0;
+let _lastPushPlaying = null;
+let _lastPushPos = -1;
 setInterval(() => {
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
@@ -1387,8 +1409,24 @@ setInterval(() => {
   if(isAudio && 'mediaSession' in navigator && dur){
      try{ navigator.mediaSession.setPositionState({duration: dur, playbackRate: Player.native ? Player.speed : Player.audio.playbackRate, position: cur}); }catch{}
   }
-  // Push WebView state to native notification (throttled 1s)
-  if (Date.now() - _lastNativePush > 1000) { _lastNativePush = Date.now(); pushNativeState(cur, dur, playing); }
+   // Push WebView state to native notification (throttled 1s when playing, paused only on change → swipe-dismiss stays gone)
+  {
+    const now = Date.now();
+    if (now - _lastNativePush > 1000) {
+      const posMs = Math.round((cur || 0) * 1000);
+      const posChanged = Math.abs(posMs - _lastPushPos) > 1500;
+      const playingChanged = _lastPushPlaying !== !!playing;
+      if (playing) {
+        _lastNativePush = now; _lastPushPlaying = true; _lastPushPos = posMs;
+        pushNativeState(cur, dur, true);
+      } else {
+        if (playingChanged || posChanged) {
+          _lastNativePush = now; _lastPushPlaying = false; _lastPushPos = posMs;
+          pushNativeState(cur, dur, false);
+        }
+      }
+    }
+  }
 }, 400);
 
 function renderPlayButtons() {
@@ -3977,6 +4015,38 @@ function openSettingsModal(tab = 'about') {
       }, 300);
     };
   }
+  const verEl = $('#set-version');
+  if (verEl) verEl.textContent = APP_VERSION;
+  const updBtn = $('#set-update');
+  const updLabel = $('#set-update-label');
+  if (updBtn) {
+    if (updLabel) updLabel.textContent = 'Check update';
+    updBtn.onclick = async () => {
+      if (updLabel) updLabel.textContent = 'Checking…';
+      updBtn.disabled = true;
+      try {
+        const res = await checkAppVersion({ silent: false, force: true });
+        if (res && res.needsUpdate) {
+          if (updLabel) updLabel.textContent = 'Update available';
+          toast('Update tersedia v' + res.latest + ' — tap Update');
+        } else if (res && res.offline) {
+          if (updLabel) updLabel.textContent = 'Offline';
+          toast('Offline — tidak bisa cek update');
+          setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
+        } else {
+          if (updLabel) updLabel.textContent = 'Up to date ✓';
+          toast('Sudah versi terbaru v' + APP_VERSION);
+          setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
+        }
+      } catch {
+        if (updLabel) updLabel.textContent = 'Check update';
+        toast('Gagal cek update');
+      } finally {
+        updBtn.disabled = false;
+        if (updLabel && updLabel.textContent === 'Checking…') updLabel.textContent = 'Check update';
+      }
+    };
+  }
   const copy = $('#contact-copy');
   if (copy) {
     copy.onclick = async () => {
@@ -4327,6 +4397,68 @@ $('#mini-close').addEventListener('click', (e) => {
   e.stopPropagation();
   closePlayer();
 });
+// swipe-to-close miniplayer on mobile (desktop uses X at pojok kanan)
+(() => {
+  const mp = $('#miniplayer');
+  if (!mp) return;
+  let sx = 0, sy = 0, swiping = false, startTime = 0;
+  const isMobile = () => window.innerWidth <= 860;
+  mp.addEventListener('touchstart', (e) => {
+    if (!isMobile()) return;
+    if (e.target.closest('button, input, .pb-bar')) return;
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY; startTime = Date.now(); swiping = true;
+  }, { passive: true });
+  mp.addEventListener('touchmove', (e) => {
+    if (!swiping || !isMobile()) return;
+    const t = e.touches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    // if vertical swipe dominates and moving down, allow swipe; otherwise if horizontal large, also allow
+    const absX = Math.abs(dx), absY = Math.abs(dy);
+    if (absY > 10 || absX > 10) {
+      // hint translate
+      if (absX > absY) {
+        mp.style.transform = `translateX(${dx}px)`;
+        mp.style.opacity = String(Math.max(0.3, 1 - absX / 200));
+      } else if (dy > 0) {
+        mp.style.transform = `translateY(${dy}px)`;
+        mp.style.opacity = String(Math.max(0.3, 1 - dy / 120));
+      }
+    }
+  }, { passive: true });
+  const resetMP = () => {
+    mp.style.transform = '';
+    mp.style.opacity = '';
+    swiping = false;
+  };
+  mp.addEventListener('touchend', (e) => {
+    if (!swiping || !isMobile()) { resetMP(); return; }
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    const dt = Date.now() - startTime;
+    const absX = Math.abs(dx), absY = Math.abs(dy);
+    let shouldClose = false;
+    // velocity or distance threshold
+    if (absX > 90 && absX > absY) shouldClose = true;
+    else if (dy > 65 && absY > absX) shouldClose = true;
+    else if (absX > 60 && dt < 250 && absX > absY) shouldClose = true;
+    if (shouldClose) {
+      mp.style.transition = 'transform 0.22s ease, opacity 0.22s ease';
+      mp.style.transform = absX > absY ? `translateX(${dx > 0 ? 120 : -120}%)` : `translateY(120%)`;
+      mp.style.opacity = '0';
+      setTimeout(() => {
+        mp.style.transition = '';
+        resetMP();
+        closePlayer();
+      }, 220);
+    } else {
+      mp.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+      resetMP();
+      setTimeout(() => { mp.style.transition = ''; }, 200);
+    }
+  }, { passive: true });
+  mp.addEventListener('touchcancel', resetMP, { passive: true });
+})();
 $('#np-play').addEventListener('click', toggleNowPlayingPlay);
 $('#np-next').addEventListener('click', () => nextTrack(false));
 $('#np-prev').addEventListener('click', prevTrack);
@@ -4409,25 +4541,80 @@ $('#np-artist').addEventListener('click', (e) => {
 
 let seekDragging = false;
 const range = $('#np-range');
-range.addEventListener('input', () => {
-  seekDragging = true;
-});
-range.addEventListener('change', () => {
-  seekDragging = false;
-  if (isPreviewing()) return;
-  const frac = range.value / 1000;
-  if(Player.native){
-    window.NativePlayback.seek(frac * (window.NativePlayback.duration() || 0));
+function npSeekDuration(){
+  if (Player.native && window.NativePlayback) try { return window.NativePlayback.duration() || 0; } catch {}
+  if (Player.useAudio && Player.audio && Number.isFinite(Player.audio.duration)) return Player.audio.duration || 0;
+  if (Player.yt && Player.ready && Player.yt.getDuration) try { return Player.yt.getDuration() || 0; } catch {}
+  return 0;
+}
+function npDoSeek(frac){
+  if (Player.cued || isPreviewing()) return;
+  frac = Math.min(1, Math.max(0, frac));
+  if (Player.native && window.NativePlayback) {
+    const dur = window.NativePlayback.duration() || 0;
+    if (dur) window.NativePlayback.seek(frac * dur);
     return;
   }
-  if(Player.useAudio && Player.audio && Player.audio.duration){
+  if (Player.useAudio && Player.audio && Player.audio.duration) {
     Player.audio.currentTime = frac * Player.audio.duration;
     return;
   }
   if (!Player.yt || !Player.ready) return;
   const dur = Player.yt.getDuration() || 0;
-  Player.yt.seekTo(frac * dur, true);
+  if (dur) Player.yt.seekTo(frac * dur, true);
+}
+range.addEventListener('input', () => {
+  seekDragging = true;
+  const frac = range.value / 1000;
+  const dur = npSeekDuration();
+  $('#np-cur').textContent = fmtTime(frac * dur);
+  // live seek for native/audio for immediate feedback
+  if (Player.native || (Player.useAudio && Player.audio)) npDoSeek(frac);
 });
+range.addEventListener('change', () => {
+  seekDragging = false;
+  const frac = range.value / 1000;
+  npDoSeek(frac);
+});
+// direct drag on track (click or drag anywhere on seek row) — makes overlay bar draggable without opening songbar first
+const npSeekRow = $('#np-seek-global');
+if (npSeekRow) {
+  let npRowDragging = false;
+  const npRowSeek = (clientX) => {
+    const rect = range.getBoundingClientRect();
+    if (!rect.width) return;
+    const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    range.value = Math.round(frac * 1000);
+    $('#np-cur').textContent = fmtTime(frac * npSeekDuration());
+    npDoSeek(frac);
+  };
+  const onNpRowDown = (e) => {
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    npRowDragging = true;
+    seekDragging = true;
+    npRowSeek(cx);
+    e.preventDefault();
+  };
+  const onNpRowMove = (e) => {
+    if (!npRowDragging) return;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    npRowSeek(cx);
+    e.preventDefault();
+  };
+  const onNpRowUp = () => {
+    if (!npRowDragging) return;
+    npRowDragging = false;
+    setTimeout(() => { seekDragging = false; }, 80);
+  };
+  npSeekRow.addEventListener('mousedown', onNpRowDown);
+  npSeekRow.addEventListener('touchstart', onNpRowDown, { passive: false });
+  document.addEventListener('mousemove', onNpRowMove);
+  document.addEventListener('touchmove', onNpRowMove, { passive: false });
+  document.addEventListener('mouseup', onNpRowUp);
+  document.addEventListener('touchend', onNpRowUp);
+  range.addEventListener('touchstart', () => { seekDragging = true; }, { passive: true });
+  range.addEventListener('touchend', () => { setTimeout(() => { seekDragging = false; }, 80); }, { passive: true });
+}
 
 function switchNPTab(name) {
   $$('.np-tab').forEach((t) =>

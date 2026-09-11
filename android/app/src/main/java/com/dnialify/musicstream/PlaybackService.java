@@ -36,6 +36,7 @@ public class PlaybackService extends Service {
     private boolean playing;
     private long positionMs;
     private long durationMs;
+    private boolean dismissedPaused = false;
 
     public static void arm(Context context) {
         if (instance != null) { instance.publishNotification(); return; }
@@ -94,6 +95,7 @@ public class PlaybackService extends Service {
     }
 
     public static void pause(Context context) { dispatch(context, "pause"); }
+    public static void stop(Context context) { dispatch(context, "stop"); }
     public static void seek(Context context, double seconds) {
         ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class)
                 .setAction("seek").putExtra("seconds", seconds));
@@ -155,7 +157,17 @@ public class PlaybackService extends Service {
             artworkUrl = nextArtwork;
             loadArtwork(nextArtwork);
         }
-        playing = intent.getBooleanExtra("isPlaying", false);
+        boolean nextPlaying = intent.getBooleanExtra("isPlaying", false);
+        // swipe-dismissed while paused → don't resurrect until next play
+        if (dismissedPaused && !nextPlaying) {
+            playing = false;
+            positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
+            durationMs = Math.max(0, intent.getLongExtra("durationMs", 0));
+            updateMediaSession();
+            return;
+        }
+        if (nextPlaying) dismissedPaused = false;
+        playing = nextPlaying;
         positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
         durationMs = Math.max(0, intent.getLongExtra("durationMs", 0));
         updateMediaSession();
@@ -210,7 +222,7 @@ public class PlaybackService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         int playIcon = playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
         String playLabel = playing ? "Pause" : "Play";
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(title)
                 .setContentText(artist)
@@ -224,8 +236,15 @@ public class PlaybackService extends Service {
                         .setShowActionsInCompactView(0, 1, 2))
                 .addAction(android.R.drawable.ic_media_previous, "Prev", serviceAction("prev", 1))
                 .addAction(playIcon, playLabel, serviceAction("toggle", 3))
-                .addAction(android.R.drawable.ic_media_next, "Next", serviceAction("next", 2))
-                .build();
+                .addAction(android.R.drawable.ic_media_next, "Next", serviceAction("next", 2));
+        // when paused, notification dismissible → swipe deletes without re-push until next play
+        if (!playing) {
+            PendingIntent del = PendingIntent.getService(this, 99,
+                    new Intent(this, PlaybackService.class).setAction("dismiss"),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            b.setDeleteIntent(del);
+        }
+        return b.build();
     }
 
     private void publishNotification() {
@@ -247,7 +266,23 @@ public class PlaybackService extends Service {
                 publishNotification();
             }
         }
-        else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
+        else if ("stop".equals(action) || "dismiss".equals(action)) {
+            // true stop → remove notification and stop foreground, don't recreate until next play
+            try { stopForeground(STOP_FOREGROUND_REMOVE); } catch (Exception ignored) { try { stopForeground(true); } catch (Exception ignored2) {} }
+            try { getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID); } catch (Exception ignored) {}
+            playing = false;
+            if ("dismiss".equals(action)) dismissedPaused = true;
+            else dismissedPaused = true; // also for explicit stop, prevent re-push until next play
+            // if explicit stop from closePlayer, also clear session state to NONE so lockscreen goes away
+            if ("stop".equals(action)) {
+                try { mediaSession.setPlaybackState(new PlaybackStateCompat.Builder().setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f).setActions(0).build()); mediaSession.setActive(false); } catch (Exception ignored) {}
+            }
+            if ("dismiss".equals(action)) {
+                // swipe when paused → stay stopped, don't auto-republish; JS will republish on next play when pushNativeState playing=true
+                return START_NOT_STICKY;
+            }
+            return START_NOT_STICKY;
+        } else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
             if (nextTitle != null) title = nextTitle;
