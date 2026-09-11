@@ -1,4 +1,4 @@
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -523,9 +523,20 @@ const Player = {
   },
 };
 
+function updateVolumeControls(value) {
+  const v = Math.min(200, Math.max(0, Number(value) || 0));
+  const label = $('#set-volume-value');
+  if (label) label.textContent = `${v}%`;
+  for (const id of ['mini-volume', 'np-volume', 'set-volume']) {
+    const input = $(`#${id}`);
+    if (input) input.value = v;
+  }
+}
+
 function setPlaybackVolume(value) {
   const v = Math.min(200, Math.max(0, Number(value) || 0));
   store.set('vol', v);
+  updateVolumeControls(v);
   if (Player.audio) {
     try {
       if (!Player.audioGain && window.AudioContext) {
@@ -4106,9 +4117,6 @@ function openSettingsModal(tab = 'about') {
     vol.oninput = (e) => {
       const v = Number(e.target.value);
       setPlaybackVolume(v);
-      $('#mini-volume').value = v;
-      $('#np-volume').value = v;
-      store.set('vol', v);
     };
   }
   const fl = $('#set-float');
@@ -4457,8 +4465,6 @@ $('#mini-repeat').addEventListener('click', (e) => {
 $('#mini-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
   setPlaybackVolume(v);
-  $('#np-volume').value = e.target.value;
-  store.set('vol', v);
 });
 /* click-to-seek on the bar */
 const miniBar = $('#mini-bar');
@@ -4639,8 +4645,6 @@ $('#np-sb').addEventListener('click', toggleSB);
 $('#np-volume').addEventListener('input', (e) => {
   const v = Number(e.target.value);
   setPlaybackVolume(v);
-  $('#mini-volume').value = e.target.value;
-  store.set('vol', v);
 });
 $('#np-lyric-preview').addEventListener('click', () => switchNPTab('lyrics'));
 $('#np-sleep').addEventListener('click', openSleepTimer);
@@ -5434,8 +5438,7 @@ syncNpMore();
 bindFloatWidget(document);
 enableDrag($('#float-widget'));
 const savedVol = store.get('vol', 100);
-$('#mini-volume').value = savedVol;
-$('#np-volume').value = savedVol;
+updateVolumeControls(savedVol);
 $('#mini-volume').addEventListener('change', (e) =>
   store.set('vol', Number(e.target.value)),
 );
