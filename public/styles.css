@@ -644,7 +644,7 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 .pb-knob {
   position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
   background: var(--play-bg); transform: translate(-50%, -50%); left: 0%;
-  opacity: 0; transition: opacity 0.15s; pointer-events: none;
+  opacity: 1; transition: opacity 0.15s; pointer-events: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 .pb-bar:hover .pb-knob { opacity: 1; }
