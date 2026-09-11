@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="1.3.1" />
+<meta name="app-version" content="1.3.2" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -183,7 +183,7 @@ try {
       <button id="mini-queue" class="icon-btn sm" title="Queue"><svg class="ic"><use href="#i-queue"/></svg></button>
       <button id="mini-open" class="icon-btn sm" title="Now playing"><svg class="ic"><use href="#i-expand"/></svg></button>
       <span class="pb-vol-ic"><svg class="ic"><use href="#i-volume"/></svg></span>
-      <input type="range" id="mini-volume" min="0" max="100" value="100" />
+              <input type="range" id="mini-volume" min="0" max="200" value="100" />
       <button id="mini-close" class="icon-btn" title="Close player (stop)"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
   </div>
@@ -239,7 +239,7 @@ try {
             <button id="np-quality" class="pill-btn np-extra" title="YouTube Music audio — tap for YouTube max quality"><span>Quality</span></button>
             <button id="np-sb" class="pill-btn np-extra" title="SponsorBlock auto-skip"><svg class="ic"><use href="#i-next"/></svg><span>SB</span></button>
             <div class="np-volume">
-              <svg class="ic vol-ic"><use href="#i-volume"/></svg><input type="range" id="np-volume" min="0" max="100" value="100" />
+              <svg class="ic vol-ic"><use href="#i-volume"/></svg><input type="range" id="np-volume" min="0" max="200" value="100" />
             </div>
           </div>
           <div id="np-lyric-preview" title="Open lyrics"></div>
@@ -272,7 +272,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v1.3.1 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v1.3.2 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -298,10 +298,10 @@ try {
           <div class="settings-row"><span class="s-label">SponsorBlock auto-skip</span><button id="set-sb" class="pill-btn"><span>On</span></button></div>
           <div class="settings-row"><span class="s-label">Quality</span><button id="set-quality" class="pill-btn"><span>YouTube Music</span></button></div>
           <div class="settings-row"><span class="s-label">Playback speed</span><button id="set-speed" class="pill-btn"><span>1×</span></button></div>
-          <div class="settings-row"><span class="s-label">Volume</span><input type="range" id="set-volume" min="0" max="100" value="100" /></div>
+          <div class="settings-row volume-setting"><div><span class="s-label">Volume</span><small>100% = normal</small></div><div class="volume-control"><output id="set-volume-value">100%</output><input type="range" id="set-volume" min="0" max="200" value="100" /></div></div>
           <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
           <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">1.3.1</span> · untuk update aplikasi Android download APK baru</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">1.3.2</span> · untuk update aplikasi Android download APK baru</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
         </div>
         <div data-spane="social" class="s-pane">
@@ -373,7 +373,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="1.3.1";
+    var VER="1.3.2";
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
     if(cur !== VER){
