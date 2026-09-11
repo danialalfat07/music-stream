@@ -4449,38 +4449,40 @@ $('#mini-close').addEventListener('click', (e) => {
   e.stopPropagation();
   closePlayer();
 });
-// swipe-to-close miniplayer on mobile (desktop uses X at pojok kanan)
+// swipe on miniplayer mobile = pause (not close+autoplay)
 (() => {
   const mp = $('#miniplayer');
   if (!mp) return;
-  let sx = 0, sy = 0, swiping = false, startTime = 0;
+  let sx = 0, sy = 0, swiping = false, startTime = 0, didSwipe = false;
   const isMobile = () => window.innerWidth <= 860;
   mp.addEventListener('touchstart', (e) => {
     if (!isMobile()) return;
     if (e.target.closest('button, input, .pb-bar')) return;
     const t = e.touches[0];
-    sx = t.clientX; sy = t.clientY; startTime = Date.now(); swiping = true;
+    sx = t.clientX; sy = t.clientY; startTime = Date.now(); swiping = true; didSwipe = false;
   }, { passive: true });
   mp.addEventListener('touchmove', (e) => {
     if (!swiping || !isMobile()) return;
     const t = e.touches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
-    // if vertical swipe dominates and moving down, allow swipe; otherwise if horizontal large, also allow
     const absX = Math.abs(dx), absY = Math.abs(dy);
     if (absY > 10 || absX > 10) {
-      // hint translate
+      didSwipe = true;
       if (absX > absY) {
-        mp.style.transform = `translateX(${dx}px)`;
-        mp.style.opacity = String(Math.max(0.3, 1 - absX / 200));
+        mp.style.transform = `translateX(${dx * 0.3}px)`;
+        mp.style.opacity = String(Math.max(0.6, 1 - absX / 300));
       } else if (dy > 0) {
-        mp.style.transform = `translateY(${dy}px)`;
-        mp.style.opacity = String(Math.max(0.3, 1 - dy / 120));
+        mp.style.transform = `translateY(${dy * 0.4}px)`;
+        mp.style.opacity = String(Math.max(0.6, 1 - dy / 200));
       }
+      // prevent scroll
+      if (absX > 10 || absY > 10) e.preventDefault();
     }
-  }, { passive: true });
+  }, { passive: false });
   const resetMP = () => {
     mp.style.transform = '';
     mp.style.opacity = '';
+    mp.style.transition = '';
     swiping = false;
   };
   mp.addEventListener('touchend', (e) => {
@@ -4489,26 +4491,34 @@ $('#mini-close').addEventListener('click', (e) => {
     const dx = t.clientX - sx, dy = t.clientY - sy;
     const dt = Date.now() - startTime;
     const absX = Math.abs(dx), absY = Math.abs(dy);
-    let shouldClose = false;
-    // velocity or distance threshold
-    if (absX > 90 && absX > absY) shouldClose = true;
-    else if (dy > 65 && absY > absX) shouldClose = true;
-    else if (absX > 60 && dt < 250 && absX > absY) shouldClose = true;
-    if (shouldClose) {
-      mp.style.transition = 'transform 0.22s ease, opacity 0.22s ease';
-      mp.style.transform = absX > absY ? `translateX(${dx > 0 ? 120 : -120}%)` : `translateY(120%)`;
-      mp.style.opacity = '0';
-      setTimeout(() => {
-        mp.style.transition = '';
-        resetMP();
-        closePlayer();
-      }, 220);
-    } else {
-      mp.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
-      resetMP();
-      setTimeout(() => { mp.style.transition = ''; }, 200);
+    let shouldPause = false;
+    if (absX > 70 && absX > absY) shouldPause = true;
+    else if (dy > 45 && absY > absX) shouldPause = true;
+    else if (absX > 50 && dt < 300 && absX > absY) shouldPause = true;
+    if (shouldPause && didSwipe) {
+      e.preventDefault(); e.stopPropagation();
+      mp.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+      mp.style.transform = '';
+      mp.style.opacity = '';
+      setTimeout(resetMP, 180);
+      // pause, not close — avoid autoplay bug
+      try {
+        const isPaused = document.body.classList.contains('paused') || (Player.audio && Player.audio.paused);
+        // if already paused, do nothing; if playing, pause
+        if (!isPaused) togglePlay();
+        else toast('Paused');
+      } catch {}
+      swiping = false;
+      // block next click that would open nowplaying
+      const blockClick = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      mp.addEventListener('click', blockClick, { capture: true, once: true });
+      setTimeout(() => mp.removeEventListener('click', blockClick, { capture: true }), 400);
+      return;
     }
-  }, { passive: true });
+    mp.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+    resetMP();
+    setTimeout(() => { mp.style.transition = ''; }, 200);
+  }, { passive: false });
   mp.addEventListener('touchcancel', resetMP, { passive: true });
 })();
 $('#np-play').addEventListener('click', toggleNowPlayingPlay);
