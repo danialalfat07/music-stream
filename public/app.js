@@ -1,4 +1,4 @@
-const APP_VERSION = "1.2.6";
+const APP_VERSION = "1.2.7";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -1031,6 +1031,82 @@ function moveQueueItem(from, to) {
   renderQueue();
   return true;
 }
+const QueueDrag = { pending: null, active: null, bound: false };
+function bindQueueDrag(row) {
+  const button = $('.btn-more', row);
+  if (!button) return;
+  button.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    const pending = { button, row, pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    QueueDrag.pending = pending;
+    pending.timer = setTimeout(() => {
+      if (QueueDrag.pending !== pending) return;
+      QueueDrag.pending = null;
+      QueueDrag.active = { ...pending, item: Player.queue[Number(row.dataset.qi)] };
+      row.classList.add('dragging');
+      if (button.setPointerCapture && e.pointerId !== undefined) {
+        try { button.setPointerCapture(e.pointerId); } catch {}
+      }
+    }, 400);
+  });
+  button.addEventListener('click', (e) => {
+    if (button.dataset.skipQueueClick !== '1') return;
+    delete button.dataset.skipQueueClick;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  if (!QueueDrag.bound) {
+    QueueDrag.bound = true;
+    const stop = (e, cancelled = false) => {
+      const pending = QueueDrag.pending;
+      if (pending && (!e || e.pointerId === pending.pointerId)) {
+        clearTimeout(pending.timer);
+        QueueDrag.pending = null;
+        if (pending.moved) pending.button.dataset.skipQueueClick = '1';
+      }
+      const active = QueueDrag.active;
+      if (!active || (e && e.pointerId !== active.pointerId)) return;
+      const current = document.querySelector(`#queue-list .track[data-qi="${Player.queue.indexOf(active.item)}"]`);
+      if (current) current.classList.remove('dragging');
+      active.button.dataset.skipQueueClick = '1';
+      QueueDrag.active = null;
+      document.querySelectorAll('#queue-list .track.drag-over').forEach((r) => r.classList.remove('drag-over'));
+      if (e && e.cancelable) e.preventDefault();
+    };
+    window.addEventListener('pointermove', (e) => {
+      const pending = QueueDrag.pending;
+      if (pending && e.pointerId === pending.pointerId) {
+        if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) > 8) {
+          clearTimeout(pending.timer);
+          pending.moved = true;
+          QueueDrag.pending = null;
+          pending.button.dataset.skipQueueClick = '1';
+        }
+        return;
+      }
+      const active = QueueDrag.active;
+      if (!active || e.pointerId !== active.pointerId) return;
+      if (e.cancelable) e.preventDefault();
+      const list = $('#queue-list');
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.track');
+      const from = Player.queue.indexOf(active.item);
+      const to = target && list && list.contains(target) ? Number(target.dataset.qi) : -1;
+      const targetItem = Player.queue[to];
+      document.querySelectorAll('#queue-list .track.drag-over').forEach((r) => r.classList.remove('drag-over'));
+      if (targetItem && from > Player.index && to > Player.index && !!targetItem._user === !!(active.item && active.item._user)) {
+        if (from !== to) {
+          moveQueueItem(from, to);
+          const current = list?.querySelector(`.track[data-qi="${to}"]`);
+          if (current) current.classList.add('dragging');
+        }
+        const current = list?.querySelector(`.track[data-qi="${to}"]`);
+        if (current) current.classList.add('drag-over');
+      }
+    }, { passive: false });
+    window.addEventListener('pointerup', (e) => stop(e));
+    window.addEventListener('pointercancel', (e) => stop(e, true));
+  }
+}
 
 function startCurrent() {
   if (_isClosed) return;
@@ -1915,88 +1991,7 @@ function renderQueue() {
       moveQueued(Number(b.dataset.qi), 1);
     }),
   );
-  $$('.track.q-user, .track.q-radio', el).forEach((row) => {
-    const moreBtn = $('.btn-more', row);
-    if (!moreBtn) return;
-    let pressTimer = 0;
-    let dragging = false;
-    let moved = false;
-    let startX = 0;
-    let startY = 0;
-    const clearDragOver = () =>
-      $$('.track.drag-over', el).forEach((r) => r.classList.remove('drag-over'));
-    const finish = (e, cancelled = false) => {
-      if (pressTimer) clearTimeout(pressTimer);
-      pressTimer = 0;
-      if (!dragging) {
-        if (moved) moreBtn.dataset.skipClick = '1';
-        return;
-      }
-      if (e && e.cancelable) e.preventDefault();
-      const target = e && !cancelled
-        ? document.elementFromPoint(e.clientX, e.clientY)?.closest('.track')
-        : null;
-      const from = Number(row.dataset.qi);
-      const to = target && el.contains(target) ? Number(target.dataset.qi) : NaN;
-      row.classList.remove('dragging');
-      clearDragOver();
-      dragging = false;
-      if (moved) moreBtn.dataset.skipClick = '1';
-      if (!cancelled) moreBtn.dataset.dragged = '1';
-      if (target && target !== row) moveQueueItem(from, to);
-    };
-    moreBtn.addEventListener('pointerdown', (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
-      moved = false;
-      startX = e.clientX;
-      startY = e.clientY;
-      if (moreBtn.setPointerCapture && e.pointerId !== undefined) {
-        try { moreBtn.setPointerCapture(e.pointerId); } catch {}
-      }
-      pressTimer = setTimeout(() => {
-        dragging = true;
-        row.classList.add('dragging');
-      }, 400);
-    });
-    moreBtn.addEventListener('pointermove', (e) => {
-      if (!dragging) {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
-          clearTimeout(pressTimer);
-          pressTimer = 0;
-          moved = true;
-        }
-        return;
-      }
-      if (e.cancelable) e.preventDefault();
-      clearDragOver();
-      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.track');
-      const targetItem = target && el.contains(target)
-        ? Player.queue[Number(target.dataset.qi)]
-        : null;
-      const sourceItem = Player.queue[Number(row.dataset.qi)];
-      if (
-        target &&
-        el.contains(target) &&
-        target !== row &&
-        targetItem &&
-        sourceItem &&
-        !!targetItem._user === !!sourceItem._user
-      ) target.classList.add('drag-over');
-    }, { passive: false });
-    moreBtn.addEventListener('pointerup', (e) => finish(e));
-    moreBtn.addEventListener('pointercancel', () => finish(null, true));
-    moreBtn.addEventListener('click', (e) => {
-      if (moreBtn.dataset.dragged === '1') {
-        delete moreBtn.dataset.dragged;
-        e.preventDefault();
-        e.stopPropagation();
-      } else if (moreBtn.dataset.skipClick === '1') {
-        delete moreBtn.dataset.skipClick;
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    }, true);
-  });
+  $$('.track.q-user, .track.q-radio', el).forEach(bindQueueDrag);
   const clr = $('#q-clear', el);
   if (clr) clr.addEventListener('click', clearUserQueue);
   const sc = $('#q-scramble', el);
