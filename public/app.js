@@ -533,7 +533,7 @@ function initAudio(){
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   a.volume = (store.get('vol',100)/100);
   a.playbackRate = Player.speed;
-  a.addEventListener('ended', ()=>{ nextTrack(true); });
+  a.addEventListener('ended', ()=>{ if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
   a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
   a.addEventListener('pause', ()=>{ if (!Player.native) Player.wasPlaying = false; document.body.classList.add('paused'); renderPlayButtons(); updateMediaSessionState('paused'); });
   a.addEventListener('timeupdate', ()=>{
@@ -801,6 +801,7 @@ window.onYouTubeIframeAPIReady = () => {
       },
       onStateChange: (e) => {
         if (e.data === YT.PlayerState.ENDED) {
+          if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
           try {
             const vid =
               Player.yt.getVideoData && Player.yt.getVideoData().video_id;
@@ -1159,6 +1160,7 @@ async function fetchQueue(song) {
 }
 
 function nextTrack(auto) {
+  if (auto && typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
   if (Player.cued) {
     if (auto) return;
     togglePlay();
@@ -1375,6 +1377,7 @@ setInterval(() => {
     if (playing && _lastTick && Player.current) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
     if (Player.native && window.NativePlayback.isEnded()) {
+      if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
       nextTrack(true);
       return;
     }
