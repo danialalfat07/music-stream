@@ -132,14 +132,16 @@ public class PlaybackService extends Service {
             @Override public void onSkipToPrevious() { sendToWebView("if(window.prevTrack) prevTrack();"); }
             @Override public void onSkipToNext() { sendToWebView("if(window.nextTrack) nextTrack(false);"); }
             @Override public void onSeekTo(long position) {
+                android.util.Log.d("DnialifyDiag", "[Service] onSeekTo pos=" + position + " durMs=" + durationMs + " playing=" + playing + " lastPos=" + positionMs);
                 long pos = Math.max(0, Math.min(position, durationMs > 0 ? durationMs : position));
                 positionMs = pos;
                 lastSeekMs = System.currentTimeMillis();
                 updateMediaSession();
                 publishNotification();
                 double sec = pos / 1000d;
-                // Seek all possible engines; audio is primary, yt is fallback, native is ExoPlayer bridge
-                sendToWebView("try{var s=" + sec + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){} if(window.Player.native&&window.NativePlayback&&window.NativePlayback.seek)try{window.NativePlayback.seek(s);}catch(e){} }}catch(e){}");
+                String js = "try{if(window.nativeSeek){window.nativeSeek(" + sec + ");}else{var s=" + sec + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){}}} }catch(e){}";
+                android.util.Log.d("DnialifyDiag", "[Service] onSeekTo dispatch sec=" + sec);
+                sendToWebView(js);
             }
         });
         mediaSession.setActive(true);
@@ -153,9 +155,27 @@ public class PlaybackService extends Service {
     }
 
     private void sendToWebView(String script) {
-        if (MainActivity.current == null) return;
-        MainActivity.current.runOnUiThread(() -> {
-            try { MainActivity.current.getBridge().eval(script, null); } catch (Exception ignored) { }
+        android.util.Log.d("DnialifyDiag", "[Service] sendToWebView script=" + script.substring(0, Math.min(400, script.length())));
+        MainActivity a = MainActivity.current;
+        if (a == null) {
+            android.util.Log.w("DnialifyDiag", "[Service] sendToWebView no activity");
+            return;
+        }
+        a.runOnUiThread(() -> {
+            try {
+                // Prefer direct WebView eval (works even if Capacitor bridge torn); fallback to Bridge.eval
+                boolean done = false;
+                try {
+                    android.webkit.WebView wv = a.getBridge() != null ? a.getBridge().getWebView() : null;
+                    if (wv != null) {
+                        wv.evaluateJavascript(script, v -> android.util.Log.d("DnialifyDiag", "[Service] evaluateJavascript result=" + v));
+                        done = true;
+                    }
+                } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] evaluateJavascript fail " + e); }
+                if (!done) {
+                    try { a.getBridge().eval(script, null); android.util.Log.d("DnialifyDiag", "[Service] Bridge.eval fallback"); } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] Bridge.eval fail " + e); }
+                }
+            } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] sendToWebView outer " + e); }
         });
     }
 
@@ -204,15 +224,17 @@ public class PlaybackService extends Service {
         long newPos = Math.max(0, intent.getLongExtra("positionMs", 0));
         long newDur = Math.max(0, intent.getLongExtra("durationMs", 0));
         // debounce stale JS pushes right after a notification seek (prevents snap-back)
-        if (lastSeekMs != 0 && System.currentTimeMillis() - lastSeekMs < 2000) {
-            if (Math.abs(newPos - positionMs) > 1500 && Math.abs(newPos - lastSeekMs) > 1000) {
+        if (lastSeekMs != 0 && System.currentTimeMillis() - lastSeekMs < 2500) {
+            if (Math.abs(newPos - positionMs) > 1200) {
                 // JS still reports old position before audio seek settled → keep optimistic position
                 durationMs = newDur > 0 ? newDur : durationMs;
                 updateMediaSession();
                 publishNotification();
+                android.util.Log.d("DnialifyDiag", "[Service] debounce stale push newPos=" + newPos + " optimistic=" + positionMs + " lastSeekMs=" + lastSeekMs);
                 return;
             } else {
                 // seek settled, clear debounce
+                android.util.Log.d("DnialifyDiag", "[Service] seek settled newPos=" + newPos + " optimistic=" + positionMs);
                 lastSeekMs = 0;
             }
         }
@@ -360,7 +382,8 @@ public class PlaybackService extends Service {
             lastSeekMs = System.currentTimeMillis();
             updateMediaSession();
             publishNotification();
-            sendToWebView("try{var s=" + seconds + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){} if(window.Player.native&&window.NativePlayback&&window.NativePlayback.seek)try{window.NativePlayback.seek(s);}catch(e){} }}catch(e){}");
+            String js2 = "try{if(window.nativeSeek){window.nativeSeek(" + seconds + ");}else{var s=" + seconds + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){}}} }catch(e){}";
+            sendToWebView(js2);
         }
         return START_STICKY;
     }

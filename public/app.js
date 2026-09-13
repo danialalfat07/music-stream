@@ -1,4 +1,4 @@
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "1.5.2";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -1395,6 +1395,34 @@ function toggleNowPlayingPlay() {
   togglePlay();
 }
 
+window.nativeSeek = function(sec){
+  sec = Number(sec);
+  if(!isFinite(sec)) return false;
+  try{ android && android.util && android.util.Log && android.util.Log.d("DnialifyDiag","[JS] nativeSeek sec="+sec); }catch{}
+  try{ console.log("[JS] nativeSeek sec="+sec+" useAudio="+Player.useAudio+" hasAudio="+(!!Player.audio)+" ytReady="+(!!Player.yt && !!Player.ready)); }catch{}
+  try{ if(window.Diagnostics) window.Diagnostics.logLine("[JS] nativeSeek sec="+sec); }catch{}
+  let done=false;
+  try{
+    if(Player.audio){
+      try{ Player.audio.currentTime = sec; done=true; }catch(e){ try{console.warn("nativeSeek audio fail",e)}catch{} }
+    }
+    if(Player.yt && Player.yt.seekTo){
+      try{ Player.yt.seekTo(sec, true); done=true; }catch(e){}
+    }
+    if(Player.native && window.NativePlayback && window.NativePlayback.seek){
+      try{ window.NativePlayback.seek(sec); done=true; }catch(e){}
+    }
+  }catch(e){ try{console.warn("nativeSeek outer",e)}catch{} }
+  // immediate push so notif doesn't snap back
+  try{
+    const s=Player.current;
+    if(s && window.NativePlayback && window.NativePlayback.updateWebViewState){
+      const dur = (Player.audio && isFinite(Player.audio.duration) && Player.audio.duration) || (Player.yt && Player.yt.getDuration && Player.yt.getDuration()) || 0;
+      window.NativePlayback.updateWebViewState(displayTitle(s.title)||s.title||"", s.artist||s.subtitle||"", s.thumbnail||"", true, Math.round(sec*1000), Math.round((dur||0)*1000));
+    }
+  }catch{}
+  return done;
+};
 /* bridge WebView state to native notification (incremental, minimal) */
 function pushNativeState(cur, dur, playing) {
   try {
