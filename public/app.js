@@ -1,4 +1,4 @@
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.4.1";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -518,25 +518,26 @@ const Player = {
   nativeUrl: null,
   wasPlaying: false,
   native: false,
+  extraVolume: store.get('extra_volume', false),
   get current() {
     return this.queue[this.index] || null;
   },
 };
 
 function updateVolumeControls(value) {
-  const v = Math.min(200, Math.max(0, Number(value) || 0));
-  const label = $('#set-volume-value');
-  if (label) label.textContent = `${v}%`;
-  for (const id of ['mini-volume', 'np-volume', 'set-volume']) {
-    const input = $(`#${id}`);
-    if (input) input.value = v;
+  const on = !!value;
+  const button = $('#set-volume-extra');
+  const hint = $('#set-volume-hint');
+  if (button) {
+    button.querySelector('span').textContent = on ? 'ON · 200%' : 'OFF · 100%';
+    button.classList.toggle('primary', on);
   }
+  if (hint) hint.textContent = on ? 'ON = 200% extra volume' : 'OFF = 100% normal';
 }
 
-function setPlaybackVolume(value) {
-  const v = Math.min(200, Math.max(0, Number(value) || 0));
-  store.set('vol', v);
-  updateVolumeControls(v);
+function setPlaybackVolume(extra = Player.extraVolume) {
+  const gain = extra ? 2 : 1;
+  updateVolumeControls(extra);
   if (Player.audio) {
     try {
       if (!Player.audioGain && window.AudioContext) {
@@ -546,18 +547,25 @@ function setPlaybackVolume(value) {
         source.connect(Player.audioGain).connect(Player.audioContext.destination);
       }
       if (Player.audioGain) {
-        Player.audioGain.gain.value = v / 100;
+        Player.audioGain.gain.value = gain;
         Player.audio.volume = 1;
       } else {
-        Player.audio.volume = Math.min(1, v / 100);
+        Player.audio.volume = gain;
       }
       if (Player.audioContext?.state === 'suspended') Player.audioContext.resume().catch(() => {});
     } catch {
-      Player.audio.volume = Math.min(1, v / 100);
+      Player.audio.volume = Math.min(1, gain);
     }
   }
-  if (Player.native && window.NativePlayback) window.NativePlayback.volume(Math.min(1, v / 100));
-  if (Player.yt && Player.ready) Player.yt.setVolume(Math.min(100, v));
+  if (Player.native && window.NativePlayback) window.NativePlayback.volume(1);
+  if (Player.yt && Player.ready) Player.yt.setVolume(100);
+}
+
+function toggleExtraVolume() {
+  Player.extraVolume = !Player.extraVolume;
+  store.set('extra_volume', Player.extraVolume);
+  setPlaybackVolume();
+  toast(Player.extraVolume ? 'Extra volume 200%' : 'Volume normal 100%');
 }
 
 function initAudio(){
@@ -569,7 +577,7 @@ function initAudio(){
   Player.native = false;
   Player.audioReady = true;
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
-  setPlaybackVolume(store.get('vol', 100));
+  setPlaybackVolume();
   a.playbackRate = Player.speed;
   a.addEventListener('ended', ()=>{ if (_isClosed) return; if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
   a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
@@ -674,7 +682,7 @@ async function playViaAudio(song){
     try {
       window.NativePlayback.play(`${location.origin}${streamUrl}`, displayTitle(song.title) || song.title || 'Dnialify', song.artist || song.subtitle || '', song.thumbnail || '');
       window.NativePlayback.speed(Player.speed);
-      setPlaybackVolume(store.get('vol', 100));
+      setPlaybackVolume();
     } catch (e) {
       console.warn('native playback unavailable', e);
       Player.native = false;
@@ -825,8 +833,7 @@ window.onYouTubeIframeAPIReady = () => {
     events: {
       onReady: () => {
         Player.ready = true;
-        const v = store.get('vol', 100);
-        setPlaybackVolume(v);
+        setPlaybackVolume();
         applyPlaybackQuality();
         try {
           const iframe = Player.yt.getIframe && Player.yt.getIframe();
@@ -3520,7 +3527,7 @@ function backupLibrary() {
     stats: Library.stats,
     settings: {
       theme: store.get('theme', 'dark'),
-      vol: store.get('vol', 100),
+       extra_volume: Player.extraVolume,
       sb_on: store.get('sb_on', true),
       yt_hq: store.get('yt_hq', false),
     },
@@ -3578,11 +3585,10 @@ function restoreLibrary() {
             );
             updateThemeIcon();
           }
-          if (typeof d.settings.vol === 'number') {
-            store.set('vol', d.settings.vol);
-            $('#mini-volume').value = d.settings.vol;
-            $('#np-volume').value = d.settings.vol;
-      setPlaybackVolume(d.settings.vol);
+          if (typeof d.settings.extra_volume === 'boolean') {
+            Player.extraVolume = d.settings.extra_volume;
+            store.set('extra_volume', Player.extraVolume);
+            setPlaybackVolume();
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -4111,13 +4117,10 @@ function openSettingsModal(tab = 'about') {
       spBtn.textContent = Player.speed + '×';
     };
   }
-  const vol = $('#set-volume');
-  if (vol) {
-    vol.value = store.get('vol', 100);
-    vol.oninput = (e) => {
-      const v = Number(e.target.value);
-      setPlaybackVolume(v);
-    };
+  const extraVol = $('#set-volume-extra');
+  if (extraVol) {
+    updateVolumeControls(Player.extraVolume);
+    extraVol.onclick = toggleExtraVolume;
   }
   const fl = $('#set-float');
   if (fl) {
@@ -4461,11 +4464,6 @@ $('#mini-repeat').addEventListener('click', (e) => {
   persistQueue();
   toast(['Repeat off', 'Repeat all', 'Repeat one'][Player.repeat]);
 });
-/* volume on the bar */
-$('#mini-volume').addEventListener('input', (e) => {
-  const v = Number(e.target.value);
-  setPlaybackVolume(v);
-});
 /* click-to-seek on the bar */
 const miniBar = $('#mini-bar');
 function seekMiniBar(clientX) {
@@ -4642,10 +4640,6 @@ $('#mini-float').addEventListener('click', (e) => {
 });
 $('#np-quality').addEventListener('click', toggleQuality);
 $('#np-sb').addEventListener('click', toggleSB);
-$('#np-volume').addEventListener('input', (e) => {
-  const v = Number(e.target.value);
-  setPlaybackVolume(v);
-});
 $('#np-lyric-preview').addEventListener('click', () => switchNPTab('lyrics'));
 $('#np-sleep').addEventListener('click', openSleepTimer);
 const npShare = $('#np-share');
@@ -5437,14 +5431,7 @@ updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
 enableDrag($('#float-widget'));
-const savedVol = store.get('vol', 100);
-updateVolumeControls(savedVol);
-$('#mini-volume').addEventListener('change', (e) =>
-  store.set('vol', Number(e.target.value)),
-);
-$('#np-volume').addEventListener('change', (e) =>
-  store.set('vol', Number(e.target.value)),
-);
+updateVolumeControls(Player.extraVolume);
 document.addEventListener(
   'error',
   (e) => {

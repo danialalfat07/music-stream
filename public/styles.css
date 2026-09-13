@@ -653,9 +653,6 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 .pb-vol-ic { color: var(--muted); line-height: 0; }
 .pb-vol-ic .ic { width: 16px; height: 16px; }
 .vol-ic { width: 16px; height: 16px; color: var(--muted); }
-#mini-volume, #np-volume { accent-color: var(--bar-fill); height: 4px; cursor: pointer; }
-#mini-volume { width: 93px; }
-#mini-volume:hover, #np-volume:hover { accent-color: var(--accent-bright); }
 
 /* ---------- bottom nav mobile ---------- */
 #nav-mobile { display: none; }
@@ -751,8 +748,6 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 .np-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
 .np-actions .np-extra { display: none !important; }
 #np-more.has-on { color: #1ed760; border-color: rgba(30, 215, 96, 0.55); }
-.np-volume { display: flex; align-items: center; gap: 6px; }
-.np-volume input { width: 100px; }
 #np-lyric-preview {
   font-size: 13.5px; color: rgba(255,255,255,.78); text-align: center; min-height: 18px;
   cursor: pointer; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;
@@ -1118,7 +1113,6 @@ body.hq-audio #yt-player {
 @media (min-width: 861px) and (max-width: 1099px) {
   .np-art-wrap { width: min(38vw, 400px); }
   #np-player.active { justify-content: flex-start; gap: 16px; overflow: hidden; }
-  .np-volume { display: none; }
   .np-tabs { flex-wrap: nowrap; }
 }
 
@@ -1188,7 +1182,6 @@ body.hq-audio #yt-player {
   #nowplaying .np-actions .pill-btn .ic { width: 16px; height: 16px; }
   #nowplaying #np-speed span,
   #nowplaying #np-quality span { display: inline; font-size: 11px; font-weight: 800; }
-  #nowplaying .np-volume { display: none; }
   #nowplaying #np-lyric-preview { max-width: none; text-align: left; font-size: 12.5px; }
   body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 }
@@ -1321,7 +1314,7 @@ body.hq-audio #yt-player {
   }
   .np-controls { gap: 16px; }
   .play-big { width: 68px; height: 68px; }
-  .np-volume, #np-float { display: none !important; }
+  #np-float { display: none !important; }
   .np-actions {
     flex-wrap: nowrap;
     gap: 10px;
@@ -1424,11 +1417,8 @@ html[data-theme="light"] .modal-card .pl-form-input {
 .settings-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid color-mix(in srgb,var(--text) 6%,transparent)}
 .s-label{font-size:13.5px;font-weight:600}
 .settings-row .pill-btn{font-size:13px;padding:7px 12px}
-.volume-setting>div:first-child{display:flex;flex-direction:column;gap:3px}
-.volume-setting small{font-size:11px;color:var(--muted);font-weight:500}
-.volume-control{display:flex;align-items:center;gap:9px;min-width:190px}
-.volume-control output{min-width:43px;color:var(--accent-bright);font-size:13px;font-weight:800;text-align:right}
-.volume-control input{width:135px;accent-color:var(--bar-fill);cursor:pointer}
+.settings-row>div:first-child{display:flex;flex-direction:column;gap:3px}
+.settings-row small{font-size:11px;color:var(--muted);font-weight:500}
 .settings-contact{display:flex;flex-direction:column;gap:10px}
 .sc-row{display:flex;align-items:center;gap:10px;font-size:13.5px}
 .sc-row .ic{width:16px;height:16px;color:var(--muted)}
