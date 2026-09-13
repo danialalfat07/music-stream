@@ -4,7 +4,10 @@ def computedVersionCode = {
     // Monotonic versionCode: base 2 + GITHUB_RUN_NUMBER (CI) else 2
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toInteger() ?: 0
     def base = 2
-    return base + runNum
+    def code = base + runNum
+    // Local build must be > last CI artifact (v41) so adb install -r works
+    if (code <= 41) code = 42
+    return code
 }()
 def computedVersionName = {
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toString() ?: ""
