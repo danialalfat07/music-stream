@@ -1,5 +1,8 @@
 /* Dnialify Music Stream - Spotify-style theme (polished) */
 :root {
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --bg: #000000;
   --main-bg: #121212;
   --card: #181818;
@@ -62,7 +65,11 @@ html[data-theme="light"] {
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
 html, body { height: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 body {
   background: var(--bg);
   color: var(--text);
@@ -182,7 +189,7 @@ a { color: inherit; }
 .nav-item {
   display: flex; align-items: center; gap: 18px; padding: 9px 12px;
   border-radius: 6px; color: var(--muted); font-size: 15.5px; font-weight: 700;
-  transition: color 0.18s, background 0.18s, transform 0.18s;
+  transition: color 0.22s var(--ease-spring), background 0.22s var(--ease-spring), transform 0.22s var(--ease-spring);
   text-align: left; width: 100%; letter-spacing: -0.01em;
 }
 .nav-item:hover { color: var(--text); background: var(--hover); }
@@ -271,7 +278,19 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 .tb-search:hover { background: var(--card-hover); color: var(--text); transform: scale(1.01); }
 .tb-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
 #view { max-width: 1480px; margin: 0 auto; padding: 8px 24px 48px; will-change: opacity, transform; }
-#view.view-enter { animation: viewEnter 0.48s cubic-bezier(0.16, 1, 0.3, 1); }
+#view.view-enter { animation: viewEnter 0.62s var(--ease-spring); }
+#view.view-enter .page-title,
+#view.view-enter .hello-row { animation: titleEnter 0.56s var(--ease-spring) both; }
+#view.view-enter .shelf { animation: shelfEnter 0.58s var(--ease-spring) both; }
+#view.view-enter .shelf:nth-child(2) { animation-delay: 0.06s; }
+#view.view-enter .shelf:nth-child(3) { animation-delay: 0.12s; }
+#view.view-enter .shelf:nth-child(4) { animation-delay: 0.18s; }
+#view.view-enter .track { animation: trackEnter 0.45s var(--ease-spring) both; }
+#view.view-enter .track:nth-child(2) { animation-delay: 0.04s; }
+#view.view-enter .track:nth-child(3) { animation-delay: 0.08s; }
+#view.view-enter .track:nth-child(4) { animation-delay: 0.12s; }
+#view.view-enter .track:nth-child(5) { animation-delay: 0.16s; }
+#view.view-enter .card { animation: cardEnter 0.5s var(--ease-spring) both; }
 .page-title {
   font-size: clamp(28px, 4vw, 34px);
   font-weight: 800; margin-bottom: 22px;
@@ -286,7 +305,7 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 .chip {
   padding: 7px 14px; background: var(--hover-strong);
   border-radius: 999px; font-size: 13px; color: var(--text); font-weight: 600;
-  transition: background 0.15s, color 0.15s, transform 0.15s;
+  transition: background 0.22s var(--ease-spring), color 0.22s var(--ease-spring), transform 0.22s var(--ease-spring);
 }
 .chip:hover { background: color-mix(in srgb, var(--text) 18%, transparent); transform: scale(1.03); }
 .chip.active { background: var(--chip-on-bg); color: var(--chip-on-fg); font-weight: 700; }
@@ -305,7 +324,7 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
   border-radius: 6px; overflow: hidden; height: 64px;
   text-align: left; font-weight: 700; font-size: 14.5px;
   position: relative; min-width: 0;
-  transition: background 0.18s, transform 0.18s;
+  transition: background 0.24s var(--ease-spring), transform 0.24s var(--ease-spring), box-shadow 0.24s var(--ease-spring);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 html[data-theme="light"] .quick-card { background: rgba(0, 0, 0, 0.05); box-shadow: none; }
@@ -361,7 +380,7 @@ html[data-theme="light"] .car-btn {
 .card {
   width: 186px; scroll-snap-align: start; cursor: pointer;
   padding: 12px; border-radius: var(--radius-lg);
-  transition: background 0.22s, transform 0.22s;
+  transition: background 0.26s var(--ease-spring), transform 0.26s var(--ease-spring), box-shadow 0.26s var(--ease-spring);
   position: relative;
 }
 .card:hover { background: var(--card-hover); }
@@ -417,7 +436,7 @@ html[data-theme="light"] .art-ph { background: linear-gradient(145deg, #e8e8e8, 
 .track {
   display: flex; align-items: center; gap: 14px;
   padding: 7px 14px; border-radius: 6px; cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.22s var(--ease-spring), transform 0.22s var(--ease-spring);
 }
 .track:hover { background: var(--hover-strong); }
 .track.playing { background: var(--hover); }
@@ -520,7 +539,7 @@ html[data-theme="light"] .detail-head {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 9px 18px; background: transparent; border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
   border-radius: 999px; font-size: 13.5px; font-weight: 700; letter-spacing: 0.02em;
-  transition: transform 0.12s, border-color 0.15s, background 0.15s;
+  transition: transform 0.22s var(--ease-spring), border-color 0.22s var(--ease-spring), background 0.22s var(--ease-spring), color 0.22s var(--ease-spring);
 }
 .pill-btn .ic { width: 15px; height: 15px; }
 .pill-btn:hover { border-color: var(--text); transform: scale(1.04); }
@@ -703,7 +722,7 @@ html[data-theme="light"] #np-bg::after {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 7px 16px; border-radius: 999px; font-size: 13px;
   color: rgba(255,255,255,.78); background: hsla(0, 0%, 100%, 0.14); font-weight: 700;
-  transition: background 0.15s, color 0.15s, transform 0.15s;
+  transition: background 0.28s var(--ease-spring), color 0.28s var(--ease-spring), transform 0.28s var(--ease-spring);
 }
 html[data-theme="light"] .np-tab { background: hsla(0, 0%, 100%, 0.16); color: rgba(255,255,255,.82); }
 .np-tab .ic { width: 14px; height: 14px; }
@@ -712,7 +731,7 @@ html[data-theme="light"] .np-tab { background: hsla(0, 0%, 100%, 0.16); color: r
 html[data-theme="light"] .np-tab.active { background: #fff; color: #111; }
 .np-body { flex: 1; overflow: hidden; position: relative; }
 .np-pane { display: none; height: 100%; overflow-y: auto; padding: 12px 4px; }
-.np-pane.active { display: flex; flex-direction: column; }
+.np-pane.active { display: flex; flex-direction: column; animation: paneEnter 0.42s var(--ease-spring) both; }
 #np-player.active { align-items: center; justify-content: center; gap: 18px; }
 .np-art-wrap {
   width: min(56vw, 360px); aspect-ratio: 1;
@@ -846,7 +865,7 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
   background: var(--card-hover); border-radius: 16px; padding: 24px;
   width: min(92vw, 420px); max-height: 80vh; overflow-y: auto;
   box-shadow: 0 16px 60px rgba(0, 0, 0, 0.45);
-  animation: popIn 0.22s ease;
+  animation: modalEnter 0.42s var(--ease-spring);
 }
 .modal-card h3 { margin-bottom: 16px; font-weight: 800; letter-spacing: -0.02em; }
 .modal-card input {
@@ -1113,7 +1132,17 @@ body.hq-audio #yt-player {
 @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes viewEnter { from { opacity: 0; transform: translateY(14px) scale(0.98); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes viewEnter { from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes viewExit { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(0.99); filter: blur(2px); } }
+@keyframes titleEnter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes shelfEnter { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes trackEnter { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes cardEnter { from { opacity: 0; transform: translateY(12px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes paneEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes modalEnter { from { opacity: 0; transform: scale(0.94) translateY(10px); } to { opacity: 1; transform: none; } }
+::view-transition-old(root) { animation: viewExit 0.32s var(--ease-smooth) both; }
+::view-transition-new(root) { animation: viewEnter 0.52s var(--ease-spring) both; }
+::view-transition-group(root) { animation-duration: 0.52s; }
 
 /* Laptop overlay (sidebar on, NP still fullscreen): don't leave a tiny floating cover */
 @media (min-width: 861px) and (max-width: 1099px) {

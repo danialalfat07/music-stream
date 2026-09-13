@@ -1,4 +1,4 @@
-const APP_VERSION = "1.5.3";
+const APP_VERSION = "1.6.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -2715,6 +2715,7 @@ async function route() {
   view.classList.remove('view-enter');
   void view.offsetWidth;
   applyTint(parts[0] || 'home');
+  const runRoute = async () => {
 
   try {
     if (parts[0] === 'settings') { openSettingsModal('about'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); return; }
@@ -2772,6 +2773,12 @@ async function route() {
     bindEmptyCtas(view);
   }
   view.classList.add('view-enter');
+  };
+  if (document.startViewTransition) {
+    try { await document.startViewTransition(runRoute).finished; } catch { await runRoute(); }
+  } else {
+    await runRoute();
+  }
 }
 window.addEventListener('hashchange', route);
 
