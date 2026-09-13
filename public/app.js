@@ -1,4 +1,4 @@
-const APP_VERSION = "1.5.2";
+const APP_VERSION = "1.5.3";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -2573,11 +2573,10 @@ function previewSong(song) {
 function openSongNowPlaying(song) {
   if (!song || !song.videoId) return;
   const same = Player.current && Player.current.videoId === song.videoId;
-  if (!Player.current) {
+  if (!same) {
     playSong(song);
-  } else if (!same) {
-    previewSong(song);
   } else {
+    if (document.body.classList.contains('paused')) togglePlay();
     Player.pending = null;
     renderNowPlaying();
     updateLikeButtons();
@@ -4837,19 +4836,52 @@ $('#miniplayer').addEventListener('click', (e) => {
 });
 (() => {
   const np = $('#nowplaying');
-  let startY = 0;
+  let startY = 0, startX = 0, startTarget = null, startTime = 0;
   np.addEventListener(
     'touchstart',
     (e) => {
-      startY = e.changedTouches[0].clientY;
+      const t = e.changedTouches[0];
+      startY = t.clientY;
+      startX = t.clientX;
+      startTarget = e.target;
+      startTime = Date.now();
     },
     { passive: true },
   );
   np.addEventListener(
     'touchend',
     (e) => {
-      const dy = e.changedTouches[0].clientY - startY;
-      if (dy > 90 && window.innerWidth < 1100) closeNowPlaying();
+      if (window.innerWidth >= 1100) return;
+      const t = e.changedTouches[0];
+      const dy = t.clientY - startY;
+      const dx = t.clientX - startX;
+      const dt = Date.now() - startTime;
+      // only vertical swipe down, not horizontal, not too slow
+      if (dy < 70) return;
+      if (Math.abs(dx) > Math.abs(dy) * 0.85) return;
+      if (dt > 600) return;
+      // ignore if touch started on interactive controls
+      if (startTarget && startTarget.closest && startTarget.closest('button, input, a, .np-tab, .np-controls, .np-seek, .np-actions, .track, .card')) {
+        // allow handle area to still close even if it's a button container
+        if (!startTarget.closest('.np-handle') && !startTarget.closest('.np-topbar')) return;
+      }
+      // don't close when scrolling lyric/queue/related content
+      const activePane = document.querySelector('.np-pane.active');
+      let scroller = null;
+      if (activePane) {
+        if (activePane.id === 'np-lyrics') scroller = activePane.querySelector('#lyrics-container');
+        else if (activePane.id === 'np-queue') scroller = activePane.querySelector('#queue-list');
+        else if (activePane.id === 'np-related') scroller = activePane.querySelector('#related-list');
+      }
+      if (scroller && scroller.scrollTop > 8) return;
+      // also check any scrollable ancestor of startTarget
+      let el = startTarget;
+      while (el && el !== np) {
+        if (el.scrollHeight > el.clientHeight + 8 && el.scrollTop > 8) return;
+        el = el.parentElement;
+      }
+      // require swipe started near top handle or on empty area when not scrolling
+      closeNowPlaying();
     },
     { passive: true },
   );

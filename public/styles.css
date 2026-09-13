@@ -270,8 +270,8 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 .tb-search .ic { width: 20px; height: 20px; }
 .tb-search:hover { background: var(--card-hover); color: var(--text); transform: scale(1.01); }
 .tb-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
-#view { max-width: 1480px; margin: 0 auto; padding: 8px 24px 48px; }
-#view.view-enter { animation: fadeUp 0.38s ease; }
+#view { max-width: 1480px; margin: 0 auto; padding: 8px 24px 48px; will-change: opacity, transform; }
+#view.view-enter { animation: viewEnter 0.48s cubic-bezier(0.16, 1, 0.3, 1); }
 .page-title {
   font-size: clamp(28px, 4vw, 34px);
   font-weight: 800; margin-bottom: 22px;
@@ -662,7 +662,8 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
   position: fixed; inset: 0; z-index: 60;
   background: #121212;
   color: #fff;
-  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+  transition: transform 0.52s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.36s ease;
+  will-change: transform, opacity;
 }
 #nowplaying.hidden { transform: translateY(100%); pointer-events: none; opacity: 0; }
 #np-bg {
@@ -682,6 +683,10 @@ html[data-theme="light"] #np-bg::after {
 .np-handle {
   display: none; width: 42px; height: 5px; border-radius: 99px;
   background: hsla(0, 0%, 100%, 0.35); margin: 6px auto 0;
+}
+@media (max-width: 860px) {
+  .np-handle { display: block; }
+  #nowplaying { transition: transform 0.52s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.36s ease; }
 }
 .np-inner { position: relative; height: 100%; display: flex; flex-direction: column; max-width: 820px; margin: 0 auto; padding: 12px 24px 26px; }
 .np-topbar { display: flex; align-items: center; justify-content: space-between; }
@@ -1108,6 +1113,7 @@ body.hq-audio #yt-player {
 @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes viewEnter { from { opacity: 0; transform: translateY(14px) scale(0.98); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 
 /* Laptop overlay (sidebar on, NP still fullscreen): don't leave a tiny floating cover */
 @media (min-width: 861px) and (max-width: 1099px) {
