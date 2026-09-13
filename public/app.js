@@ -1,4 +1,4 @@
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.6.1";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -2703,6 +2703,24 @@ function renderSidebarLibrary() {
 const go = (hash) => {
   location.hash = hash;
 };
+// ---- page cache: keep last rendered HTML per hash to eliminate switch delay (stale-while-revalidate) ----
+const pageCache = new Map();
+const PAGE_CACHE_TTL = 90000;
+const PAGE_CACHE_MAX = 24;
+function cacheGet(hash) {
+  const e = pageCache.get(hash);
+  if (!e) return null;
+  if (Date.now() - e.ts > PAGE_CACHE_TTL) { pageCache.delete(hash); return null; }
+  return e.html;
+}
+function cacheSet(hash, html) {
+  if (!html || html.length < 80) return;
+  if (pageCache.size >= PAGE_CACHE_MAX) {
+    const first = pageCache.keys().next().value;
+    pageCache.delete(first);
+  }
+  pageCache.set(hash, { html, ts: Date.now() });
+}
 
 async function route() {
   const hash = location.hash || '#/home';
@@ -2715,13 +2733,21 @@ async function route() {
   view.classList.remove('view-enter');
   void view.offsetWidth;
   applyTint(parts[0] || 'home');
+  // show cached instantly to avoid delay (stale-while-revalidate)
+  const _cached = cacheGet(hash);
+  if (_cached) {
+    view.innerHTML = _cached;
+    bindItems(view);
+    view.classList.add('view-enter');
+  }
   const runRoute = async () => {
 
   try {
-    if (parts[0] === 'settings') { openSettingsModal('about'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); return; }
+    if (parts[0] === 'settings') { openSettingsModal('about'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); cacheSet(hash, view.innerHTML); return; }
     if (parts[0] === '' || parts[0] === 'home') {
       setActiveNav('home');
       await viewHome(view);
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'search') {
       setActiveNav('search');
       await viewSearch(
@@ -2729,18 +2755,23 @@ async function route() {
         decodeURIComponent(parts[1] || ''),
         params.get('filter'),
       );
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'charts') {
       setActiveNav('charts');
       await viewCharts(view);
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'stats') {
       setActiveNav('library');
       viewStats(view);
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'moods') {
       setActiveNav('moods');
       await viewMoods(view);
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'library') {
       setActiveNav('library');
       viewLibrary(view, parts[1] || 'playlists');
+      cacheSet(hash, view.innerHTML);
     } else if (
       parts[0] === 'album' ||
       parts[0] === 'playlist' ||
@@ -2749,12 +2780,15 @@ async function route() {
     ) {
       setActiveNav('');
       await viewBrowse(view, parts[1], parts[0], params.get('params'));
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'localpl') {
       setActiveNav('library');
       viewLocalPlaylist(view, parts[1]);
+      cacheSet(hash, view.innerHTML);
     } else if (parts[0] === 'song' && parts[1]) {
       setActiveNav('home');
       await viewHome(view);
+      cacheSet(hash, view.innerHTML);
       openSharedSong(parts[1]);
     } else {
       view.innerHTML = emptyHTML(
@@ -2794,7 +2828,8 @@ const skeletonHTML =
 
 /* ---- Home ---- */
 async function viewHome(view) {
-  view.innerHTML = skeletonHTML;
+  const _ck = location.hash || '#/home';
+  if (!cacheGet(_ck)) view.innerHTML = skeletonHTML;
   const now = new Date();
   const h = now.getHours();
   const greet =
@@ -3209,7 +3244,8 @@ async function viewSearch(view, q = '', filter = null) {
 
 /* ---- Charts ---- */
 async function viewCharts(view) {
-  view.innerHTML = skeletonHTML;
+  const _ckC = location.hash || '#/charts';
+  if (!cacheGet(_ckC)) view.innerHTML = skeletonHTML;
   const d = await api('/api/charts');
   const dateLine = new Date().toLocaleDateString('id-ID', {
     weekday: 'long',
@@ -3264,7 +3300,8 @@ const MOOD_COLORS = [
 
 /* ---- Moods ---- */
 async function viewMoods(view) {
-  view.innerHTML = `<div class="page-title">Moods & genres</div><div class="loading-note">Loading…</div>`;
+  const _ckM = location.hash || '#/moods';
+  if (!cacheGet(_ckM)) view.innerHTML = `<div class="page-title">Moods & genres</div><div class="loading-note">Loading…</div>`;
   const d = await api('/api/moods');
   view.innerHTML = `<div class="page-title">Moods & genres</div>
     <div class="mood-grid">${d.categories.map(moodCardHTML).join('')}</div>`;
@@ -3759,7 +3796,8 @@ function viewLocalPlaylist(view, pid) {
 
 /* ---- Browse (album / playlist / artist / mood) ---- */
 async function viewBrowse(view, id, kind, extraParams) {
-  view.innerHTML = skeletonHTML;
+  const _ckB = location.hash || '#/browse';
+  if (!cacheGet(_ckB)) view.innerHTML = skeletonHTML;
   const d = await api(
     `/api/browse?id=${encodeURIComponent(id)}${extraParams ? '&params=' + encodeURIComponent(extraParams) : ''}`,
   );
@@ -4841,58 +4879,7 @@ $('#miniplayer').addEventListener('click', (e) => {
   updateLikeButtons();
   openNowPlaying();
 });
-(() => {
-  const np = $('#nowplaying');
-  let startY = 0, startX = 0, startTarget = null, startTime = 0;
-  np.addEventListener(
-    'touchstart',
-    (e) => {
-      const t = e.changedTouches[0];
-      startY = t.clientY;
-      startX = t.clientX;
-      startTarget = e.target;
-      startTime = Date.now();
-    },
-    { passive: true },
-  );
-  np.addEventListener(
-    'touchend',
-    (e) => {
-      if (window.innerWidth >= 1100) return;
-      const t = e.changedTouches[0];
-      const dy = t.clientY - startY;
-      const dx = t.clientX - startX;
-      const dt = Date.now() - startTime;
-      // only vertical swipe down, not horizontal, not too slow
-      if (dy < 70) return;
-      if (Math.abs(dx) > Math.abs(dy) * 0.85) return;
-      if (dt > 600) return;
-      // ignore if touch started on interactive controls
-      if (startTarget && startTarget.closest && startTarget.closest('button, input, a, .np-tab, .np-controls, .np-seek, .np-actions, .track, .card')) {
-        // allow handle area to still close even if it's a button container
-        if (!startTarget.closest('.np-handle') && !startTarget.closest('.np-topbar')) return;
-      }
-      // don't close when scrolling lyric/queue/related content
-      const activePane = document.querySelector('.np-pane.active');
-      let scroller = null;
-      if (activePane) {
-        if (activePane.id === 'np-lyrics') scroller = activePane.querySelector('#lyrics-container');
-        else if (activePane.id === 'np-queue') scroller = activePane.querySelector('#queue-list');
-        else if (activePane.id === 'np-related') scroller = activePane.querySelector('#related-list');
-      }
-      if (scroller && scroller.scrollTop > 8) return;
-      // also check any scrollable ancestor of startTarget
-      let el = startTarget;
-      while (el && el !== np) {
-        if (el.scrollHeight > el.clientHeight + 8 && el.scrollTop > 8) return;
-        el = el.parentElement;
-      }
-      // require swipe started near top handle or on empty area when not scrolling
-      closeNowPlaying();
-    },
-    { passive: true },
-  );
-})();
+/* swipe-down to minimize disabled — only #np-close and back button close Now Playing */
 
 /* ================= floating widget / Picture-in-Picture ================= */
 Player.pipWin = null;
