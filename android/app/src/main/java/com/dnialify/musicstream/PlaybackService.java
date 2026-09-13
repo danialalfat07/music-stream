@@ -39,6 +39,7 @@ public class PlaybackService extends Service {
     private boolean dismissedPaused = false;
     private long lastStopMs = 0;
     private boolean isStopped = false;
+    private long lastSeekMs = 0;
 
     public static void arm(Context context) {
         if (instance != null) {
@@ -131,9 +132,14 @@ public class PlaybackService extends Service {
             @Override public void onSkipToPrevious() { sendToWebView("if(window.prevTrack) prevTrack();"); }
             @Override public void onSkipToNext() { sendToWebView("if(window.nextTrack) nextTrack(false);"); }
             @Override public void onSeekTo(long position) {
-                sendToWebView("if(window.Player && window.Player.yt) Player.yt.seekTo(" + (position / 1000d)
-                        + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime="
-                        + (position / 1000d) + ";");
+                long pos = Math.max(0, Math.min(position, durationMs > 0 ? durationMs : position));
+                positionMs = pos;
+                lastSeekMs = System.currentTimeMillis();
+                updateMediaSession();
+                publishNotification();
+                double sec = pos / 1000d;
+                // Seek all possible engines; audio is primary, yt is fallback, native is ExoPlayer bridge
+                sendToWebView("try{var s=" + sec + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){} if(window.Player.native&&window.NativePlayback&&window.NativePlayback.seek)try{window.NativePlayback.seek(s);}catch(e){} }}catch(e){}");
             }
         });
         mediaSession.setActive(true);
@@ -195,8 +201,23 @@ public class PlaybackService extends Service {
         }
         if (nextPlaying) { dismissedPaused = false; isStopped = false; }
         playing = nextPlaying;
-        positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
-        durationMs = Math.max(0, intent.getLongExtra("durationMs", 0));
+        long newPos = Math.max(0, intent.getLongExtra("positionMs", 0));
+        long newDur = Math.max(0, intent.getLongExtra("durationMs", 0));
+        // debounce stale JS pushes right after a notification seek (prevents snap-back)
+        if (lastSeekMs != 0 && System.currentTimeMillis() - lastSeekMs < 2000) {
+            if (Math.abs(newPos - positionMs) > 1500 && Math.abs(newPos - lastSeekMs) > 1000) {
+                // JS still reports old position before audio seek settled → keep optimistic position
+                durationMs = newDur > 0 ? newDur : durationMs;
+                updateMediaSession();
+                publishNotification();
+                return;
+            } else {
+                // seek settled, clear debounce
+                lastSeekMs = 0;
+            }
+        }
+        positionMs = newPos;
+        durationMs = newDur;
         updateMediaSession();
         publishNotification();
     }
@@ -333,8 +354,13 @@ public class PlaybackService extends Service {
         else if ("pause".equals(action)) sendToWebView("if(window.togglePlay) togglePlay();");
         else if ("seek".equals(action)) {
             double seconds = intent.getDoubleExtra("seconds", 0);
-            sendToWebView("if(window.Player && window.Player.yt) Player.yt.seekTo(" + seconds
-                    + ",true); else if(window.Player && window.Player.audio) Player.audio.currentTime=" + seconds + ";");
+            long pos = (long)(Math.max(0, seconds) * 1000);
+            if (durationMs > 0) pos = Math.min(pos, durationMs);
+            positionMs = pos;
+            lastSeekMs = System.currentTimeMillis();
+            updateMediaSession();
+            publishNotification();
+            sendToWebView("try{var s=" + seconds + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){} if(window.Player.native&&window.NativePlayback&&window.NativePlayback.seek)try{window.NativePlayback.seek(s);}catch(e){} }}catch(e){}");
         }
         return START_STICKY;
     }
