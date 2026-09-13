@@ -1,4 +1,4 @@
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.5.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -538,15 +538,21 @@ function updateVolumeControls(value) {
 function setPlaybackVolume(extra = Player.extraVolume) {
   const gain = extra ? 2 : 1;
   updateVolumeControls(extra);
+  const nativeExtra = !!window.NativePlayback?.extraVolume;
+  if (nativeExtra) {
+    try { window.NativePlayback.extraVolume(!!extra); } catch {}
+  }
   if (Player.audio) {
     try {
-      if (!Player.audioGain && window.AudioContext) {
+      if (!nativeExtra && !Player.audioGain && window.AudioContext) {
         Player.audioContext = new AudioContext();
         const source = Player.audioContext.createMediaElementSource(Player.audio);
         Player.audioGain = Player.audioContext.createGain();
         source.connect(Player.audioGain).connect(Player.audioContext.destination);
       }
-      if (Player.audioGain) {
+      if (nativeExtra) {
+        Player.audio.volume = 1;
+      } else if (Player.audioGain) {
         Player.audioGain.gain.value = gain;
         Player.audio.volume = 1;
       } else {

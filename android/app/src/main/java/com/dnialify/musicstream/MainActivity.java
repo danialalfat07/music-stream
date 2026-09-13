@@ -23,6 +23,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.util.TypedValue;
+import android.media.audiofx.LoudnessEnhancer;
 
 public class MainActivity extends BridgeActivity {
     public static MainActivity current;
@@ -50,6 +51,7 @@ public class MainActivity extends BridgeActivity {
     private boolean pipIsPlaying = false;
     private Bitmap pipArtworkBitmap;
     private String pipLoadedArtworkUrl = "";
+    private LoudnessEnhancer extraVolumeEffect;
 
     @Override
     public void onCreate(android.os.Bundle state) {
@@ -112,6 +114,19 @@ public class MainActivity extends BridgeActivity {
         // Phase 11 — native PiP view (GONE until PiP, mirrors WebView state)
         ensurePipNativeView();
         logPipNative("onStart");
+    }
+
+    private void setExtraVolume(boolean enabled) {
+        runOnUiThread(() -> {
+            try {
+                if (extraVolumeEffect == null) extraVolumeEffect = new LoudnessEnhancer(0);
+                extraVolumeEffect.setTargetGain(enabled ? 600 : 0);
+                extraVolumeEffect.setEnabled(enabled);
+                android.util.Log.d(TAG_DIAG, "[Native] extra volume " + (enabled ? "ON +6dB" : "OFF"));
+            } catch (Exception e) {
+                android.util.Log.w(TAG_DIAG, "[Native] extra volume unavailable", e);
+            }
+        });
     }
 
     @Override
@@ -680,6 +695,12 @@ public class MainActivity extends BridgeActivity {
     public void onDestroy() {
         android.util.Log.d(TAG_DIAG, "Activity onDestroy " + lifecycleSnapshot());
         if (current == this) current = null;
+        try {
+            if (extraVolumeEffect != null) {
+                extraVolumeEffect.release();
+                extraVolumeEffect = null;
+            }
+        } catch (Exception ignored) { }
         super.onDestroy();
     }
 
@@ -912,6 +933,9 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void volume(double value) { PlaybackService.volume(MainActivity.this, value); }
+
+        @JavascriptInterface
+        public void extraVolume(boolean enabled) { setExtraVolume(enabled); }
 
         @JavascriptInterface
         public void enterPip() {
