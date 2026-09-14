@@ -1,4 +1,4 @@
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.7.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -324,11 +324,20 @@ const Library = {
     return store.get('stats', {});
   },
   addListenTime(videoId, secs) {
-    const st = store.get('stats', {});
-    if (st[videoId]) {
-      st[videoId].secs += secs;
-      store.set('stats', st);
-    }
+    // buffered to avoid parse/stringify every 400ms
+    if (!this._pendingListen) this._pendingListen = {};
+    this._pendingListen[videoId] = (this._pendingListen[videoId] || 0) + secs;
+    if (this._listenTimer) return;
+    this._listenTimer = setTimeout(() => {
+      this._listenTimer = null;
+      const pending = this._pendingListen; this._pendingListen = {};
+      if (!Object.keys(pending).length) return;
+      try {
+        const st = store.get('stats', {});
+        for (const k in pending) if (st[k]) st[k].secs += pending[k];
+        store.set('stats', st);
+      } catch {}
+    }, 4000);
   },
 };
 
@@ -1522,14 +1531,18 @@ function pushNativeLyricWindow() {
 }
 
 
-/* progress loop */
+/* progress loop — rAF throttled 220ms for 60fps */
 let _lastTick = null;
 let _lastNativePush = 0;
 let _lastPushPlaying = null;
 let _lastPushPos = -1;
 let _lastCloseMs = 0;
 let _isClosed = false;
-setInterval(() => {
+let _rafLast = 0;
+function progressLoop(ts){
+  requestAnimationFrame(progressLoop);
+  if (ts - _rafLast < 220) return;
+  _rafLast = ts;
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
     : Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
@@ -1624,7 +1637,8 @@ setInterval(() => {
       }
     }
   }
-}, 400);
+}
+requestAnimationFrame(progressLoop);
 
 function renderPlayButtons() {
   let nativePlaying = false;
@@ -1815,21 +1829,27 @@ let lastLyricIdx = -1;
 function updateLyricHighlight(cur) {
   const L = Player.lyrics;
   if (!L.lines.length) return;
-  let idx = -1;
-  for (let i = 0; i < L.lines.length; i++) {
-    if (cur >= L.lines[i].t - 0.2) idx = i;
-    else break;
+  // binary search for idx (faster than linear on long lyrics)
+  let lo = 0, hi = L.lines.length - 1, idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cur >= L.lines[mid].t - 0.2) { idx = mid; lo = mid + 1; } else hi = mid - 1;
   }
   if (idx === lastLyricIdx) return;
   lastLyricIdx = idx;
   const c = $('#lyrics-container');
-  $$('.lyric-line', c).forEach((el, i) => {
-    el.classList.toggle('active', i === idx);
-    el.classList.toggle('past', i < idx);
+  // batch class toggles via rAF to avoid layout thrash
+  requestAnimationFrame(() => {
+    $$('.lyric-line', c).forEach((el, i) => {
+      el.classList.toggle('active', i === idx);
+      el.classList.toggle('past', i < idx);
+    });
+    const active = c.querySelector('.lyric-line.active');
+    if (active && $('#np-lyrics').classList.contains('active')) {
+      // auto scroll without smooth queue (instant, CSS smooth will handle)
+      try { active.scrollIntoView({ block: 'center', behavior: 'auto' }); } catch {}
+    }
   });
-  const active = c.querySelector('.lyric-line.active');
-  if (active && $('#np-lyrics').classList.contains('active'))
-    active.scrollIntoView({ block: 'center', behavior: 'smooth' });
   const line = idx >= 0 ? L.lines[idx].text : '';
   $('#np-lyric-preview').textContent = line;
   syncFloatLyric(line);

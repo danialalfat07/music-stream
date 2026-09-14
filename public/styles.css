@@ -65,11 +65,9 @@ html[data-theme="light"] {
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: auto; }
 html, body { height: 100%; }
-@media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-}
+#lyrics-container { scroll-behavior: smooth; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -248,9 +246,7 @@ html[data-theme="light"] #main {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 12px;
   padding: 12px 24px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--main-bg) 72%, transparent), transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--main-bg) 88%, transparent);
 }
 .tb-nav { display: flex; gap: 8px; flex-shrink: 0; }
 .tb-btn {
@@ -277,20 +273,20 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 .tb-search .ic { width: 20px; height: 20px; }
 .tb-search:hover { background: var(--card-hover); color: var(--text); transform: scale(1.01); }
 .tb-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
-#view { max-width: 1480px; margin: 0 auto; padding: 8px 24px 48px; will-change: opacity, transform; }
-#view.view-enter { animation: viewEnter 0.62s var(--ease-spring); }
+#view { max-width: 1480px; margin: 0 auto; padding: 8px 24px 48px; contain: layout paint; }
+#view.view-enter { animation: viewEnter 0.34s var(--ease-spring); }
 #view.view-enter .page-title,
-#view.view-enter .hello-row { animation: titleEnter 0.56s var(--ease-spring) both; }
-#view.view-enter .shelf { animation: shelfEnter 0.58s var(--ease-spring) both; }
-#view.view-enter .shelf:nth-child(2) { animation-delay: 0.06s; }
-#view.view-enter .shelf:nth-child(3) { animation-delay: 0.12s; }
-#view.view-enter .shelf:nth-child(4) { animation-delay: 0.18s; }
-#view.view-enter .track { animation: trackEnter 0.45s var(--ease-spring) both; }
-#view.view-enter .track:nth-child(2) { animation-delay: 0.04s; }
-#view.view-enter .track:nth-child(3) { animation-delay: 0.08s; }
-#view.view-enter .track:nth-child(4) { animation-delay: 0.12s; }
-#view.view-enter .track:nth-child(5) { animation-delay: 0.16s; }
-#view.view-enter .card { animation: cardEnter 0.5s var(--ease-spring) both; }
+#view.view-enter .hello-row { animation: titleEnter 0.30s var(--ease-spring) both; }
+#view.view-enter .shelf { animation: shelfEnter 0.36s var(--ease-spring) both; }
+#view.view-enter .shelf:nth-child(2) { animation-delay: 0.03s; }
+#view.view-enter .shelf:nth-child(3) { animation-delay: 0.06s; }
+#view.view-enter .shelf:nth-child(4) { animation-delay: 0.09s; }
+#view.view-enter .track { animation: trackEnter 0.28s var(--ease-spring) both; }
+#view.view-enter .track:nth-child(2) { animation-delay: 0.02s; }
+#view.view-enter .track:nth-child(3) { animation-delay: 0.04s; }
+#view.view-enter .track:nth-child(4) { animation-delay: 0.06s; }
+#view.view-enter .track:nth-child(5) { animation-delay: 0.08s; }
+#view.view-enter .card { animation: cardEnter 0.32s var(--ease-spring) both; }
 .page-title {
   font-size: clamp(28px, 4vw, 34px);
   font-weight: 800; margin-bottom: 22px;
@@ -345,7 +341,7 @@ html[data-theme="light"] .quick-card:hover { background: rgba(0, 0, 0, 0.09); }
 .quick-card .play-ov .ic { width: 18px; height: 18px; }
 
 /* shelf / carousel */
-.shelf { margin-bottom: 34px; }
+.shelf { margin-bottom: 34px; contain: layout paint; content-visibility: auto; contain-intrinsic-size: 280px; }
 .shelf-title {
   font-size: 22px; font-weight: 800; margin-bottom: 14px;
   letter-spacing: -0.03em; display: flex; align-items: center; justify-content: space-between;
@@ -355,6 +351,8 @@ html[data-theme="light"] .quick-card:hover { background: rgba(0, 0, 0, 0.09); }
   display: grid; grid-auto-flow: column; grid-auto-columns: 186px;
   gap: 0; overflow-x: auto; padding-bottom: 8px;
   scroll-snap-type: x proximity; scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .car-btn {
   display: none;
@@ -382,6 +380,8 @@ html[data-theme="light"] .car-btn {
   padding: 12px; border-radius: var(--radius-lg);
   transition: background 0.26s var(--ease-spring), transform 0.26s var(--ease-spring), box-shadow 0.26s var(--ease-spring);
   position: relative;
+  contain: layout paint;
+  transform: translateZ(0);
 }
 .card:hover { background: var(--card-hover); }
 .card .art {
@@ -437,6 +437,8 @@ html[data-theme="light"] .art-ph { background: linear-gradient(145deg, #e8e8e8, 
   display: flex; align-items: center; gap: 14px;
   padding: 7px 14px; border-radius: 6px; cursor: pointer;
   transition: background 0.22s var(--ease-spring), transform 0.22s var(--ease-spring);
+  contain: layout paint;
+  transform: translateZ(0);
 }
 .track:hover { background: var(--hover-strong); }
 .track.playing { background: var(--hover); }
@@ -681,14 +683,16 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
   position: fixed; inset: 0; z-index: 60;
   background: #121212;
   color: #fff;
-  transition: transform 0.52s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.36s ease;
-  will-change: transform, opacity;
+  transition: transform 0.38s var(--ease-spring), opacity 0.28s ease;
+  contain: layout paint;
 }
 #nowplaying.hidden { transform: translateY(100%); pointer-events: none; opacity: 0; }
 #np-bg {
   position: absolute; inset: 0; background-size: cover; background-position: center;
-  filter: blur(80px) brightness(0.22) saturate(1.2); transform: scale(1.45);
-  transition: background-image 0.6s ease;
+  filter: blur(36px) brightness(0.24) saturate(1.15); transform: scale(1.25) translateZ(0);
+  transition: background-image 0.45s var(--ease-smooth);
+  will-change: filter;
+  contain: paint;
 }
 #np-bg::after {
   content: ""; position: absolute; inset: 0;
@@ -1132,17 +1136,17 @@ body.hq-audio #yt-player {
 @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes viewEnter { from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
-@keyframes viewExit { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(0.99); filter: blur(2px); } }
+@keyframes viewEnter { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+@keyframes viewExit { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(0.99); } }
 @keyframes titleEnter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes shelfEnter { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @keyframes trackEnter { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes cardEnter { from { opacity: 0; transform: translateY(12px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes paneEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes modalEnter { from { opacity: 0; transform: scale(0.94) translateY(10px); } to { opacity: 1; transform: none; } }
-::view-transition-old(root) { animation: viewExit 0.32s var(--ease-smooth) both; }
-::view-transition-new(root) { animation: viewEnter 0.52s var(--ease-spring) both; }
-::view-transition-group(root) { animation-duration: 0.52s; }
+::view-transition-old(root) { animation: viewExit 0.22s var(--ease-smooth) both; }
+::view-transition-new(root) { animation: viewEnter 0.34s var(--ease-spring) both; }
+::view-transition-group(root) { animation-duration: 0.34s; }
 
 /* Laptop overlay (sidebar on, NP still fullscreen): don't leave a tiny floating cover */
 @media (min-width: 861px) and (max-width: 1099px) {
