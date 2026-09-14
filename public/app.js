@@ -1,4 +1,4 @@
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.8.1";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -2702,7 +2702,7 @@ const NAV = [
 function renderNav() {
   const navBtn = (n) => {
     if(n.modal) return `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" data-modal="settings"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`;
-    return `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" onclick="location.hash='${n.hash}'"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`;
+    return `<button class="nav-item" data-id="${n.id}" data-ic="${n.icon}" data-ica="${n.iconActive}" data-hash="${n.hash}"><svg class="ic"><use href="#${n.icon}"/></svg><span>${n.label}</span></button>`;
   };
   const html = NAV.map(navBtn).join('');
   // desktop sidebar: only Home + Search + Charts (no settings)
@@ -2712,6 +2712,15 @@ function renderNav() {
     .map(navBtn)
     .join('');
   $('#nav-mobile').innerHTML = html;
+  // hash nav via go() so home double-tap can trigger widget
+  $$('#nav-desktop .nav-item[data-hash], #nav-mobile .nav-item[data-hash]').forEach(b=>{
+    b.addEventListener('click', (e)=>{
+      const h = b.dataset.hash;
+      if (!h) return;
+      e.preventDefault();
+      go(h);
+    });
+  });
   // bind settings modal on mobile + desktop (if ever shown)
   $$('#nav-mobile [data-modal="settings"], #nav-desktop [data-modal="settings"]').forEach(b=>{
     b.addEventListener('click', (e)=>{ e.preventDefault(); openSettingsModal('about'); });
