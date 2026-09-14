@@ -1,4 +1,4 @@
-const APP_VERSION = "1.8.2";
+const APP_VERSION = "1.8.3";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -3190,47 +3190,103 @@ function bindSearchChrome(view, q, filter) {
       (input.value || '').length,
     );
   }
+  function getRecentFiltered(txt){
+    const rec = store.get('srec', []).filter(Boolean);
+    if (!txt) return rec.slice(0, 8);
+    const low = txt.toLowerCase();
+    return rec.filter(s => s.toLowerCase().includes(low)).slice(0, 8);
+  }
+  function renderSuggest(recent, sug){
+    const el = $('#suggest');
+    if (!el) return;
+    let html = '';
+    if (recent && recent.length) {
+      html += `<div class="suggest-sec"><div class="suggest-head"><span>Recent</span><button type="button" id="sug-clear">Clear</button></div>` + recent.map(qq => `<button type="button" class="suggest-row" data-q="${esc(qq)}">${icon('i-clock')}<span>${esc(qq)}</span><span class="suggest-rm" data-rm="${esc(qq)}">${icon('i-x')}</span></button>`).join('') + `</div>`;
+    }
+    if (sug && sug.length) {
+      html += `<div class="suggest-sec">` + sug.slice(0,6).map(s => `<button type="button" class="suggest-row" data-sug="${esc(s)}">${icon('i-search')}<span>${esc(s)}</span></button>`).join('') + `</div>`;
+    }
+    el.innerHTML = html;
+    el.classList.toggle('has-content', !!html);
+    // bind recent
+    $$('.suggest-row[data-q]', el).forEach(b=>{
+      b.addEventListener('click', (e)=>{
+        if (e.target.closest('[data-rm]')) return;
+        const term = b.dataset.q;
+        pushRecentSearch(term);
+        input.value = term;
+        el.innerHTML = ''; el.classList.remove('has-content');
+        go(`#/search/${encodeURIComponent(term)}`);
+      });
+    });
+    $$('[data-rm]', el).forEach(x=>{
+      x.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        removeRecentSearch(x.dataset.rm);
+        renderSuggest(getRecentFiltered(input ? input.value.trim() : ''), null);
+        if (!store.get('srec', []).length) { el.innerHTML=''; el.classList.remove('has-content'); }
+      });
+    });
+    const clr = $('#sug-clear', el);
+    if (clr) clr.addEventListener('click', (e)=>{ e.stopPropagation(); store.set('srec', []); el.innerHTML=''; el.classList.remove('has-content'); });
+    // bind suggest
+    $$('.suggest-row[data-sug]', el).forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const term = b.dataset.sug;
+        pushRecentSearch(term);
+        input.value = term;
+        el.innerHTML=''; el.classList.remove('has-content');
+        go(`#/search/${encodeURIComponent(term)}`);
+      });
+    });
+  }
   let sugT;
   if (input) {
-    input.addEventListener('input', () => {
-      syncClear();
-      clearTimeout(sugT);
+    const showDropdown = () => {
       const v = input.value.trim();
+      const recent = getRecentFiltered(v);
       if (!v) {
-        $('#suggest').innerHTML = '';
+        renderSuggest(recent, null);
         return;
       }
+      clearTimeout(sugT);
       sugT = setTimeout(async () => {
+        let sug = null;
         try {
           const d = await api(`/api/suggest?q=${encodeURIComponent(v)}`);
-          $('#suggest').innerHTML = (d.suggestions || [])
-            .slice(0, 6)
-            .map(
-              (s) =>
-                `<button type="button">${icon('i-search')}<span>${esc(s)}</span></button>`,
-            )
-            .join('');
-          $$('#suggest button').forEach((b) =>
-            b.addEventListener('click', () => {
-              const term = b.querySelector('span')
-                ? b.querySelector('span').textContent
-                : b.textContent;
-              pushRecentSearch(term);
-              go(`#/search/${encodeURIComponent(term)}`);
-            }),
-          );
+          sug = d.suggestions || [];
         } catch {}
-      }, 220);
+        // filter recent as user types (shrink)
+        const recent2 = getRecentFiltered(v);
+        renderSuggest(recent2, sug);
+      }, 180);
+    };
+    input.addEventListener('focus', showDropdown);
+    input.addEventListener('input', () => {
+      syncClear();
+      showDropdown();
+    });
+    input.addEventListener('blur', () => {
+      setTimeout(()=>{ const el=$('#suggest'); if(el) { el.innerHTML=''; el.classList.remove('has-content'); } }, 180);
+    });
+    // click outside closes
+    document.addEventListener('click', (e)=>{
+      const wrap = $('.search-wrap', view);
+      const sugEl = $('#suggest');
+      if (!wrap || !sugEl) return;
+      if (!wrap.contains(e.target)) { sugEl.innerHTML=''; sugEl.classList.remove('has-content'); }
     });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         $('#suggest').innerHTML = '';
+        const el=$('#suggest'); if(el) el.classList.remove('has-content');
         input.blur();
         return;
       }
       if (e.key === 'Enter' && input.value.trim()) {
         if (filter) store.set('search_filter', filter);
         pushRecentSearch(input.value.trim());
+        const el=$('#suggest'); if(el){ el.innerHTML=''; el.classList.remove('has-content'); }
         go(
           `#/search/${encodeURIComponent(input.value.trim())}${filter && filter !== 'all' ? '?filter=' + filter : ''}`,
         );
@@ -3318,9 +3374,11 @@ async function viewSearch(view, q = '', filter = null) {
   const hist = !q ? Library.history.slice(0, 6) : [];
   view.innerHTML = `
     ${q ? '' : '<div class="page-title">Search</div>'}
-    <div class="search-bar${q ? ' has-q' : ''}">${icon('i-search', 'ic search-ic')}<input id="search-input" placeholder="What do you want to play?" value="${esc(q)}" autocomplete="off" spellcheck="false"><button type="button" class="search-clear" id="search-clear" title="Clear">${icon('i-x')}</button></div>
-    <div class="suggest" id="suggest"></div>
-    ${q ? `<div class="search-chips">${filters.map((f) => `<button type="button" class="chip ${(filter || 'all') === f ? 'active' : ''}" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>` : recentSearchHTML()}
+    <div class="search-wrap" style="position:relative">
+      <div class="search-bar${q ? ' has-q' : ''}">${icon('i-search', 'ic search-ic')}<input id="search-input" placeholder="What do you want to play?" value="${esc(q)}" autocomplete="off" spellcheck="false"><button type="button" class="search-clear" id="search-clear" title="Clear">${icon('i-x')}</button></div>
+      <div class="suggest" id="suggest"></div>
+    </div>
+    ${q ? `<div class="search-chips">${filters.map((f) => `<button type="button" class="chip ${(filter || 'all') === f ? 'active' : ''}" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>` : ''}
     <div id="search-results">${
       q
         ? '<div class="loading-note">Searching…</div>'
