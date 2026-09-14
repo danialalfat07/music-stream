@@ -1,4 +1,4 @@
-const APP_VERSION = "1.7.5";
+const APP_VERSION = "1.7.6";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -520,6 +520,9 @@ const Player = {
   cued: false,
   pending: null,
   loadId: 0,
+  loadStartedAt: 0,
+  _fallbackTried: null,
+  _ytRetry: null,
   audio: null,
   audioContext: null,
   audioGain: null,
@@ -614,6 +617,24 @@ function initAudio(){
       $('#np-dur').textContent = fmtTime(dur);
     }
     if(!isPreviewing()) updateLyricHighlight(cur);
+  });
+  a.addEventListener('loadedmetadata', ()=>{
+    // force UI refresh once duration known
+    try {
+      const d = a.duration || 0;
+      if (d && Player.current) {
+        $('#np-dur').textContent = fmtTime(d);
+        $('#mini-dur').textContent = fmtTime(d);
+      }
+    } catch {}
+  });
+  a.addEventListener('stalled', ()=>{
+    if (Player.current && Player.useAudio && a.duration === 0 && a.currentTime === 0 && !a.paused) {
+      console.warn('audio stalled 00:00, fallback');
+      Player.useAudio = false;
+      const s = Player.current;
+      if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
+    }
   });
   a.addEventListener('error', (e)=>{
     console.warn('audio error', e);
@@ -719,7 +740,17 @@ async function playViaAudio(song){
   // Arm service while foreground; Android blocks late foreground-service starts.
   if (window.NativePlayback?.arm) window.NativePlayback.arm();
   try{
-    await Player.audio.play();
+    const playRace = Promise.race([
+      Player.audio.play(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('play timeout 5s')), 5000))
+    ]);
+    await playRace;
+    // wait for duration to be known up to 3s
+    let waited = 0;
+    while (waited < 3000 && (!isFinite(Player.audio.duration) || Player.audio.duration === 0) && Player.audio.currentTime === 0) {
+      await new Promise(r => setTimeout(r, 400));
+      waited += 400;
+    }
     Player.useAudio = true;
     fetchAudioUrl(song.videoId).then((url) => {
       if (url && Player.current?.videoId === song.videoId) Player.nativeUrl = url;
@@ -734,12 +765,17 @@ async function playViaAudio(song){
       if(direct){
         Player.audio.src = direct;
         Player.audio.crossOrigin = 'anonymous';
-        await Player.audio.play();
+        const race2 = Promise.race([
+          Player.audio.play(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('direct timeout')), 5000))
+        ]);
+        await race2;
         Player.useAudio = true;
         setMediaSessionForAudio(song);
         return true;
       }
     }catch{}
+    Player.useAudio = false;
     return false;
   }
 }
@@ -1178,6 +1214,8 @@ function startCurrent() {
   const s = Player.current;
   if (!s) return;
   const loadId = ++Player.loadId;
+  Player.loadStartedAt = Date.now();
+  Player._fallbackTried = null;
   // try audio first (background capable)
   (async () => {
     const audioOk = Player.useAudio && Player.audioReady ? await playViaAudio(s) : false;
@@ -1602,6 +1640,20 @@ function progressLoop(ts){
       }
     }
     dur = Player.yt.getDuration() || 0;
+  }
+  // auto fallback when stuck at 00:00 (no duration, not playing)
+  if (Player.current && Player.loadStartedAt && dur === 0 && cur === 0 && Date.now() - Player.loadStartedAt > 4500) {
+    if (Player.useAudio && Player._fallbackTried !== Player.current.videoId) {
+      Player._fallbackTried = Player.current.videoId;
+      console.warn('00:00 stuck → fallback YouTube');
+      Player.useAudio = false;
+      toast('Memuat ulang pemutar…');
+      if (Player.ready) try { Player.yt.loadVideoById({videoId: Player.current.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); } catch {}
+    } else if (!Player.useAudio && Player.yt && Player.ready && (Player.yt.getDuration()||0) === 0 && !Player._ytRetry) {
+      Player._ytRetry = Player.current.videoId;
+      setTimeout(()=>{ Player._ytRetry=null; }, 6000);
+      try { Player.yt.loadVideoById({videoId: Player.current.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); } catch {}
+    }
   }
   const pct = dur ? (cur / dur) * 100 : 0;
   const barFill = document.getElementById('mini-progress-fill');
