@@ -1,4 +1,4 @@
-const APP_VERSION = "1.7.1";
+const APP_VERSION = "1.7.2";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -19,11 +19,12 @@ const esc = (s) =>
 const icon = (id, cls = 'ic') =>
   `<svg class="${cls}"><use href="#${id}"/></svg>`;
 
-const api = async (path) => {
-  const r = await fetch(path);
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${path} -> ${r.status}`);
   return r.json();
 };
+let _searchAbort = null;
 // Bare/Brave spoof: keep YT IFrame fallback playing in background on Android Capacitor
 // Mirrors Bare 0043/0050 + Brave background_video_playback.js — must run before YT iframe loads
 (function(){
@@ -3167,14 +3168,34 @@ function bindSearchChrome(view, q, filter) {
     });
   }
   $$('.search-chips .chip', view).forEach((c) =>
-    c.addEventListener('click', () => {
+    c.addEventListener('click', async () => {
       const f = c.dataset.f;
+      if (c.classList.contains('active')) return;
       store.set('search_filter', f);
       const term = (input && input.value.trim()) || q;
       if (!term) return;
-      go(
-        `#/search/${encodeURIComponent(term)}${f !== 'all' ? '?filter=' + f : ''}`,
-      );
+      // instant chip switch, no full page reload
+      $$('.search-chips .chip', view).forEach(x => x.classList.toggle('active', x.dataset.f === f));
+      const newHash = `#/search/${encodeURIComponent(term)}${f !== 'all' ? '?filter=' + f : ''}`;
+      history.replaceState(null, '', newHash);
+      const res = $('#search-results');
+      if (!res) return;
+      res.style.opacity = '0.5';
+      res.style.transition = 'opacity 0.16s var(--ease-smooth)';
+      if (_searchAbort) try { _searchAbort.abort(); } catch {}
+      _searchAbort = new AbortController();
+      try {
+        const d = await api(`/api/search?q=${encodeURIComponent(term)}${f !== 'all' ? '&filter=' + f : ''}`, { signal: _searchAbort.signal });
+        res.innerHTML = searchResultsHTML(d.sections || []);
+        bindItems(res);
+        res.style.opacity = '1';
+        cacheSet(newHash, view.innerHTML);
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+        res.style.opacity = '1';
+        res.innerHTML = emptyHTML('Search failed', esc(e.message || 'Try again.'), { label: 'Retry', go: newHash, ic: 'i-search' });
+        bindEmptyCtas(res);
+      }
     }),
   );
   $$('.recent-go', view).forEach((b) =>
