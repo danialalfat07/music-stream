@@ -1177,8 +1177,15 @@ body.hq-audio #yt-player {
 ::view-transition-old(root),
 ::view-transition-new(root),
 ::view-transition-group(root),
-::view-transition-image-pair(root) { animation: none !important; opacity: 0 !important; }
-#nav-mobile, #miniplayer, #sidebar, #topbar { view-transition-name: none; }
+::view-transition-image-pair(root) { animation: none !important; }
+#nav-mobile { view-transition-name: nav; }
+#miniplayer { view-transition-name: miniplayer; }
+#sidebar { view-transition-name: sidebar; }
+#topbar { view-transition-name: topbar; }
+::view-transition-old(nav), ::view-transition-new(nav),
+::view-transition-old(miniplayer), ::view-transition-new(miniplayer),
+::view-transition-old(sidebar), ::view-transition-new(sidebar),
+::view-transition-old(topbar), ::view-transition-new(topbar) { animation: none !important; }
 
 /* Laptop overlay (sidebar on, NP still fullscreen): don't leave a tiny floating cover */
 @media (min-width: 861px) and (max-width: 1099px) {
