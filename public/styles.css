@@ -616,6 +616,7 @@ html[data-theme="light"] .detail-head {
   padding: 0 16px; z-index: 40; gap: 16px;
   border-top: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
   isolation: isolate;
+  transform: translateZ(0);
 }
 #miniplayer.hidden { display: none; }
 body.has-player #main, body.has-player #sidebar { margin-bottom: var(--player-h); }
@@ -700,7 +701,7 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 .vol-ic { width: 16px; height: 16px; color: var(--muted); }
 
 /* ---------- bottom nav mobile ---------- */
-#nav-mobile { display: none; z-index: 45; }
+#nav-mobile { display: none; z-index: 45; isolation: isolate; transform: translateZ(0); }
 
 /* ---------- now playing ---------- */
 #nowplaying {
@@ -1173,6 +1174,10 @@ body.hq-audio #yt-player {
 ::view-transition-old(view) { animation: viewExit 0.24s var(--ease-smooth) both; }
 ::view-transition-new(view) { animation: viewEnter 0.44s var(--ease-spring-soft) both; }
 ::view-transition-group(view) { animation-duration: 0.44s; }
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(root),
+::view-transition-image-pair(root) { animation: none !important; opacity: 0 !important; }
 #nav-mobile, #miniplayer, #sidebar, #topbar { view-transition-name: none; }
 
 /* Laptop overlay (sidebar on, NP still fullscreen): don't leave a tiny floating cover */
