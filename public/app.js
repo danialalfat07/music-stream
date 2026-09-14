@@ -1299,13 +1299,16 @@ function moveQueued(i, dir) {
   moveQueueItem(i, i + dir);
 }
 async function cacheAudioInBackground(song, url){
-  if(!song?.videoId || !url || _isOfflineMode) return;
+  if(!song?.videoId || !url) return;
   try{
     const r = await fetch(url, { cache:'no-store' });
-    if(!r.ok) return;
+    if(!r.ok){ console.error('cache audio fail', r.status, url); return; }
     const blob = await r.blob();
-    if(blob.size > 0) await OfflineCache.put(song, blob);
-  }catch(e){ console.warn('offline cache fetch failed', e); }
+    if(blob.size > 0){
+      console.log('cache audio stored', song.videoId, blob.size);
+      await OfflineCache.put(song, blob);
+    }
+  }catch(e){ console.error('offline cache fetch failed', e); }
 }
 function moveQueueItem(from, to) {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
@@ -1410,10 +1413,10 @@ function startCurrent() {
     if (audioOk && loadId === Player.loadId) {
       try { if (Player.yt && Player.ready) Player.yt.pauseVideo(); } catch {}
       if (Player.audio) Player.audio.playbackRate = Player.speed;
-    } else if (loadId === Player.loadId && !_isOfflineMode && navigator.onLine) {
-      const tryPlay = () => {
+} else if (loadId === Player.loadId && !_isOfflineMode && navigator.onLine) {
+      const tryPlay = async () => {
         if (loadId !== Player.loadId) return;
-        if (!Player.ready) return setTimeout(tryPlay, 300);
+        if (!Player.ready) return setTimeout(() => tryPlay(), 300);
         Player.yt.loadVideoById({
           videoId: s.videoId,
           suggestedQuality: suggestedQuality(),
@@ -1423,6 +1426,7 @@ function startCurrent() {
         applyPlaybackQuality();
         setTimeout(applyPlaybackQuality, 400);
         setTimeout(applyPlaybackQuality, 1600);
+        await cacheAudioInBackground(s, `/api/stream?videoId=${encodeURIComponent(s.videoId)}`);
       };
       tryPlay();
       // YT fallback keeps native controls available while audio runs in WebView.
