@@ -254,7 +254,8 @@ public class MainActivity extends BridgeActivity {
                     + "if(!activeTab&&paneId){if(paneId==='np-player')activeTab='player';else if(paneId==='np-lyrics')activeTab='lyrics';else if(paneId==='np-queue')activeTab='queue';else if(paneId==='np-related')activeTab='related';}"
                     + "var hash=location.hash||'';"
                     + "var isHome=hash==='#/home'||hash==='#/'||hash===''||hash==='#';"
-                    + "return JSON.stringify({modalOpen:!!isModal,nowOpen:!!isNow,settingsOpen:!!isSettings,helpOpen:!!isHelp,activeTab:activeTab,activePane:paneId,href:location.href,hash:hash,historyLen:history.length,isHome:isHome});"
+                    + "var hasCurrent=!!(window.Player&&window.Player.current);"
+                    + "return JSON.stringify({modalOpen:!!isModal,nowOpen:!!isNow,settingsOpen:!!isSettings,helpOpen:!!isHelp,activeTab:activeTab,activePane:paneId,href:location.href,hash:hash,historyLen:history.length,isHome:isHome,hasCurrent:hasCurrent});"
                     + "}catch(e){return JSON.stringify({error:String(e)});}})()";
             try {
                 finalWv.evaluateJavascript(jsState, value -> {
@@ -283,7 +284,8 @@ public class MainActivity extends BridgeActivity {
                         String hash = obj.optString("hash", "");
                         String href = obj.optString("href", "");
                         boolean isHome = obj.optBoolean("isHome", false);
-                        android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " settingsOpen=" + settingsOpen + " helpOpen=" + helpOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " isHome=" + isHome + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
+                        boolean hasCurrent = obj.optBoolean("hasCurrent", false);
+                        android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " settingsOpen=" + settingsOpen + " helpOpen=" + helpOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " isHome=" + isHome + " hasCurrent=" + hasCurrent + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
                         if (modalOpen) {
                             android.util.Log.d(TAG_DIAG, "Back: closeModal modalOpen=true");
                             finalWv.evaluateJavascript("try{closeModal()}catch(e){}", null);
@@ -311,7 +313,12 @@ public class MainActivity extends BridgeActivity {
                             return;
                         }
                         if (isHome) {
-                            android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
+                            if (hasCurrent) {
+                                android.util.Log.d(TAG_DIAG, "Back: widget on home hasCurrent=true hash=" + hash);
+                                finalWv.evaluateJavascript("try{if(window.NativePlayback&&window.NativePlayback.enterPip) window.NativePlayback.enterPip(); else if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null);
+                                return;
+                            }
+                            android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true no song hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
                             moveTaskToBack(true);
                             return;
                         }

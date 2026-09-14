@@ -1030,6 +1030,12 @@ html[data-theme="light"] .pl-pick-name { color: #121212; }
 }
 #float-widget.hidden { display: none; }
 #float-widget.dragging { cursor: grabbing; animation: none; }
+@media (max-width: 860px) {
+  body:not(.pip-system) #float-widget { display: none !important; }
+  body.float-mode:not(.pip-system) #miniplayer { opacity: 1 !important; pointer-events: auto !important; }
+  body.float-mode:not(.pip-system).has-player #main,
+  body.float-mode:not(.pip-system).has-player #sidebar { margin-bottom: var(--player-h) !important; }
+}
 body.pip-system #sidebar,
 body.pip-system #main,
 body.pip-system #miniplayer,

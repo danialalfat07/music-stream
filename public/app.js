@@ -1,4 +1,4 @@
-const APP_VERSION = "1.7.6";
+const APP_VERSION = "1.8.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -2775,6 +2775,14 @@ function renderSidebarLibrary() {
   );
 }
 const go = (hash) => {
+  // nav home double-tap → widget if song playing (mobile/desktop)
+  try {
+    const curHash = location.hash || '#/home';
+    const isHomeNav = hash === '#/home' && (curHash === '#/home' || curHash === '#/' || curHash === '' || curHash === '#');
+    if (isHomeNav && window.Player && window.Player.current) {
+      if (typeof toggleFloatWidget === 'function') { toggleFloatWidget(); return; }
+    }
+  } catch {}
   location.hash = hash;
 };
 // ---- page cache: keep last rendered HTML per hash to eliminate switch delay (stale-while-revalidate) ----
@@ -5478,6 +5486,22 @@ async function openFloatWidget() {
   } else {
     try { console.log('[JS] native PiP branch not taken, fallback to hasDocumentPiP'); } catch {}
   }
+  const isMobile = window.matchMedia('(max-width: 860px)').matches;
+  // desktop = in-page widget only, mobile = PiP only
+  if (!isMobile) {
+    Player.floatOn = true;
+    closeNowPlaying();
+    document.body.classList.add('float-mode');
+    drawPipFrame();
+    const el = $('#float-widget');
+    el.classList.remove('hidden');
+    enableDrag(el);
+    bindFloatWidget(document);
+    toast('Floating widget - drag to move');
+    syncFloatWidget();
+    return;
+  }
+  // mobile: try native PiP, then browser PiP, no in-page fallback
   Player.floatOn = true;
   closeNowPlaying();
   document.body.classList.add('float-mode');
@@ -5496,10 +5520,11 @@ async function openFloatWidget() {
     el.classList.add('hidden');
     toast('Widget floating - stays on top');
   } else {
-    el.classList.remove('hidden');
-    enableDrag(el);
-    bindFloatWidget(document);
-    toast('Floating widget - drag to move');
+    // mobile no in-page fallback: keep mini player visible
+    Player.floatOn = false;
+    document.body.classList.remove('float-mode');
+    el.classList.add('hidden');
+    toast('PiP tidak tersedia di perangkat ini');
   }
   syncFloatWidget();
 }
@@ -5619,7 +5644,7 @@ $('#np-sb').classList.toggle('on', Player.sbEnabled);
 updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
-enableDrag($('#float-widget'));
+if (!window.matchMedia('(max-width: 860px)').matches) enableDrag($('#float-widget'));
 updateVolumeControls(Player.extraVolume);
 document.addEventListener(
   'error',
