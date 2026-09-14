@@ -328,6 +328,9 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 }
 .chip:hover { background: color-mix(in srgb, var(--text) 18%, transparent); transform: scale(1.03); }
 .chip.active { background: var(--chip-on-bg); color: var(--chip-on-fg); font-weight: 700; }
+.search-chips { display: flex; gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 2px 0 8px; margin: 14px 0 18px; }
+.search-chips::-webkit-scrollbar { display: none; }
+.search-chips .chip { flex-shrink: 0; }
 
 /* Spotify recently-played tiles */
 .quick-grid {
