@@ -615,6 +615,7 @@ html[data-theme="light"] .detail-head {
   display: grid; grid-template-columns: 1fr 2fr 1fr; align-items: center;
   padding: 0 16px; z-index: 40; gap: 16px;
   border-top: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  isolation: isolate;
 }
 #miniplayer.hidden { display: none; }
 body.has-player #main, body.has-player #sidebar { margin-bottom: var(--player-h); }
@@ -699,7 +700,7 @@ body.np-open.has-player #nowplaying { margin-bottom: var(--player-h); }
 .vol-ic { width: 16px; height: 16px; color: var(--muted); }
 
 /* ---------- bottom nav mobile ---------- */
-#nav-mobile { display: none; }
+#nav-mobile { display: none; z-index: 45; }
 
 /* ---------- now playing ---------- */
 #nowplaying {
@@ -1307,8 +1308,10 @@ body.hq-audio #yt-player {
   .quick-grid { grid-template-columns: 1fr 1fr; }
   #nav-mobile {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; height: var(--navm-h);
-    background: linear-gradient(0deg, var(--bg) 40%, color-mix(in srgb, var(--bg) 85%, transparent));
+    background: var(--bg);
+    border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
     z-index: 45; padding-bottom: env(safe-area-inset-bottom);
+    isolation: isolate;
   }
   #nav-mobile .nav-item {
     flex: 1; flex-direction: column; gap: 3px; font-size: 10px; padding: 8px 0;

@@ -1,4 +1,4 @@
-const APP_VERSION = "1.7.2";
+const APP_VERSION = "1.7.3";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -25,6 +25,7 @@ const api = async (path, opts = {}) => {
   return r.json();
 };
 let _searchAbort = null;
+const searchResultsCache = new Map();
 // Bare/Brave spoof: keep YT IFrame fallback playing in background on Android Capacitor
 // Mirrors Bare 0043/0050 + Brave background_video_playback.js — must run before YT iframe loads
 (function(){
@@ -3182,13 +3183,31 @@ function bindSearchChrome(view, q, filter) {
       if (!res) return;
       res.style.opacity = '0.5';
       res.style.transition = 'opacity 0.16s var(--ease-smooth)';
+      const sKey = term + '|' + f;
+      const hit = searchResultsCache.get(sKey);
+      if (hit && Date.now() - hit.ts < 60000) {
+        res.innerHTML = hit.html;
+        bindItems(res);
+        res.style.opacity = '1';
+        cacheSet(newHash, view.innerHTML);
+        // revalidate in bg
+        if (_searchAbort) try { _searchAbort.abort(); } catch {}
+        _searchAbort = new AbortController();
+        api(`/api/search?q=${encodeURIComponent(term)}${f !== 'all' ? '&filter=' + f : ''}`, { signal: _searchAbort.signal }).then(d => {
+          const html = searchResultsHTML(d.sections || []);
+          if (html !== hit.html) { res.innerHTML = html; bindItems(res); searchResultsCache.set(sKey, { html, ts: Date.now() }); cacheSet(newHash, view.innerHTML); }
+        }).catch(()=>{});
+        return;
+      }
       if (_searchAbort) try { _searchAbort.abort(); } catch {}
       _searchAbort = new AbortController();
       try {
         const d = await api(`/api/search?q=${encodeURIComponent(term)}${f !== 'all' ? '&filter=' + f : ''}`, { signal: _searchAbort.signal });
-        res.innerHTML = searchResultsHTML(d.sections || []);
+        const html = searchResultsHTML(d.sections || []);
+        res.innerHTML = html;
         bindItems(res);
         res.style.opacity = '1';
+        searchResultsCache.set(sKey, { html, ts: Date.now() });
         cacheSet(newHash, view.innerHTML);
       } catch (e) {
         if (e && e.name === 'AbortError') return;
@@ -3259,6 +3278,21 @@ async function viewSearch(view, q = '', filter = null) {
     }
     return;
   }
+  const sKey2 = q + '|' + (filter || 'all');
+  const hit2 = searchResultsCache.get(sKey2);
+  if (hit2 && Date.now() - hit2.ts < 60000) {
+    pushRecentSearch(q);
+    $('#suggest').innerHTML = '';
+    const res = $('#search-results');
+    res.innerHTML = hit2.html;
+    bindItems(res);
+    // bg revalidate
+    api(`/api/search?q=${encodeURIComponent(q)}${filter && filter !== 'all' ? '&filter=' + filter : ''}`).then(d => {
+      const html = searchResultsHTML(d.sections || []);
+      if (html !== hit2.html) { res.innerHTML = html; bindItems(res); searchResultsCache.set(sKey2, { html, ts: Date.now() }); cacheSet(location.hash, view.innerHTML); }
+    }).catch(()=>{});
+    return;
+  }
   try {
     const d = await api(
       `/api/search?q=${encodeURIComponent(q)}${filter && filter !== 'all' ? '&filter=' + filter : ''}`,
@@ -3266,8 +3300,10 @@ async function viewSearch(view, q = '', filter = null) {
     pushRecentSearch(q);
     $('#suggest').innerHTML = '';
     const res = $('#search-results');
-    res.innerHTML = searchResultsHTML(d.sections || []);
+    const html = searchResultsHTML(d.sections || []);
+    res.innerHTML = html;
     bindItems(res);
+    searchResultsCache.set(sKey2, { html, ts: Date.now() });
   } catch (e) {
     const res = $('#search-results');
     if (res)
