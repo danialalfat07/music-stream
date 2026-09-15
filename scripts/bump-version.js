@@ -2,8 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const version = process.argv[2];
-if (!/^\d+\.\d+\.\d+$/.test(version || '')) {
-  console.error('Usage: npm run version:bump -- <major.minor.patch>');
+if (!/^\d+\.\d+\.\d+(-beta\.\d+)?$/.test(version || '')) {
+  console.error('Usage: npm run version:bump -- <major.minor.patch> or <major.minor.patch-beta.N>');
   process.exit(1);
 }
 
@@ -20,12 +20,5 @@ lockData.version = version;
 if (lockData.packages?.['']) lockData.packages[''].version = version;
 fs.writeFileSync(lockPath, `${JSON.stringify(lockData, null, 2)}\n`);
 
-for (const relativePath of ['public/app.js', 'public/index.html']) {
-  const filePath = path.join(root, relativePath);
-  const source = fs.readFileSync(filePath, 'utf8');
-  const updated = source.replaceAll(previous, version);
-  if (updated === source) throw new Error(`${relativePath}: old version not found`);
-  fs.writeFileSync(filePath, updated);
-}
-
-console.log(`Version bumped: ${previous} -> ${version}`);
+// delegate injection to single source of truth script
+require('./inject-version.js');

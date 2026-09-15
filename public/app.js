@@ -1,4 +1,6 @@
-const APP_VERSION = "2.0.4";
+const APP_VERSION = "2.1.0-beta.1";
+const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
+window.__BUILD_CHANNEL = BUILD_CHANNEL;
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -193,16 +195,22 @@ function isPreviewing() {
 }
 
 /* ================= local library (localStorage) ================= */
+// Same-domain beta isolation: read shared smw_* fallback, write beta isolated smw_beta_*
 const store = {
   get(k, d) {
     try {
+      if (BUILD_CHANNEL === 'beta') {
+        const bv = localStorage.getItem('smw_beta_' + k);
+        if (bv !== null) return JSON.parse(bv) ?? d;
+      }
       return JSON.parse(localStorage.getItem('smw_' + k)) ?? d;
     } catch {
       return d;
     }
   },
   set(k, v) {
-    localStorage.setItem('smw_' + k, JSON.stringify(v));
+    const key = (BUILD_CHANNEL === 'beta' ? 'smw_beta_' : 'smw_') + k;
+    localStorage.setItem(key, JSON.stringify(v));
   },
 };
 const Library = {
@@ -406,6 +414,11 @@ async function clearWebsiteCacheOnly() {
 }
 
 async function applyVersionUpdate(latest) {
+  if (BUILD_CHANNEL === 'beta') {
+    toast('Versi baru tersedia (beta) — reload manual untuk update');
+    console.log('[beta] soft notify new version', latest);
+    return;
+  }
   if (_pendingVersionUpdate) return;
   _pendingVersionUpdate = latest || APP_VERSION;
   try {
@@ -446,6 +459,16 @@ async function checkAppVersion({ silent = true, force = false } = {}) {
   // offline → keep current cache, don't break user data
   if (!navigator.onLine) return { ok: true, offline: true, version: APP_VERSION };
   const data = await fetchAppVersion();
+  // sync channel from server if provided
+  try { if (data && data.channel) window.__BUILD_CHANNEL = data.channel; } catch {}
+  if (BUILD_CHANNEL === 'beta') {
+    if (data && data.version && isNewerVersion(data.version, APP_VERSION)) {
+      console.log('[beta] newer version available', data.version, 'soft notify only');
+      // soft toast, no modal block
+      try { toast('Versi baru tersedia (beta) — reload manual'); } catch {}
+    }
+    return { ok: true, version: APP_VERSION };
+  }
   if (!data || !data.version) return { ok: true, version: APP_VERSION };
   if (data.version === APP_VERSION) {
     try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
@@ -465,6 +488,7 @@ async function checkAppVersion({ silent = true, force = false } = {}) {
 }
 
 async function ensureAppVersionBeforePlay() {
+  if (BUILD_CHANNEL === 'beta') return true;
   const res = await checkAppVersion({ silent: false, force: true });
   if (res && res.needsUpdate) {
     // mandatory — block play until updated
@@ -474,6 +498,11 @@ async function ensureAppVersionBeforePlay() {
 }
 
 function migrateUserDataIfNeeded() {
+  // beta badge toggle
+  try {
+    const badge = document.getElementById('beta-badge');
+    if (badge) badge.classList.toggle('hidden', BUILD_CHANNEL !== 'beta');
+  } catch {}
   // NEVER localStorage.clear() — only migrate schema
   try {
     const stored = parseInt(localStorage.getItem('smw_user_data_version') || '0', 10) || 0;

@@ -6,6 +6,7 @@ const { Readable } = require('stream');
 
 const PKG = (() => { try { return require('./package.json'); } catch { return { version: '1.2.1' }; } })();
 const APP_VERSION_SERVER = PKG.version || '1.2.1';
+const BUILD_CHANNEL = process.env.BUILD_CHANNEL || (String(APP_VERSION_SERVER).includes('-beta') ? 'beta' : 'stable');
 const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
@@ -1291,6 +1292,7 @@ app.get('/api/app-version', (req, res) => {
   res.setHeader('Surrogate-Control', 'no-store');
   res.json({
     version: APP_VERSION_SERVER,
+    channel: BUILD_CHANNEL,
     assetCache: `dnialify-assets-v${APP_VERSION_SERVER}`,
     minVersion: '1.2.0',
     updatedAt: new Date().toISOString(),

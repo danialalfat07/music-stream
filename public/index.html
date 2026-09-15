@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.0.4" />
+<meta name="app-version" content="2.1.0-beta.1" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -97,7 +97,7 @@ try {
     <div class="side-box">
       <div class="logo">
         <img class="logo-img" src="/logo.png" srcset="/logo-64.png 64w, /logo-192.png 192w, /logo.png 512w" sizes="34px" width="34" height="34" alt="Dnialify Music Stream" />
-        <span>Dnialify Music Stream</span>
+        <span>Dnialify Music Stream</span><span id="beta-badge" class="hidden" style="margin-left:6px;padding:2px 6px;border-radius:4px;background:#ff3b30;color:#fff;font-size:10px;font-weight:800;letter-spacing:.06em;">BETA</span>
       </div>
       <nav id="nav-desktop"></nav>
     </div>
@@ -267,7 +267,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.0.4 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.1.0-beta.1 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -296,7 +296,7 @@ try {
           <div class="settings-row"><div><span class="s-label">Volume</span><small id="set-volume-hint">Pilih 100%, 200%, atau 300%</small></div><button id="set-volume-extra" class="pill-btn"><span>100%</span></button></div>
           <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
           <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.0.4</span> · untuk update aplikasi Android download APK baru</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.1.0-beta.1</span> · untuk update aplikasi Android download APK baru</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
         </div>
         <div data-spane="social" class="s-pane">
@@ -368,25 +368,29 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.0.4";
+    var VER="2.1.0-beta.1";
+    var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
     if(cur !== VER){
-      // ONLY website assets (dnialify-), NEVER user data (smw_* in localStorage)
-      if(window.caches && caches.keys){
-        caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf("dnialify-")===0) caches.delete(k); }); }).catch(function(){});
+      if (!IS_BETA) {
+        // beta: skip aggressive cache clear + reload (soft notify only)
+        if(window.caches && caches.keys){
+          caches.keys().then(function(ks){ ks.forEach(function(k){ if(k.indexOf("dnialify-")===0) caches.delete(k); }); }).catch(function(){});
+        }
       }
       localStorage.setItem(KEY, VER);
       if(!localStorage.getItem('smw_user_data_version')){
         try{ localStorage.setItem('smw_user_data_version','1'); }catch(e){}
       }
-      if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      if(!IS_BETA && navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
         navigator.serviceWorker.getRegistrations().then(function(rs){ rs.forEach(function(r){ try{ r.update(); }catch(e){} }); }).catch(function(){});
       }
-      if(cur !== null){ setTimeout(function(){ location.reload(); }, 400); }
+      if(!IS_BETA && cur !== null){ setTimeout(function(){ location.reload(); }, 400); }
     } else if(!localStorage.getItem('smw_user_data_version')){
       try{ localStorage.setItem('smw_user_data_version','1'); }catch(e){}
     }
+    // beta badge is toggled in app.js via BUILD_CHANNEL
   }catch(e){}
 })();
 </script>
