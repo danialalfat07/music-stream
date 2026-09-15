@@ -12,10 +12,9 @@ describe('server', ()=>{
     assert.match(backend, /app\.get\('\/api\/video-stream'/);
     assert.ok(backend.includes("if (!/^[\\w-]{6,20}$/.test(id)) return res.status(400).end();"));
   });
-  it('iframe fallback caches video and records playback mode', ()=> {
+  it('offline save is explicit and playback modes are tracked', ()=> {
     assert.match(frontend, /playbackMode:\s*null/);
     assert.match(frontend, /Player\.playbackMode = 'iframe'/);
-    assert.match(frontend, /cacheMediaInBackground\(s\)/);
     assert.match(frontend, /async function saveSongOffline\(song\)/);
     assert.match(frontend, /let mode = await cacheAudioInBackground\(song, audioUrl\)/);
     assert.match(frontend, /const videoUrl = `\/api\/video-stream\?videoId=\$\{encodeURIComponent\(song\.videoId\)\}`/);
@@ -24,5 +23,7 @@ describe('server', ()=>{
     assert.match(frontend, /row\('offline', 'i-download', 'Save offline'\)/);
     assert.match(frontend, /Player\.playbackMode = 'audio'/);
     assert.match(frontend, /Player\.playbackMode = 'cached'/);
+    const playbackBlock = frontend.slice(frontend.indexOf('function startCurrent()'), frontend.indexOf('async function cacheAudioInBackground'));
+    assert.doesNotMatch(playbackBlock, /cache(Audio|Video|Media)InBackground/);
   });
 });
