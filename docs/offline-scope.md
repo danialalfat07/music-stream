@@ -1,9 +1,10 @@
 # Offline Scope — Apa Bisa Offline vs Tidak
 
-## 1. Bisa Offline (audioStream via googlevideo)
+## 1. Bisa Offline (audioStream via googlevideo) — native-first
 
 - Source `getAudioUrl` return `url` (`server.js:1177`) → `mime audio/webm|audio/mp4`, `content_length` via `Range 0-0` total.
-- Chunk `1MB` `ceil(len/1M)` (3-7 seg untuk 3-6MB track), OPFS `/offline-beta/`, SW intercept `/api/stream` `206`.
+- Chunk `1MB` `ceil(len/1M)` (3-7 seg untuk 3-6MB track), native Capacitor Filesystem `files/offline-beta/{songId}/{sourceId}/seg_*.bin` (500MB cap native), SQLite `dnialify-offline-beta`.
+- Intercept: `shouldInterceptRequest` in `MainActivity.java:88` `WebViewClient` → return `WebResourceResponse` `206` slice, not SW. SW `public/sw.js` only static.
 - Need: metadata + artwork `/api/thumb` + lyrics `{synced,plain,source}` + `status=full`.
 - `offline_ready = metadata && artwork cached && lyrics cached && source.status==='full' && stream_kind==='googlevideo'`.
 

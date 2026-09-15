@@ -46,7 +46,7 @@
 ## 4. Player
 
 - `<audio id="bg-audio">` `public/index.html:361` primary + `YT.Player` fallback. No `hls.js`/`dash.js`.
-- `<audio>` can be intercepted via Service Worker; IFrame cannot.
+- `<audio>` intercept via native `shouldInterceptRequest` (primary, `MainActivity.java:88` `WebViewClient`), SW fallback only for static. IFrame cannot be intercepted (cross-origin `https://www.youtube.com`).
 - Reads via `audio.src = /api/stream?videoId=` same-origin proxy `server.js:1246`.
 
 ## 5. Assets
@@ -58,14 +58,17 @@
 
 ## 6. Web Infra
 
-- PWA `public/manifest.json:1-11`, SW `public/sw.js:1-17` static only `if(/api/) return`, Cache API `dnialify-assets-v*`, `localStorage smw_*`, no IndexedDB/OPFS yet.
-- Build: vanilla JS + Express, Capacitor 6.2.1 `package.json`, `MainActivity.java:28 BridgeActivity`.
-- Target: desktop + mobile web + WebView Android.
+- PWA `public/manifest.json:1-11`, SW `public/sw.js:1-17` static only `if(/api/) return`, Cache API `dnialify-assets-v*`, `localStorage smw_*`/`smw_beta_*` isolated, no IndexedDB/OPFS for offline.
+- Native app: Capacitor 6.2.1 `package.json`, `MainActivity.java:28 BridgeActivity` + `PlaybackBridge` `MainActivity.java:863`, private storage `files/offline-beta/` SQLite `dnialify-offline-beta` (planned), cap 500MB enforced native `MainActivity.java:953 volumeBoost` pattern.
+- Build: vanilla JS + Express, target desktop + mobile web + WebView Android (native-first offline).
 
-## 7. Chunk Strategy (Lock Q1)
+## 7. Chunk Strategy (Lock Q1) — native-first
 
 - **1MB virtual chunk** `chunk_size=1048576`, `total=ceil(content_length/1M)`. For 3-7 MB tracks → 4-7 segments, not 100. For 255KB short track → 1 segment.
-- Need `HEAD` or `Range 0-0` to get `Content-Range` total before chunking.
+- Need `Range 0-0` to get `Content-Range` total before chunking (`206` verified).
+- Storage: Capacitor Filesystem `files/offline-beta/{songId}/{sourceId}/seg_*.bin` native private, not OPFS. Metadata SQLite `dnialify-offline-beta`.
+- Intercept: `shouldInterceptRequest` return `WebResourceResponse` with `206` slice, not SW.
+- Cap 500MB hardcoded v1 native, user-configurable later.
 - Revisit trigger if `content_length > 20MB` (long mix) → keep 1MB, total ~20 seg still ok.
 
 ## 8. Samples for PRD
@@ -79,9 +82,9 @@
 1. Signed URL expiry 6h
 2. IFrame opaque
 3. No native 100 segments
-4. Quota/eviction (need `navigator.storage.estimate()` manual on device)
-5. SW currently skips `/api/`
+4. Native storage 500MB cap (no eviction in private files, old quota via `estimate()` irrelevant)
+5. SW currently skips `/api/` → replaced by native `shouldInterceptRequest`
 
 ## 10. Captures Pending Manual
 
-- `navigator.storage.estimate()` on Android WebView target device (await result before finalize chunk if quota < 200MB).
+- `navigator.storage.estimate()` on Android WebView: **not needed for native** (private files not evicted). Manual test still useful for web fallback quota, but 500MB cap native is source of truth. Await device result before finalize web fallback if you run without native.

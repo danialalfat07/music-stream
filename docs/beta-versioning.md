@@ -41,13 +41,13 @@ const store = {
   - (b) drop `smw_beta_*` (beta edits hilang, stable tetap)
 - Rekom: (a) copy dengan last-write-wins per key.
 
-### IndexedDB (offline cache baru)
+### IndexedDB / SQLite native (offline cache baru)
 
-- DB name: `dnialify-offline-beta` (beta) vs `dnialify-offline` (stable). Full isolated, jangan baca/tulis silang.
+- DB name: `dnialify-offline-beta` SQLite native (`files/offline-beta.db` via Capacitor SQLite / Room) beta vs `dnialify-offline` stable. Full isolated, jangan baca/tulis silang. WebView IndexedDB not used for offline.
 
-### OPFS
+### OPFS / Native Filesystem
 
-- Root: `/offline-beta/{songId}/...` beta vs `/offline/{songId}/...` stable. Isolated.
+- Native private: `files/offline-beta/{songId}/{sourceId}/seg_*.bin` beta vs `files/offline/...` stable. Capacitor Filesystem primary, OPFS not used for audio chunks. Cap 500MB enforced native.
 
 ### Service Worker Cache
 
