@@ -1,4 +1,4 @@
-const APP_VERSION = "2.0.1";
+const APP_VERSION = "2.0.2";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -532,39 +532,43 @@ const Player = {
   nativeUrl: null,
   wasPlaying: false,
   native: false,
-  extraVolume: store.get('extra_volume', false),
+  volumeLevel: [100, 200, 300].includes(store.get('volume_level', 100)) ? store.get('volume_level', 100) : (store.get('extra_volume', false) ? 200 : 100),
   get current() {
     return this.queue[this.index] || null;
   },
 };
 
 function updateVolumeControls(value) {
-  const on = !!value;
+  const level = [100, 200, 300].includes(Number(value)) ? Number(value) : 100;
   const button = $('#set-volume-extra');
   const hint = $('#set-volume-hint');
   if (button) {
-    button.querySelector('span').textContent = on ? 'ON · 200%' : 'OFF · 100%';
-    button.classList.toggle('primary', on);
+    button.querySelector('span').textContent = `${level}%`;
+    button.classList.toggle('primary', level > 100);
   }
-  if (hint) hint.textContent = on ? 'ON = 200% extra volume' : 'OFF = 100% normal';
+  if (hint) hint.textContent = 'Pilih 100%, 200%, atau 300%';
 }
 
-function setPlaybackVolume(extra = Player.extraVolume) {
-  const gain = extra ? 2 : 1;
-  updateVolumeControls(extra);
-  const nativeExtra = !!window.NativePlayback?.extraVolume;
-  if (nativeExtra) {
-    try { window.NativePlayback.extraVolume(!!extra); } catch {}
+function setPlaybackVolume(level = Player.volumeLevel) {
+  level = [100, 200, 300].includes(Number(level)) ? Number(level) : 100;
+  Player.volumeLevel = level;
+  const gain = level / 100;
+  updateVolumeControls(level);
+  const nativeBoost = !!window.NativePlayback?.volumeBoost;
+  if (nativeBoost) {
+    try { window.NativePlayback.volumeBoost(level); } catch {}
+  } else if (window.NativePlayback?.extraVolume) {
+    try { window.NativePlayback.extraVolume(level > 100); } catch {}
   }
   if (Player.audio) {
     try {
-      if (!nativeExtra && !Player.audioGain && window.AudioContext) {
+      if (!nativeBoost && !Player.audioGain && window.AudioContext) {
         Player.audioContext = new AudioContext();
         const source = Player.audioContext.createMediaElementSource(Player.audio);
         Player.audioGain = Player.audioContext.createGain();
         source.connect(Player.audioGain).connect(Player.audioContext.destination);
       }
-      if (nativeExtra) {
+      if (nativeBoost) {
         Player.audio.volume = 1;
       } else if (Player.audioGain) {
         Player.audioGain.gain.value = gain;
@@ -582,10 +586,11 @@ function setPlaybackVolume(extra = Player.extraVolume) {
 }
 
 function toggleExtraVolume() {
-  Player.extraVolume = !Player.extraVolume;
-  store.set('extra_volume', Player.extraVolume);
-  setPlaybackVolume();
-  toast(Player.extraVolume ? 'Extra volume 200%' : 'Volume normal 100%');
+  const next = Player.volumeLevel === 100 ? 200 : Player.volumeLevel === 200 ? 300 : 100;
+  Player.volumeLevel = next;
+  store.set('volume_level', next);
+  setPlaybackVolume(next);
+  toast(`Volume ${next}%`);
 }
 
 function initAudio(){
@@ -3808,7 +3813,8 @@ function backupLibrary() {
     stats: Library.stats,
     settings: {
       theme: store.get('theme', 'dark'),
-       extra_volume: Player.extraVolume,
+        volume_level: Player.volumeLevel,
+        extra_volume: Player.volumeLevel > 100,
       sb_on: store.get('sb_on', true),
       yt_hq: store.get('yt_hq', false),
     },
@@ -3866,10 +3872,13 @@ function restoreLibrary() {
             );
             updateThemeIcon();
           }
-          if (typeof d.settings.extra_volume === 'boolean') {
-            Player.extraVolume = d.settings.extra_volume;
-            store.set('extra_volume', Player.extraVolume);
-            setPlaybackVolume();
+          if ([100, 200, 300].includes(Number(d.settings.volume_level))) {
+            store.set('volume_level', Number(d.settings.volume_level));
+            setPlaybackVolume(Number(d.settings.volume_level));
+          } else if (typeof d.settings.extra_volume === 'boolean') {
+            const level = d.settings.extra_volume ? 200 : 100;
+            store.set('volume_level', level);
+            setPlaybackVolume(level);
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -4401,7 +4410,7 @@ function openSettingsModal(tab = 'about') {
   }
   const extraVol = $('#set-volume-extra');
   if (extraVol) {
-    updateVolumeControls(Player.extraVolume);
+    updateVolumeControls(Player.volumeLevel);
     extraVol.onclick = toggleExtraVolume;
   }
   const fl = $('#set-float');
@@ -5712,7 +5721,7 @@ updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
 if (!window.matchMedia('(max-width: 860px)').matches) enableDrag($('#float-widget'));
-updateVolumeControls(Player.extraVolume);
+updateVolumeControls(Player.volumeLevel);
 document.addEventListener(
   'error',
   (e) => {

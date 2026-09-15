@@ -117,12 +117,17 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void setExtraVolume(boolean enabled) {
+        setVolumeBoost(enabled ? 200 : 100);
+    }
+
+    private void setVolumeBoost(double level) {
         runOnUiThread(() -> {
             try {
                 if (extraVolumeEffect == null) extraVolumeEffect = new LoudnessEnhancer(0);
-                extraVolumeEffect.setTargetGain(enabled ? 600 : 0);
-                extraVolumeEffect.setEnabled(enabled);
-                android.util.Log.d(TAG_DIAG, "[Native] extra volume " + (enabled ? "ON +6dB" : "OFF"));
+                float gainDb = (float) (20.0 * Math.log10(Math.max(1.0, level / 100.0)));
+                extraVolumeEffect.setTargetGain((int) (gainDb * 100));
+                extraVolumeEffect.setEnabled(level > 100);
+                android.util.Log.d(TAG_DIAG, "[Native] volume " + level + "% (" + gainDb + "dB)");
             } catch (Exception e) {
                 android.util.Log.w(TAG_DIAG, "[Native] extra volume unavailable", e);
             }
@@ -943,6 +948,9 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void extraVolume(boolean enabled) { setExtraVolume(enabled); }
+
+        @JavascriptInterface
+        public void volumeBoost(double level) { setVolumeBoost(level); }
 
         @JavascriptInterface
         public void enterPip() {
