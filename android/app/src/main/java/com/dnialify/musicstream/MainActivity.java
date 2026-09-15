@@ -57,8 +57,13 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(android.os.Bundle state) {
         super.onCreate(state);
         try {
+            boolean isDebuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+            if (isDebuggable) {
+                WebView.setWebContentsDebuggingEnabled(true);
+            }
+            // beta: also unconditional for chrome://inspect next time (requested if (BuildConfig.DEBUG))
             WebView.setWebContentsDebuggingEnabled(true);
-            android.util.Log.d(TAG_DIAG, "WebView remote debugging enabled");
+            android.util.Log.d(TAG_DIAG, "WebView remote debugging enabled debuggable=" + isDebuggable);
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "WebView debugging enable failed " + e);
         }
@@ -1004,6 +1009,103 @@ public class MainActivity extends BridgeActivity {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return isInPictureInPictureMode();
             } catch (Exception ignored) {}
             return false;
+        }
+
+        // ========== Phase 1 Offline stubs (no download logic) ==========
+        @JavascriptInterface
+        public boolean isCachedOffline(String songId) {
+            if (songId == null || songId.isEmpty()) return false;
+            try {
+                // Check DB: any source for songId with status='full'
+                // Stub: query offline DB without download logic
+                android.database.sqlite.SQLiteDatabase db = null;
+                try {
+                    db = OfflineDatabase.getInstance(MainActivity.this, true).getReadableDatabase();
+                    android.database.Cursor c = db.rawQuery("SELECT status FROM sources WHERE song_id=? LIMIT 1", new String[]{songId});
+                    boolean full = false;
+                    if (c.moveToFirst()) full = "full".equals(c.getString(0));
+                    c.close();
+                    return full;
+                } finally { /* keep db open via helper */ }
+            } catch (Exception e) {
+                android.util.Log.d(TAG_DIAG, "isCachedOffline err " + e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public String getOfflineProgress(String songId) {
+            // JSON: {cached, total, status}
+            if (songId == null || songId.isEmpty()) return "{\"cached\":0,\"total\":0,\"status\":\"not_cached\"}";
+            try {
+                android.database.sqlite.SQLiteDatabase db = OfflineDatabase.getInstance(MainActivity.this, true).getReadableDatabase();
+                android.database.Cursor c = db.rawQuery("SELECT cached, total_segments, status FROM sources WHERE song_id=? LIMIT 1", new String[]{songId});
+                if (c.moveToFirst()) {
+                    // cached count = SELECT COUNT(*) FROM segments WHERE source_id=? AND cached=1
+                    String sourceId = null;
+                    // need source id
+                    android.database.Cursor c2 = db.rawQuery("SELECT id FROM sources WHERE song_id=? LIMIT 1", new String[]{songId});
+                    if (c2.moveToFirst()) sourceId = c2.getString(0);
+                    c2.close();
+                    int cached = 0, total = c.getInt(1);
+                    String status = c.getString(2);
+                    if (sourceId != null) {
+                        android.database.Cursor cc = db.rawQuery("SELECT COUNT(*) FROM segments WHERE source_id=? AND cached=1", new String[]{sourceId});
+                        if (cc.moveToFirst()) cached = cc.getInt(0);
+                        cc.close();
+                    }
+                    c.close();
+                    return "{\"cached\":" + cached + ",\"total\":" + total + ",\"status\":\"" + status + "\"}";
+                }
+                c.close();
+            } catch (Exception e) {
+                android.util.Log.d(TAG_DIAG, "getOfflineProgress err " + e);
+            }
+            return "{\"cached\":0,\"total\":0,\"status\":\"not_cached\"}";
+        }
+
+        @JavascriptInterface
+        public long getStorageUsage() {
+            try { return new OfflineStorage(MainActivity.this).getStorageUsage(); } catch (Exception e) { return 0; }
+        }
+
+        @JavascriptInterface
+        public long getFreeQuota() {
+            try { return new OfflineStorage(MainActivity.this).getFreeQuota(); } catch (Exception e) { return 0; }
+        }
+
+        @JavascriptInterface
+        public void deleteOffline(String songId) {
+            if (songId == null || songId.isEmpty()) return;
+            try {
+                new OfflineStorage(MainActivity.this).deleteSong(songId);
+                android.database.sqlite.SQLiteDatabase db = OfflineDatabase.getInstance(MainActivity.this, true).getWritableDatabase();
+                db.delete("songs", "id=?", new String[]{songId});
+                // cascade will delete sources/segments/assets/jobs via FK
+            } catch (Exception e) {
+                android.util.Log.d(TAG_DIAG, "deleteOffline err " + e);
+            }
+        }
+
+        @JavascriptInterface
+        public String listOfflineSongs() {
+            try {
+                android.database.sqlite.SQLiteDatabase db = OfflineDatabase.getInstance(MainActivity.this, true).getReadableDatabase();
+                android.database.Cursor c = db.rawQuery("SELECT s.id, s.title, s.artist FROM songs s JOIN sources src ON src.song_id=s.id WHERE src.status='full'", null);
+                org.json.JSONArray arr = new org.json.JSONArray();
+                while (c.moveToNext()) {
+                    org.json.JSONObject o = new org.json.JSONObject();
+                    o.put("id", c.getString(0));
+                    o.put("title", c.getString(1));
+                    o.put("artist", c.getString(2));
+                    arr.put(o);
+                }
+                c.close();
+                return arr.toString();
+            } catch (Exception e) {
+                android.util.Log.d(TAG_DIAG, "listOfflineSongs err " + e);
+                return "[]";
+            }
         }
     }
 }

@@ -1,19 +1,24 @@
 apply plugin: 'com.android.application'
 
 def computedVersionCode = {
-    // Monotonic versionCode: base 2 + GITHUB_RUN_NUMBER (CI) else 2
+    // Monotonic versionCode: sync with package.json + CI run number
+    // Local build must be > last installed 130 so adb install -r works
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toInteger() ?: 0
-    def base = 2
+    def base = 131 // floor: last device had 130, next must be 131
     def code = base + runNum
-    // Local build must be > last CI artifact (v41) so adb install -r works
-    if (code <= 41) code = 42
     return code
 }()
 def computedVersionName = {
+    // Single source of truth: package.json version (2.1.0-beta.1)
+    def pkgFile = file("../../package.json")
+    def pkgVersion = "2.1.0-beta.1"
+    try {
+        def parsed = new groovy.json.JsonSlurper().parse(pkgFile)
+        if (parsed.version) pkgVersion = parsed.version
+    } catch (Exception ignored) {}
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toString() ?: ""
-    def base = "1.0.1"
-    if (runNum) return base + "-build." + runNum
-    return base + "-bd1b3d1"
+    if (runNum) return pkgVersion + "-build." + runNum
+    return pkgVersion
 }()
 
 android {
@@ -84,6 +89,8 @@ dependencies {
     implementation project(':capacitor-android')
     implementation "androidx.media:media:1.7.0"
     testImplementation "junit:junit:$junitVersion"
+    testImplementation "org.xerial:sqlite-jdbc:3.45.0.0"
+    testImplementation "org.robolectric:robolectric:4.11.1"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

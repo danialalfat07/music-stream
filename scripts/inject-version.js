@@ -40,4 +40,5 @@ if (fs.existsSync(manifestPath)) {
   fs.writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
 }
 
-console.log(`Injected version ${ver} channel=${channel} -> app.js, index.html, sw.js, manifest.json`);
+// also sync android versionName via build.gradle reading package.json (no hardcode needed), but log
+console.log(`Injected version ${ver} channel=${channel} -> app.js, index.html, sw.js, manifest.json (android versionName reads package.json)`);
