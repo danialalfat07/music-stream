@@ -25,5 +25,8 @@ describe('server', ()=>{
     assert.match(frontend, /Player\.playbackMode = 'cached'/);
     const playbackBlock = frontend.slice(frontend.indexOf('function startCurrent()'), frontend.indexOf('async function cacheAudioInBackground'));
     assert.doesNotMatch(playbackBlock, /cache(Audio|Video|Media)InBackground/);
+    assert.match(frontend, /stream duration unavailable/);
+    assert.match(frontend, /AbortSignal\.timeout\(30000\)/);
+    assert.match(frontend, /cache audio fail IndexedDB/);
   });
 });
