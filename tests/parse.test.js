@@ -18,6 +18,8 @@ describe('server', ()=>{
     assert.match(frontend, /cacheMediaInBackground\(s\)/);
     assert.match(frontend, /const videoUrl = `\/api\/video-stream\?videoId=\$\{encodeURIComponent\(song\.videoId\)\}`/);
     assert.match(frontend, /cacheAudioInBackground\(song, audioUrl\)/);
+    assert.match(frontend, /saveSongOffline\(song\)/);
+    assert.match(frontend, /row\('offline', 'i-download', 'Save offline'\)/);
     assert.match(frontend, /Player\.playbackMode = 'audio'/);
     assert.match(frontend, /Player\.playbackMode = 'cached'/);
   });
