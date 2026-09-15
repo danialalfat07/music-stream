@@ -31,9 +31,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
       - run: npm ci
 
       - name: Sync Capacitor Android project
