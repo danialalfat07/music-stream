@@ -6,7 +6,7 @@ def computedVersionCode = {
     def base = 2
     def code = base + runNum
     // Local build must be > last CI artifact (v46) so adb install -r works
-    if (code <= 49) code = 50
+    if (code <= 50) code = 51
     return code
 }()
 def computedVersionName = {
