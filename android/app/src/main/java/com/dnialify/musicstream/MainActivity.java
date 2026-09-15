@@ -52,7 +52,6 @@ public class MainActivity extends BridgeActivity {
     private Bitmap pipArtworkBitmap;
     private String pipLoadedArtworkUrl = "";
     private LoudnessEnhancer extraVolumeEffect;
-    private boolean pipHasCurrent = false;
 
     @Override
     public void onCreate(android.os.Bundle state) {
@@ -179,43 +178,70 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
-        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint sync pipHasCurrent=" + pipHasCurrent + " isPlaying=" + pipIsPlaying + " " + lifecycleSnapshot());
+        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint " + lifecycleSnapshot());
         try {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint skip SDK<26");
                 return;
             }
-            try { if (isInPictureInPictureMode()) { android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint already in pip"); return; } } catch (Exception ignored) {}
-            if (!pipHasCurrent) {
-                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint no song cached, skip pip");
+            android.webkit.WebView wv = null;
+            try { if (getBridge() != null) wv = getBridge().getWebView(); } catch (Exception ignored) {}
+            if (wv == null) {
+                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint wv null");
                 return;
             }
-            // Must enter PiP synchronously in onUserLeaveHint, before activity pauses — no async JS
-            try {
-                ensurePipNativeView();
-                updatePipNativeView();
-                if (pipNativeView != null) {
-                    pipNativeView.setVisibility(View.VISIBLE);
-                    pipNativeView.bringToFront();
-                    pipNativeView.requestLayout();
-                    pipNativeView.invalidate();
-                    ViewGroup parent = (ViewGroup) pipNativeView.getParent();
-                    if (parent != null) { parent.requestLayout(); parent.invalidate(); }
+            final android.webkit.WebView fwv = wv;
+            fwv.evaluateJavascript("(function(){try{var has=!!(window.Player&&window.Player.current&&window.Player.current.videoId); var closed=typeof _isClosed!=='undefined'?_isClosed:false; return JSON.stringify({hasCurrent:has, isClosed:closed});}catch(e){return JSON.stringify({error:String(e)});}})()", val -> {
+                try {
+                    String cleaned = val;
+                    if (cleaned != null && cleaned.length() >= 2 && cleaned.charAt(0) == '\"' && cleaned.charAt(cleaned.length() - 1) == '\"')
+                        cleaned = cleaned.substring(1, cleaned.length() - 1).replace("\\\\", "\\").replace("\\\"", "\"");
+                    if (cleaned == null || cleaned.equals("null")) return;
+                    org.json.JSONObject obj = new org.json.JSONObject(cleaned);
+                    if (obj.has("error")) {
+                        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint JS error " + obj.optString("error"));
+                        return;
+                    }
+                    boolean hasCurrent = obj.optBoolean("hasCurrent", false);
+                    boolean isClosed = obj.optBoolean("isClosed", false);
+                    android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint JS hasCurrent=" + hasCurrent + " isClosed=" + isClosed);
+                    if (!hasCurrent || isClosed) {
+                        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint no song, skip pip");
+                        return;
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try { if (isInPictureInPictureMode()) { android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint already in pip"); return; } } catch (Exception ignored) {}
+                    }
+                    runOnUiThread(() -> {
+                        try {
+                            ensurePipNativeView();
+                            updatePipNativeView();
+                            if (pipNativeView != null) {
+                                pipNativeView.setVisibility(View.VISIBLE);
+                                pipNativeView.bringToFront();
+                                pipNativeView.requestLayout();
+                                pipNativeView.invalidate();
+                                ViewGroup parent = (ViewGroup) pipNativeView.getParent();
+                                if (parent != null) { parent.requestLayout(); parent.invalidate(); }
+                            }
+                            Rational ratio = new Rational(9, 16);
+                            PictureInPictureParams params = new PictureInPictureParams.Builder().setAspectRatio(ratio).build();
+                            boolean res = enterPictureInPictureMode(params);
+                            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip result=" + res + " " + lifecycleSnapshot());
+                            logPipNative("onUserLeaveHint:enter result=" + res);
+                            // fallback to JS toggle if pip failed (e.g. no permission or OS denied)
+                            if (!res) {
+                                try { fwv.evaluateJavascript("try{if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null); } catch (Exception ignored2) {}
+                            }
+                        } catch (Exception e) {
+                            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip err " + e);
+                            try { fwv.evaluateJavascript("try{if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null); } catch (Exception ignored2) {}
+                        }
+                    });
+                } catch (Exception e) {
+                    android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint callback err " + e);
                 }
-                Rational ratio = new Rational(9, 16);
-                PictureInPictureParams params = new PictureInPictureParams.Builder().setAspectRatio(ratio).build();
-                boolean res = enterPictureInPictureMode(params);
-                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip sync result=" + res + " " + lifecycleSnapshot());
-                logPipNative("onUserLeaveHint:enter sync result=" + res);
-                if (!res) {
-                    try {
-                        android.webkit.WebView wv = getBridge() != null ? getBridge().getWebView() : null;
-                        if (wv != null) wv.evaluateJavascript("try{if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null);
-                    } catch (Exception ignored2) {}
-                }
-            } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip err " + e);
-            }
+            });
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint outer err " + e);
         }
@@ -925,12 +951,7 @@ public class MainActivity extends BridgeActivity {
                 pipIsPlaying = isPlaying;
                 pipPositionMs = (long) positionMs;
                 pipDurationMs = (long) durationMs;
-                // cache hasCurrent for sync onUserLeaveHint (must be sync, no async JS)
-                boolean isEmptyClose = (title != null && title.isEmpty()) && (artist != null && artist.isEmpty()) && !isPlaying;
-                if (isEmptyClose) pipHasCurrent = false;
-                else if (title != null && !title.isEmpty() && !title.equals("Dnialify Music Stream")) pipHasCurrent = true;
-                else if (isPlaying) pipHasCurrent = true;
-                android.util.Log.d(TAG_DIAG, "[PipNative] stateUpdate title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " lyric=" + pipCurrentLyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs + " pipHasCurrent=" + pipHasCurrent);
+                android.util.Log.d(TAG_DIAG, "[PipNative] stateUpdate title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " lyric=" + pipCurrentLyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs);
                 updatePipNativeView();
             } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] updateWebViewState mirror err " + e); }
             PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, (long) positionMs, (long) durationMs);
