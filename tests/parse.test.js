@@ -17,6 +17,7 @@ describe('server', ()=>{
     assert.match(frontend, /Player\.playbackMode = 'iframe'/);
     assert.match(frontend, /cacheMediaInBackground\(s\)/);
     assert.match(frontend, /async function saveSongOffline\(song\)/);
+    assert.match(frontend, /let mode = await cacheAudioInBackground\(song, audioUrl\)/);
     assert.match(frontend, /const videoUrl = `\/api\/video-stream\?videoId=\$\{encodeURIComponent\(song\.videoId\)\}`/);
     assert.match(frontend, /cacheAudioInBackground\(song, audioUrl\)/);
     assert.match(frontend, /saveSongOffline\(song\)/);
