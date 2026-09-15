@@ -674,7 +674,6 @@ const Player = {
   wasPlaying: false,
   native: false,
   extraVolume: store.get('extra_volume', false),
-  playbackMode: null, // 'iframe' | 'audio' | 'cached'
   get current() {
     return this.queue[this.index] || null;
   },
@@ -780,8 +779,6 @@ function initAudio(){
       }
       Player.useAudio = false;
       const s = Player.current;
-      Player.playbackMode = 'iframe';
-      cacheMediaInBackground(s).catch(() => {});
       if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
     }
   });
@@ -796,8 +793,6 @@ function initAudio(){
     if(Player.current){
       toast('Audio fallback to YouTube');
       Player.useAudio = false;
-      Player.playbackMode = 'iframe';
-      cacheMediaInBackground(Player.current).catch(() => {});
       // try YT
       const s = Player.current;
       if(Player.ready){
@@ -872,7 +867,6 @@ async function playViaAudio(song){
   const cached = await OfflineCache.getBlobUrl(song.videoId);
   if (cached) {
     Player.native = false;
-    Player.playbackMode = 'cached';
     Player.audioUrl = cached;
     Player.audio.src = cached;
     Player.audio.preload = 'metadata';
@@ -909,7 +903,6 @@ async function playViaAudio(song){
       return false;
     }
     Player.useAudio = true;
-    Player.playbackMode = 'audio';
     cacheAudioInBackground(song, streamUrl);
     document.body.classList.remove('paused');
     renderPlayButtons();
@@ -921,7 +914,6 @@ async function playViaAudio(song){
   try{ Player.audio.crossOrigin = null; }catch{}
   Player.audio.preload = 'metadata';
   Player.audio.src = streamUrl;
-  Player.playbackMode = 'audio';
   // Arm service while foreground; Android blocks late foreground-service starts.
   if (window.NativePlayback?.arm) window.NativePlayback.arm();
   try{
@@ -957,7 +949,6 @@ async function playViaAudio(song){
         ]);
         await race2;
         Player.useAudio = true;
-        Player.playbackMode = 'audio';
         cacheAudioInBackground(song, direct);
         setMediaSessionForAudio(song);
         return true;
@@ -1308,35 +1299,16 @@ function moveQueued(i, dir) {
   moveQueueItem(i, i + dir);
 }
 async function cacheAudioInBackground(song, url){
-  if(!song?.videoId || !url) return false;
+  if(!song?.videoId || !url) return;
   try{
     const r = await fetch(url, { cache:'no-store' });
-    if(!r.ok){ console.error('cache audio fail', r.status, url); return false; }
+    if(!r.ok){ console.error('cache audio fail', r.status, url); return; }
     const blob = await r.blob();
-    if(!blob.size) return false;
-    const stored = await OfflineCache.put(song, blob);
-    if(stored) console.log('cache audio stored', song.videoId, blob.size);
-    return stored;
-  }catch(e){ console.error('offline cache fetch failed', e); return false; }
-}
-async function cacheVideoInBackground(song, url){
-  if(!song?.videoId || !url) return false;
-  try{
-    const r = await fetch(url, { cache:'no-store' });
-    if(!r.ok){ console.error('cache video fail', r.status, url); return false; }
-    const blob = await r.blob();
-    if(!blob.size) return false;
-    const stored = await OfflineCache.put(song, blob);
-    if(stored) console.log('cache video stored', song.videoId, blob.size);
-    return stored;
-  }catch(e){ console.error('offline video cache failed', e); return false; }
-}
-async function cacheMediaInBackground(song){
-  const videoUrl = `/api/video-stream?videoId=${encodeURIComponent(song.videoId)}`;
-  if(await cacheVideoInBackground(song, videoUrl)) return 'video';
-  const audioUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
-  if(await cacheAudioInBackground(song, audioUrl)) return 'audio';
-  return null;
+    if(blob.size > 0){
+      console.log('cache audio stored', song.videoId, blob.size);
+      await OfflineCache.put(song, blob);
+    }
+  }catch(e){ console.error('offline cache fetch failed', e); }
 }
 function moveQueueItem(from, to) {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
@@ -1441,8 +1413,7 @@ function startCurrent() {
     if (audioOk && loadId === Player.loadId) {
       try { if (Player.yt && Player.ready) Player.yt.pauseVideo(); } catch {}
       if (Player.audio) Player.audio.playbackRate = Player.speed;
-    } else if (loadId === Player.loadId && !_isOfflineMode && navigator.onLine) {
-      Player.playbackMode = 'iframe';
+} else if (loadId === Player.loadId && !_isOfflineMode && navigator.onLine) {
       const tryPlay = async () => {
         if (loadId !== Player.loadId) return;
         if (!Player.ready) return setTimeout(() => tryPlay(), 300);
@@ -1455,8 +1426,7 @@ function startCurrent() {
         applyPlaybackQuality();
         setTimeout(applyPlaybackQuality, 400);
         setTimeout(applyPlaybackQuality, 1600);
-        const cachedMode = await cacheMediaInBackground(s);
-        if(cachedMode) console.log('iframe cache mode', s.videoId, cachedMode);
+        await cacheAudioInBackground(s, `/api/stream?videoId=${encodeURIComponent(s.videoId)}`);
       };
       tryPlay();
       // YT fallback keeps native controls available while audio runs in WebView.
