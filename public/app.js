@@ -1,4 +1,4 @@
-const APP_VERSION = "1.8.7";
+const APP_VERSION = "1.8.8";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -929,6 +929,7 @@ async function playViaAudio(song){
       waited += 400;
     }
     Player.useAudio = true;
+    cacheAudioInBackground(song, streamUrl);
     fetchAudioUrl(song.videoId).then((url) => {
       if (url && Player.current?.videoId === song.videoId) Player.nativeUrl = url;
     }).catch(()=>{});
@@ -2513,6 +2514,7 @@ async function downloadSong(song) {
       const r = await fetch(url, { mode: 'cors' });
       if (!r.ok) throw new Error('fetch');
       const blob = await r.blob();
+      await OfflineCache.put(song, blob);
       const obj = URL.createObjectURL(blob);
       clickDownload(obj, name);
       setTimeout(() => URL.revokeObjectURL(obj), 8000);
@@ -5867,6 +5869,7 @@ updateThemeIcon();
 // versioning — website vs user data separated, mandatory update checks
 migrateUserDataIfNeeded();
 setupVersionChecks();
+setupConnectivity();
 try {
   const stored = localStorage.getItem('dnialify_version');
   if (stored && stored !== APP_VERSION) {
