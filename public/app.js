@@ -1,4 +1,4 @@
-const APP_VERSION = "1.9.5";
+const APP_VERSION = "1.9.4";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
