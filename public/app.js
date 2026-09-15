@@ -772,11 +772,6 @@ function initAudio(){
   a.addEventListener('stalled', ()=>{
     if (Player.current && Player.useAudio && a.duration === 0 && a.currentTime === 0 && !a.paused) {
       console.warn('audio stalled 00:00, fallback');
-      if (_isOfflineMode || !navigator.onLine) {
-        toast('Offline — audio tersimpan gagal dibaca');
-        Player.useAudio = false;
-        return;
-      }
       Player.useAudio = false;
       const s = Player.current;
       if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
@@ -784,11 +779,6 @@ function initAudio(){
   });
   a.addEventListener('error', (e)=>{
     console.warn('audio error', e);
-    if (_isOfflineMode || !navigator.onLine) {
-      toast('Offline — lagu tersimpan tidak bisa dibaca');
-      Player.useAudio = false;
-      return;
-    }
     // fallback to YT IFrame if audio fails
     if(Player.current){
       toast('Audio fallback to YouTube');
@@ -2907,7 +2897,6 @@ function renderNav() {
       const h = b.dataset.hash;
       if (!h) return;
       e.preventDefault();
-      if (!$('#nowplaying').classList.contains('hidden')) closeNowPlaying();
       go(h);
     });
   });
@@ -3116,10 +3105,7 @@ async function viewHome(view) {
   const greet =
     h < 11 ? 'Good morning' : h < 16 ? 'Good afternoon' : 'Good evening';
   applyTint(greet);
-  let d = { sections: [] };
-  if (!_isOfflineMode && navigator.onLine) {
-    try { d = await api('/api/home'); } catch { setOfflineMode(true); }
-  }
+  const d = await api('/api/home');
   const hist = Library.history.slice(0, 16);
   const favs = Library.favorites.slice(0, 12);
   const pls = Library.playlists.filter((p) => p.tracks && p.tracks.length);
@@ -3782,7 +3768,6 @@ function viewLibrary(view, tab) {
     ['favorites', 'Favorites'],
     ['saved', 'Saved'],
     ['history', 'History'],
-    ['offline', 'Offline'],
     ['stats', 'Stats'],
   ];
   if (tab === 'stats') {
@@ -3790,9 +3775,7 @@ function viewLibrary(view, tab) {
     return;
   }
   let body = '';
-  if (tab === 'offline') {
-    body = `<div id="offline-library-body" class="loading-note">Memuat lagu tersimpan…</div>`;
-  } else if (tab === 'favorites') {
+  if (tab === 'favorites') {
     const f = Library.favorites;
     body = f.length
       ? `<div class="lib-actions"><button class="pill-btn primary" id="fav-play">${icon('i-play')}<span>Play all</span></button> <button class="pill-btn" id="fav-shuffle">${icon('i-shuffle')}<span>Shuffle</span></button></div>
@@ -3873,17 +3856,6 @@ function viewLibrary(view, tab) {
   $$('[data-nav]', view).forEach((el) =>
     el.addEventListener('click', () => go(el.dataset.nav)),
   );
-  if (tab === 'offline') {
-    OfflineCache.list().then((items) => {
-      const el = $('#offline-library-body');
-      if (!el) return;
-      el.innerHTML = items.length
-        ? `${trackHeadHTML()}<div class="track-list">${items.map((s, i) => trackRowHTML({ ...s, subtitle: s.artist, tn: i + 1 })).join('')}</div>`
-        : emptyHTML('Belum ada lagu offline', 'Download lagu saat online. Maksimal 50 lagu.', { label: 'Cari lagu', go: '#/search', ic: 'i-download' });
-      bindItems(view);
-      updateOfflineCount();
-    }).catch(() => {});
-  }
   $('#hist-clear')?.addEventListener('click', () => {
     if (!confirm('Clear history?')) return;
     store.set('hist', []);

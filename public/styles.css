@@ -1576,5 +1576,4 @@ body.pip-system .fw-bar, body.pip-system .fw-controls { opacity: .6; }
 #offline-banner .ic{width:16px;height:16px;flex-shrink:0}
 #offline-banner b{color:#fff}
 .offline-hide{display:none !important}
-body.np-open #nav-mobile{z-index:65}
 
