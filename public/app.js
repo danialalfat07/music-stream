@@ -1,4 +1,4 @@
-const APP_VERSION = "1.9.1";
+const APP_VERSION = "1.9.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -1337,18 +1337,6 @@ async function cacheMediaInBackground(song){
   const audioUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
   if(await cacheAudioInBackground(song, audioUrl)) return 'audio';
   return null;
-}
-async function saveSongOffline(song){
-  if(!song?.videoId) return false;
-  toast(`Menyimpan "${song.title || 'lagu'}" offline…`);
-  const mode = await cacheMediaInBackground(song);
-  if(mode){
-    updateOfflineCount();
-    toast(`Tersimpan offline · ${mode}`);
-    return true;
-  }
-  toast('Gagal menyimpan offline');
-  return false;
 }
 function moveQueueItem(from, to) {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
