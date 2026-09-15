@@ -1,4 +1,4 @@
-const APP_VERSION = "1.9.3";
+const APP_VERSION = "1.9.4";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -771,7 +771,7 @@ function initAudio(){
     } catch {}
   });
   a.addEventListener('stalled', ()=>{
-    if (Player.current && Player.useAudio && a.duration === 0 && a.currentTime === 0 && !a.paused) {
+    if (Player.current && Player.useAudio && Player.playbackMode === 'audio' && a.duration === 0 && a.currentTime === 0 && !a.paused) {
       console.warn('audio stalled 00:00, fallback');
       if (_isOfflineMode || !navigator.onLine) {
         toast('Offline — audio tersimpan gagal dibaca');
@@ -779,6 +779,7 @@ function initAudio(){
         return;
       }
       Player.useAudio = false;
+      try { a.pause(); a.removeAttribute('src'); a.load(); } catch {}
       const s = Player.current;
       Player.playbackMode = 'iframe';
       if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
@@ -789,6 +790,7 @@ function initAudio(){
     if (_isOfflineMode || !navigator.onLine) {
       toast('Offline — lagu tersimpan tidak bisa dibaca');
       Player.useAudio = false;
+      try { a.pause(); a.removeAttribute('src'); a.load(); } catch {}
       return;
     }
     // fallback to YT IFrame if audio fails
@@ -927,11 +929,14 @@ async function playViaAudio(song){
       new Promise((_, rej) => setTimeout(() => rej(new Error('play timeout 5s')), 5000))
     ]);
     await playRace;
-    // wait for duration to be known up to 3s
+    // A resolved play() is not enough: broken proxy responses can stay at 00:00.
     let waited = 0;
     while (waited < 3000 && (!isFinite(Player.audio.duration) || Player.audio.duration === 0) && Player.audio.currentTime === 0) {
       await new Promise(r => setTimeout(r, 400));
       waited += 400;
+    }
+    if (!isFinite(Player.audio.duration) || Player.audio.duration === 0) {
+      throw new Error('stream duration unavailable');
     }
     Player.useAudio = true;
     fetchAudioUrl(song.videoId).then((url) => {
@@ -952,6 +957,9 @@ async function playViaAudio(song){
           new Promise((_, rej) => setTimeout(() => rej(new Error('direct timeout')), 5000))
         ]);
         await race2;
+        if (!isFinite(Player.audio.duration) || Player.audio.duration === 0) {
+          throw new Error('direct stream duration unavailable');
+        }
         Player.useAudio = true;
         Player.playbackMode = 'audio';
         setMediaSessionForAudio(song);
@@ -959,6 +967,7 @@ async function playViaAudio(song){
       }
     }catch{}
     Player.useAudio = false;
+    try { Player.audio.pause(); Player.audio.removeAttribute('src'); Player.audio.load(); } catch {}
     return false;
   }
 }
@@ -1305,19 +1314,20 @@ function moveQueued(i, dir) {
 async function cacheAudioInBackground(song, url){
   if(!song?.videoId || !url) return false;
   try{
-    const r = await fetch(url, { cache:'no-store' });
+    const r = await fetch(url, { cache:'no-store', signal: AbortSignal.timeout(30000) });
     if(!r.ok){ console.error('cache audio fail', r.status, url); return false; }
     const blob = await r.blob();
-    if(!blob.size) return false;
+    if(!blob.size){ console.error('cache audio fail empty body', r.status, r.headers.get('content-type'), url); return false; }
     const stored = await OfflineCache.put(song, blob);
-    if(stored) console.log('cache audio stored', song.videoId, blob.size);
+    if(stored) console.log('cache audio stored', song.videoId, blob.size, blob.type);
+    else console.error('cache audio fail IndexedDB', song.videoId, blob.size, blob.type);
     return stored;
   }catch(e){ console.error('offline cache fetch failed', e); return false; }
 }
 async function cacheVideoInBackground(song, url){
   if(!song?.videoId || !url) return false;
   try{
-    const r = await fetch(url, { cache:'no-store' });
+    const r = await fetch(url, { cache:'no-store', signal: AbortSignal.timeout(30000) });
     if(!r.ok){ console.error('cache video fail', r.status, url); return false; }
     const blob = await r.blob();
     if(!blob.size) return false;
