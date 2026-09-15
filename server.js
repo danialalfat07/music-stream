@@ -1284,6 +1284,75 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+// Video+Audio stream proxy for caching (same-origin, Range 206, no IP mismatch)
+async function getVideoUrl(videoId) {
+  const tryClients = [
+    { context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
+    { context: CONTEXT, headers: HEADERS },
+  ];
+  for (const { context, headers } of tryClients) {
+    try {
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ context, videoId, racyCheckOk: true, contentCheckOk: true }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const sd = data.streamingData;
+      if (!sd) continue;
+      const formats = [...(sd.adaptiveFormats || []), ...(sd.formats || [])];
+      // Adaptive video and audio streams cannot be stored as one playable blob.
+      const combined = formats
+        .filter(f => f.mimeType && f.mimeType.includes('video/') && f.mimeType.includes('audio/') && f.url)
+        .sort((a, b) => (b.height || 0) - (a.height || 0));
+      const best = combined[0];
+      if (!best) continue;
+      if (best.url) {
+        return { url: best.url, mimeType: best.mimeType, bitrate: best.bitrate, qualityLabel: best.qualityLabel, height: best.height };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+app.get('/api/video-stream', async (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).end();
+  try {
+    const info = await getVideoUrl(id);
+    if (!info || !info.url) return res.status(404).end();
+    const headers = {};
+    if (req.headers.range) headers['Range'] = req.headers.range;
+    headers['User-Agent'] = ANDROID_HEADERS['User-Agent'];
+    headers['Accept'] = '*/*';
+    const upstream = await fetch(info.url, { headers });
+    res.status(upstream.status);
+    const pass = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'expires'];
+    for (const [k, v] of upstream.headers.entries()) {
+      if (pass.includes(k.toLowerCase())) res.setHeader(k, v);
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (!res.getHeader('Content-Type')) res.setHeader('Content-Type', info.mimeType || 'video/mp4');
+    if (upstream.body) {
+      try {
+        const nodeStream = Readable.fromWeb(upstream.body);
+        nodeStream.pipe(res);
+        nodeStream.on('error', () => res.end());
+      } catch {
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        res.send(buf);
+      }
+    } else {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
+    }
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
 app.get('/api/app-version', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
