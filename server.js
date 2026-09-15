@@ -1192,14 +1192,16 @@ const IOS_HEADERS = {
 };
 
 async function getAudioUrl(videoId) {
+  // Vercel IP diblok untuk ANDROID/IOS di www.youtube.com — coba music.youtube.com + WEB_REMIX juga
   const tryClients = [
-    { context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
-    { context: IOS_CONTEXT, headers: IOS_HEADERS },
-    { context: CONTEXT, headers: HEADERS },
+    { host: 'https://www.youtube.com', context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
+    { host: 'https://www.youtube.com', context: IOS_CONTEXT, headers: IOS_HEADERS },
+    { host: 'https://music.youtube.com', context: CONTEXT, headers: HEADERS },
+    { host: 'https://www.youtube.com', context: CONTEXT, headers: HEADERS },
   ];
-  for (const { context, headers } of tryClients) {
+  for (const { host, context, headers } of tryClients) {
     try {
-      const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      const res = await fetch(`${host}/youtubei/v1/player?prettyPrint=false`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -1259,7 +1261,10 @@ app.get('/api/audio', async (req, res) => {
       return sendJsonWithCache(req, res, hit.v, 300);
     }
     const info = await getAudioUrl(id);
-    if (!info || !info.url) return res.status(404).json({ error: 'no audio url' });
+    if (!info || !info.url) {
+      const debug = req.query.debug ? { debug: 'all clients failed, check Vercel logs playabilityStatus' } : {};
+      return res.status(404).json({ error: 'no audio url', ...debug });
+    }
     cache.set(cacheKey, { v: info, t: Date.now() });
     res.setHeader('Access-Control-Allow-Origin', '*');
     sendJsonWithCache(req, res, info, 300);
