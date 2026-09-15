@@ -5,8 +5,8 @@ def computedVersionCode = {
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toInteger() ?: 0
     def base = 2
     def code = base + runNum
-    // Local build must be > last CI artifact (v43) so adb install -r works
-    if (code <= 43) code = 44
+    // Local build must be > last CI artifact (v44) so adb install -r works
+    if (code <= 44) code = 45
     return code
 }()
 def computedVersionName = {
