@@ -1,4 +1,4 @@
-const APP_VERSION = "1.8.6";
+const APP_VERSION = "1.8.5";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -500,147 +500,6 @@ function setupVersionChecks() {
   });
 }
 
-/* ================= offline cache LRU 50 ================= */
-const OFFLINE_MAX = 50;
-const OfflineCache = {
-  dbName: 'dnialify_offline',
-  storeName: 'tracks',
-  _dbp: null,
-  _blobUrls: new Map(),
-  open(){
-    if(this._dbp) return this._dbp;
-    this._dbp = new Promise((res, rej)=>{
-      try{
-        const req = indexedDB.open(this.dbName, 1);
-        req.onupgradeneeded = ()=>{ try{ const db=req.result; if(!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks',{keyPath:'videoId'}); }catch{} };
-        req.onsuccess = ()=> res(req.result);
-        req.onerror = ()=> rej(req.error);
-      }catch(e){ rej(e); }
-    });
-    return this._dbp;
-  },
-  async _tx(mode, fn){
-    const db = await this.open(); return new Promise((res,rej)=>{
-      const tx = db.transaction(this.storeName, mode);
-      const st = tx.objectStore(this.storeName);
-      let out; try{ out = fn(st); }catch(e){ return rej(e); }
-      tx.oncomplete = ()=> res(out);
-      tx.onerror = ()=> rej(tx.error);
-      if(out && out.onsuccess !== undefined){ out.onsuccess = ()=>{}; out.onerror = ()=>{}; }
-    });
-  },
-  async get(videoId){
-    if(!videoId) return null;
-    try{ const db=await this.open(); return await new Promise((res,rej)=>{ const tx=db.transaction(this.storeName,'readonly'); const st=tx.objectStore('tracks'); const rq=st.get(videoId); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>res(null); }); }catch{ return null; }
-  },
-  async has(videoId){ const r=await this.get(videoId); return !!r; },
-  async count(){
-    try{ const db=await this.open(); return await new Promise(res=>{ const tx=db.transaction(this.storeName,'readonly'); const st=tx.objectStore('tracks'); const rq=st.count(); rq.onsuccess=()=>res(rq.result||0); rq.onerror=()=>res(0); }); }catch{ return 0; }
-  },
-  async list(){
-    try{ const db=await this.open(); return await new Promise(res=>{ const tx=db.transaction(this.storeName,'readonly'); const st=tx.objectStore('tracks'); const rq=st.getAll(); rq.onsuccess=()=>{ const arr=rq.result||[]; arr.sort((a,b)=>(b.lastAt||0)-(a.lastAt||0)); res(arr); }; rq.onerror=()=>res([]); }); }catch{ return []; }
-  },
-  async touch(videoId){
-    if(!videoId) return;
-    try{ const rec=await this.get(videoId); if(!rec) return; rec.lastAt=Date.now(); rec.hits=(rec.hits||0)+1; const db=await this.open(); await new Promise((res,rej)=>{ const tx=db.transaction(this.storeName,'readwrite'); tx.objectStore('tracks').put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); }catch{}
-  },
-  async put(song, blob){
-    if(!song || !song.videoId || !blob) return false;
-    try{
-      const now=Date.now();
-      const existing = await this.get(song.videoId);
-      const rec = existing ? {...existing} : { videoId: song.videoId, title: song.title||'', artist: song.artist||song.subtitle||'', thumbnail: song.thumbnail||'', addedAt: now, hits:0 };
-      rec.title = song.title || rec.title;
-      rec.artist = song.artist || song.subtitle || rec.artist;
-      rec.thumbnail = song.thumbnail || rec.thumbnail;
-      rec.blob = blob;
-      rec.size = blob.size||0;
-      rec.mime = blob.type||'audio/webm';
-      rec.lastAt = now;
-      rec.hits = (rec.hits||0)+1;
-      if(!existing) rec.addedAt = now;
-      const db=await this.open();
-      await new Promise((res,rej)=>{ const tx=db.transaction(this.storeName,'readwrite'); tx.objectStore('tracks').put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
-      // evict if >50: delete smallest lastAt
-      const all = await this.list();
-      if(all.length > OFFLINE_MAX){
-        const toDel = all.slice(OFFLINE_MAX);
-        await new Promise(res=>{ const tx=db.transaction(this.storeName,'readwrite'); const st=tx.objectStore('tracks'); toDel.forEach(r=>{ try{ st.delete(r.videoId); if(OfflineCache._blobUrls.has(r.videoId)){ try{ URL.revokeObjectURL(OfflineCache._blobUrls.get(r.videoId)); }catch{} OfflineCache._blobUrls.delete(r.videoId);} }catch{} }); tx.oncomplete=()=>res(); tx.onerror=()=>res(); });
-      }
-      try{ updateOfflineCount(); }catch{}
-      return true;
-    }catch(e){ console.warn('offline put fail',e); return false; }
-  },
-  async getBlobUrl(videoId){
-    if(!videoId) return null;
-    if(this._blobUrls.has(videoId)) return this._blobUrls.get(videoId);
-    const rec = await this.get(videoId);
-    if(!rec || !rec.blob) return null;
-    try{
-      const url = URL.createObjectURL(rec.blob);
-      this._blobUrls.set(videoId, url);
-      // touch LRU
-      this.touch(videoId).catch(()=>{});
-      return url;
-    }catch{ return null; }
-  },
-  async remove(videoId){
-    try{ if(this._blobUrls.has(videoId)){ try{ URL.revokeObjectURL(this._blobUrls.get(videoId)); }catch{} this._blobUrls.delete(videoId);} const db=await this.open(); await new Promise(res=>{ const tx=db.transaction(this.storeName,'readwrite'); tx.objectStore('tracks').delete(videoId); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); try{ updateOfflineCount(); }catch{} }catch{}
-  },
-  async clear(){
-    try{ for(const u of this._blobUrls.values()) try{ URL.revokeObjectURL(u);}catch{} this._blobUrls.clear(); const db=await this.open(); await new Promise(res=>{ const tx=db.transaction(this.storeName,'readwrite'); tx.objectStore('tracks').clear(); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); try{ updateOfflineCount(); }catch{} }catch{}
-  }
-};
-function updateOfflineCount(){
-  try{ OfflineCache.count().then(n=>{ const el=$('#set-offline'); if(el) el.textContent = n + ' / 50 lagu' + (n>=50?' · penuh':''); }).catch(()=>{}); }catch{}
-}
-// pre-warm + UI
-try{ OfflineCache.open().then(()=> updateOfflineCount()).catch(()=>{}); }catch{}
-
-/* ================= offline / online net ================= */
-let _isOfflineMode = false;
-let _netTimer = null;
-async function pingVercel(timeoutMs=3500){
-  const ctrl = new AbortController();
-  const t = setTimeout(()=> ctrl.abort(), timeoutMs);
-  try{
-    const r = await fetch('/api/health', { cache:'no-store', signal: ctrl.signal });
-    clearTimeout(t);
-    if(!r.ok) throw new Error('health '+r.status);
-    // also try minimal json parse ensure vercel reachable
-    try{ await r.json(); }catch{}
-    return true;
-  }catch{ clearTimeout(t); return false; }
-}
-function setOfflineMode(isOffline){
-  _isOfflineMode = !!isOffline;
-  const b = $('#offline-banner');
-  if(b) b.classList.toggle('hidden', !isOffline);
-  if(isOffline){
-    // disable search if not focused? keep but show toast hint
-  }
-  try{ document.body.classList.toggle('is-offline', !!isOffline); }catch{}
-}
-async function checkConnectivity({showToast=false}={}){
-  const up = await pingVercel();
-  setOfflineMode(!up);
-  if(!up && showToast) toast('Offline — putar dari cache 50 lagu');
-  return up;
-}
-function setupConnectivity(){
-  // initial
-  checkConnectivity().catch(()=>{});
-  // poll foreground every 45s
-  try{
-    if(_netTimer) clearInterval(_netTimer);
-    _netTimer = setInterval(()=>{ if(document.visibilityState==='visible') checkConnectivity().catch(()=>{}); }, 45000);
-  }catch{}
-  window.addEventListener('online', ()=> checkConnectivity({showToast:false}).catch(()=>{}));
-  window.addEventListener('offline', ()=> setOfflineMode(true));
-  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkConnectivity().catch(()=>{}); });
-  window.addEventListener('pageshow', e=>{ if(e.persisted) checkConnectivity().catch(()=>{}); });
-}
-
 /* ================= player state ================= */
 const Player = {
   yt: null,
@@ -853,32 +712,7 @@ async function fetchAudioUrl(videoId){
 }
 async function playViaAudio(song){
   if(!Player.audio || !song || !song.videoId) return false;
-  // Cached audio wins online/offline. Blob URLs are WebView-only, so bypass native/iframe.
-  const cached = await OfflineCache.getBlobUrl(song.videoId);
-  if (cached) {
-    Player.native = false;
-    Player.audioUrl = cached;
-    Player.audio.src = cached;
-    Player.audio.preload = 'metadata';
-    try {
-      await Promise.race([
-        Player.audio.play(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('cache play timeout')), 5000)),
-      ]);
-      Player.useAudio = true;
-      setMediaSessionForAudio(song);
-      toast('Memutar lagu tersimpan offline');
-      return true;
-    } catch (e) {
-      console.warn('offline cache play failed', e);
-      await OfflineCache.remove(song.videoId);
-    }
-  }
-  if (_isOfflineMode || !navigator.onLine) {
-    toast('Lagu belum tersimpan untuk diputar offline');
-    return false;
-  }
-  // Use same-origin stream proxy (Vercel, no IP mismatch, TWA bg)
+  // Use same-origin stream proxy (Vercel, no IP mismatch, Range 206, TWA bg)
   const streamUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
   if (Player.native) {
     Player.audioUrl = `${location.origin}${streamUrl}`;
@@ -893,7 +727,6 @@ async function playViaAudio(song){
       return false;
     }
     Player.useAudio = true;
-    cacheAudioInBackground(song, streamUrl);
     document.body.classList.remove('paused');
     renderPlayButtons();
     setMediaSessionForAudio(song);
@@ -938,7 +771,6 @@ async function playViaAudio(song){
         ]);
         await race2;
         Player.useAudio = true;
-        cacheAudioInBackground(song, direct);
         setMediaSessionForAudio(song);
         return true;
       }
@@ -1287,15 +1119,6 @@ function restoreQueue() {
 function moveQueued(i, dir) {
   moveQueueItem(i, i + dir);
 }
-async function cacheAudioInBackground(song, url){
-  if(!song?.videoId || !url || _isOfflineMode) return;
-  try{
-    const r = await fetch(url, { cache:'no-store' });
-    if(!r.ok) return;
-    const blob = await r.blob();
-    if(blob.size > 0) await OfflineCache.put(song, blob);
-  }catch(e){ console.warn('offline cache fetch failed', e); }
-}
 function moveQueueItem(from, to) {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return false;
   if (from <= Player.index || to <= Player.index) return false;
@@ -1399,7 +1222,7 @@ function startCurrent() {
     if (audioOk && loadId === Player.loadId) {
       try { if (Player.yt && Player.ready) Player.yt.pauseVideo(); } catch {}
       if (Player.audio) Player.audio.playbackRate = Player.speed;
-    } else if (loadId === Player.loadId && !_isOfflineMode && navigator.onLine) {
+    } else if (loadId === Player.loadId) {
       const tryPlay = () => {
         if (loadId !== Player.loadId) return;
         if (!Player.ready) return setTimeout(tryPlay, 300);
@@ -1414,7 +1237,7 @@ function startCurrent() {
         setTimeout(applyPlaybackQuality, 1600);
       };
       tryPlay();
-      // YT fallback keeps native controls available while audio runs in WebView.
+      // YT fallback still needs native notif so Home shows title/artist even when audio is WebView
       if (window.NativePlayback) {
         try {
           if (window.NativePlayback.updateNotification) window.NativePlayback.updateNotification(displayTitle(s.title) || s.title, s.artist || s.subtitle || '');
@@ -1434,8 +1257,6 @@ function startCurrent() {
           navigator.mediaSession.setActionHandler('pause', () => Player.yt && Player.yt.pauseVideo());
         } catch {}
       }
-    } else if (loadId === Player.loadId) {
-      toast('Offline — lagu belum tersimpan');
     }
   })();
   Library.pushHistory(s);
