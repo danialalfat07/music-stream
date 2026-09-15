@@ -175,78 +175,6 @@ public class MainActivity extends BridgeActivity {
         logPipNative("onTopResumed:" + isTopResumed);
     }
 
-    @Override
-    protected void onUserLeaveHint() {
-        super.onUserLeaveHint();
-        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint " + lifecycleSnapshot());
-        try {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint skip SDK<26");
-                return;
-            }
-            android.webkit.WebView wv = null;
-            try { if (getBridge() != null) wv = getBridge().getWebView(); } catch (Exception ignored) {}
-            if (wv == null) {
-                android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint wv null");
-                return;
-            }
-            final android.webkit.WebView fwv = wv;
-            fwv.evaluateJavascript("(function(){try{var has=!!(window.Player&&window.Player.current&&window.Player.current.videoId); var closed=typeof _isClosed!=='undefined'?_isClosed:false; return JSON.stringify({hasCurrent:has, isClosed:closed});}catch(e){return JSON.stringify({error:String(e)});}})()", val -> {
-                try {
-                    String cleaned = val;
-                    if (cleaned != null && cleaned.length() >= 2 && cleaned.charAt(0) == '\"' && cleaned.charAt(cleaned.length() - 1) == '\"')
-                        cleaned = cleaned.substring(1, cleaned.length() - 1).replace("\\\\", "\\").replace("\\\"", "\"");
-                    if (cleaned == null || cleaned.equals("null")) return;
-                    org.json.JSONObject obj = new org.json.JSONObject(cleaned);
-                    if (obj.has("error")) {
-                        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint JS error " + obj.optString("error"));
-                        return;
-                    }
-                    boolean hasCurrent = obj.optBoolean("hasCurrent", false);
-                    boolean isClosed = obj.optBoolean("isClosed", false);
-                    android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint JS hasCurrent=" + hasCurrent + " isClosed=" + isClosed);
-                    if (!hasCurrent || isClosed) {
-                        android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint no song, skip pip");
-                        return;
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        try { if (isInPictureInPictureMode()) { android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint already in pip"); return; } } catch (Exception ignored) {}
-                    }
-                    runOnUiThread(() -> {
-                        try {
-                            ensurePipNativeView();
-                            updatePipNativeView();
-                            if (pipNativeView != null) {
-                                pipNativeView.setVisibility(View.VISIBLE);
-                                pipNativeView.bringToFront();
-                                pipNativeView.requestLayout();
-                                pipNativeView.invalidate();
-                                ViewGroup parent = (ViewGroup) pipNativeView.getParent();
-                                if (parent != null) { parent.requestLayout(); parent.invalidate(); }
-                            }
-                            Rational ratio = new Rational(9, 16);
-                            PictureInPictureParams params = new PictureInPictureParams.Builder().setAspectRatio(ratio).build();
-                            boolean res = enterPictureInPictureMode(params);
-                            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip result=" + res + " " + lifecycleSnapshot());
-                            logPipNative("onUserLeaveHint:enter result=" + res);
-                            // fallback to JS toggle if pip failed (e.g. no permission or OS denied)
-                            if (!res) {
-                                try { fwv.evaluateJavascript("try{if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null); } catch (Exception ignored2) {}
-                            }
-                        } catch (Exception e) {
-                            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint enterPip err " + e);
-                            try { fwv.evaluateJavascript("try{if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null); } catch (Exception ignored2) {}
-                        }
-                    });
-                } catch (Exception e) {
-                    android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint callback err " + e);
-                }
-            });
-        } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint outer err " + e);
-        }
-    }
-
     private void logLifecycle(String event) {
         android.util.Log.d(TAG_DIAG, "Activity " + event + " " + lifecycleSnapshot());
     }
@@ -395,19 +323,13 @@ public class MainActivity extends BridgeActivity {
                             return;
                         }
                         if (finalCanBack) {
-                            android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash + " hasCurrent=" + hasCurrent);
+                            android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash);
                             finalWv.goBack();
                             return;
                         }
                         if (historyLen > 1) {
-                            android.util.Log.d(TAG_DIAG, "Back: JS history.back() fallback historyLen=" + historyLen + " hash=" + hash + " hasCurrent=" + hasCurrent);
+                            android.util.Log.d(TAG_DIAG, "Back: JS history.back() fallback historyLen=" + historyLen + " hash=" + hash);
                             finalWv.evaluateJavascript("try{history.back()}catch(e){}", null);
-                            return;
-                        }
-                        // no more history → would exit app → show widget/pip if song playing (Home/Back nav → widget)
-                        if (hasCurrent) {
-                            android.util.Log.d(TAG_DIAG, "Back: widget on exit hasCurrent=true hash=" + hash);
-                            finalWv.evaluateJavascript("try{if(window.NativePlayback&&window.NativePlayback.enterPip) window.NativePlayback.enterPip(); else if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null);
                             return;
                         }
                         android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack no overlay/history hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
