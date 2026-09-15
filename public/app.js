@@ -1,4 +1,4 @@
-const APP_VERSION = "1.8.9";
+const APP_VERSION = "1.9.0";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -4384,9 +4384,10 @@ function openSongMenu(song, opts = {}) {
     </div>
     ${row('next', 'i-next', 'Play next')}
     ${row('queue', 'i-queue', 'Add to queue')}
-    ${row('fav', liked ? 'i-heart-f' : 'i-heart-o', liked ? 'Favorited' : 'Favorite')}
-    ${row('pl', 'i-plus', 'Add to playlist')}
-    ${row('dl', 'i-download', 'Download')}
+     ${row('fav', liked ? 'i-heart-f' : 'i-heart-o', liked ? 'Favorited' : 'Favorite')}
+     ${row('pl', 'i-plus', 'Add to playlist')}
+     ${row('offline', 'i-download', 'Save offline')}
+     ${row('dl', 'i-download', 'Download')}
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${inUserQ ? `${row('up', 'i-chev-up', 'Move up', isFirst)}${row('dn', 'i-chev-down', 'Move down', isLast)}${row('rm', 'i-x', 'Remove from queue')}` : ''}
@@ -4402,7 +4403,8 @@ function openSongMenu(song, opts = {}) {
       else if (a === 'pl') {
         openAddToPlaylist(song);
         return;
-      } else if (a === 'dl') downloadSong(song);
+       } else if (a === 'offline') saveSongOffline(song);
+       else if (a === 'dl') downloadSong(song);
       else if (a === 'share') {
         shareSong(song);
       } else if (a === 'artist') {
@@ -4436,7 +4438,8 @@ function openNowPlayingMore() {
   const row = (act, ic, label, on) =>
     `<button type="button" class="modal-row${on ? ' on' : ''}" data-npact="${act}">${icon(ic)}<span>${label}</span></button>`;
   body.innerHTML = `
-    ${row('dl', 'i-download', 'Download')}
+   ${row('dl', 'i-download', 'Download')}
+    ${row('offline', 'i-download', 'Save offline')}
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
@@ -4446,7 +4449,8 @@ function openNowPlayingMore() {
   $$('[data-npact]', body).forEach((b) =>
     b.addEventListener('click', () => {
       const a = b.dataset.npact;
-      if (a === 'dl') downloadSong(song);
+      if (a === 'offline') saveSongOffline(song);
+      else if (a === 'dl') downloadSong(song);
       else if (a === 'share') shareSong(song);
       else if (a === 'artist') goToArtist(song);
       else if (a === 'speed') cycleSpeed();
