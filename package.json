@@ -1,9 +1,10 @@
 {
   "name": "dnialify-music-stream",
-  "version": "1.8.6",
+  "version": "2.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "version:bump": "node scripts/bump-version.js",
     "test": "node --test --experimental-test-coverage 2>&1 || echo \"no tests yet\"",
     "lint": "eslint server.js public/app.js",
     "fmt": "prettier --write server.js public/app.js",
