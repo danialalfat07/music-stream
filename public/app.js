@@ -1,4 +1,4 @@
-const APP_VERSION = "1.9.3";
+const APP_VERSION = "1.9.2";
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -781,6 +781,7 @@ function initAudio(){
       Player.useAudio = false;
       const s = Player.current;
       Player.playbackMode = 'iframe';
+      cacheMediaInBackground(s).catch(() => {});
       if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
     }
   });
@@ -796,6 +797,7 @@ function initAudio(){
       toast('Audio fallback to YouTube');
       Player.useAudio = false;
       Player.playbackMode = 'iframe';
+      cacheMediaInBackground(Player.current).catch(() => {});
       // try YT
       const s = Player.current;
       if(Player.ready){
@@ -908,6 +910,7 @@ async function playViaAudio(song){
     }
     Player.useAudio = true;
     Player.playbackMode = 'audio';
+    cacheAudioInBackground(song, streamUrl);
     document.body.classList.remove('paused');
     renderPlayButtons();
     setMediaSessionForAudio(song);
@@ -934,6 +937,7 @@ async function playViaAudio(song){
       waited += 400;
     }
     Player.useAudio = true;
+    cacheAudioInBackground(song, streamUrl);
     fetchAudioUrl(song.videoId).then((url) => {
       if (url && Player.current?.videoId === song.videoId) Player.nativeUrl = url;
     }).catch(()=>{});
@@ -954,6 +958,7 @@ async function playViaAudio(song){
         await race2;
         Player.useAudio = true;
         Player.playbackMode = 'audio';
+        cacheAudioInBackground(song, direct);
         setMediaSessionForAudio(song);
         return true;
       }
@@ -1464,6 +1469,8 @@ function startCurrent() {
         applyPlaybackQuality();
         setTimeout(applyPlaybackQuality, 400);
         setTimeout(applyPlaybackQuality, 1600);
+        const cachedMode = await cacheMediaInBackground(s);
+        if(cachedMode) console.log('iframe cache mode', s.videoId, cachedMode);
       };
       tryPlay();
       // YT fallback keeps native controls available while audio runs in WebView.
