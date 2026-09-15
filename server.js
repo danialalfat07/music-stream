@@ -1158,8 +1158,7 @@ app.get('/api/thumb', async (req, res) => {
   }
 });
 
-// ---- audio stream URL via InnerTube ANDROID (background-capable) ----
-// Returns direct googlevideo audio URL for <audio> tag, which survives home/lock via MediaSession
+// ---- audio stream URL via InnerTube (ANDROID primary, WEB/IOS fallback) ----
 const ANDROID_CONTEXT = {
   client: {
     clientName: 'ANDROID',
@@ -1174,12 +1173,28 @@ const ANDROID_HEADERS = {
   'User-Agent': 'com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)',
   'X-Goog-Api-Format-Version': '2',
 };
+const IOS_CONTEXT = {
+  client: {
+    clientName: 'IOS',
+    clientVersion: '19.29.1',
+    deviceMake: 'Apple',
+    deviceModel: 'iPhone15,2',
+    hl: 'en',
+    gl: 'US',
+    osName: 'iPhone',
+    osVersion: '17_4 like Mac OS X',
+  },
+};
+const IOS_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone15,2; U; CPU iPhone OS 17_4 like Mac OS X)',
+  'X-Goog-Api-Format-Version': '2',
+};
 
 async function getAudioUrl(videoId) {
-  // try ANDROID first (signed URL, no decipher)
   const tryClients = [
     { context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
-    // fallback WEB (needs decipher but try)
+    { context: IOS_CONTEXT, headers: IOS_HEADERS },
     { context: CONTEXT, headers: HEADERS },
   ];
   for (const { context, headers } of tryClients) {
@@ -1194,15 +1209,22 @@ async function getAudioUrl(videoId) {
           contentCheckOk: true,
         }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.warn(`getAudioUrl ${context.client.clientName} -> HTTP ${res.status}`);
+        continue;
+      }
       const data = await res.json();
       const sd = data.streamingData;
-      if (!sd) continue;
+      if (!sd) {
+        console.warn(`getAudioUrl ${context.client.clientName} no streamingData playability=${data.playabilityStatus?.status} reason=${data.playabilityStatus?.reason}`);
+        continue;
+      }
       const formats = [...(sd.adaptiveFormats || []), ...(sd.formats || [])];
-      // pick best audio: opus > mp4a, highest bitrate
       const audios = formats.filter((f) => f.mimeType && f.mimeType.includes('audio/'));
-      if (!audios.length) continue;
-      // prefer opus
+      if (!audios.length) {
+        console.warn(`getAudioUrl ${context.client.clientName} no audio formats`);
+        continue;
+      }
       audios.sort((a, b) => {
         const aOpus = a.mimeType.includes('opus') ? 1 : 0;
         const bOpus = b.mimeType.includes('opus') ? 1 : 0;
@@ -1218,9 +1240,12 @@ async function getAudioUrl(videoId) {
           approxDurationMs: best.approxDurationMs || data.videoDetails?.lengthSeconds * 1000 || null,
         };
       }
-      // if ciphered, skip (would need decipher)
-    } catch {}
+      console.warn(`getAudioUrl ${context.client.clientName} best has no url, has cipher=${!!best.signatureCipher}`);
+    } catch (e) {
+      console.warn(`getAudioUrl ${context.client.clientName} exception`, e.message);
+    }
   }
+  console.warn(`getAudioUrl all clients failed for ${videoId}`);
   return null;
 }
 
