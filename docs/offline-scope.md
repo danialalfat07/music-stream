@@ -31,7 +31,20 @@
 - Lyrics `LRCLIB` LRC (30 baris sample), plain fallback, simpan `raw_synced+raw_plain+lines[]` (`public/app.js:1824`).
 - Artwork `w544` `~77KB` `image/jpeg` cacheable 1d, must be cached for offline.
 
-## 6. Test Matrix Reference
+## 6. Platform Support
+
+- **Android app (Capacitor WebView + Brave):** online ✅ + offline ✅ — `shouldInterceptRequest` Android-only, native Filesystem `files/offline-beta/`, SQLite `dnialify-offline-beta`, cap 500MB.
+- **Desktop browser:** online ✅, offline ❌ — no `shouldInterceptRequest`, no native Filesystem. Tombol `Save Offline` hidden/disabled, filter `Offline` hidden.
+- **Mobile browser:** online ✅, offline ❌ — same as desktop.
+- Alasan: intercept Android-only. Desktop offline (SW + OPFS) adalah **Phase 6**, jangan campur Phase 1.
+
+## 7. UI Platform Detection
+
+- Detect: `window.Capacitor?.isNativePlatform?.()` atau `!!window.NativePlayback` (`MainActivity.java:92`). Helper `public/app.js` `isAndroidNative()`.
+- Tombol `Save Offline` di titik tiga: `hidden` atau `disabled + label "Hanya di app Android"` jika bukan Android native.
+- Filter `Offline` di library: same — cuma muncul di Android.
+
+## 8. Test Matrix Reference
 
 - Chrome desktop, Chrome Android WebView, Firefox, Safari iOS.
 - Full cache airplane → play pass, partial → graceful, corrupt → re-download, expire → re-resolve.

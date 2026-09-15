@@ -1,6 +1,18 @@
 const APP_VERSION = "2.1.0-beta.1";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
+
+// Offline Android-only detection (detect sebelum UI offline dibangun)
+function isAndroidNative() {
+  try {
+    if (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function') return window.Capacitor.isNativePlatform();
+    if (window.NativePlayback) return true;
+  } catch {}
+  return false;
+}
+window.isAndroidNative = isAndroidNative;
+// Feature flag: offline intercept disabled sampai Phase 1 approve (rollback tanpa revert)
+window.__OFFLINE_FLAGS = { CACHE_INTERCEPT: false };
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
