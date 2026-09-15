@@ -3813,8 +3813,7 @@ function backupLibrary() {
     stats: Library.stats,
     settings: {
       theme: store.get('theme', 'dark'),
-        volume_level: Player.volumeLevel,
-        extra_volume: Player.volumeLevel > 100,
+       extra_volume: Player.extraVolume,
       sb_on: store.get('sb_on', true),
       yt_hq: store.get('yt_hq', false),
     },
@@ -3872,13 +3871,10 @@ function restoreLibrary() {
             );
             updateThemeIcon();
           }
-          if ([100, 200, 300].includes(Number(d.settings.volume_level))) {
-            store.set('volume_level', Number(d.settings.volume_level));
-            setPlaybackVolume(Number(d.settings.volume_level));
-          } else if (typeof d.settings.extra_volume === 'boolean') {
-            const level = d.settings.extra_volume ? 200 : 100;
-            store.set('volume_level', level);
-            setPlaybackVolume(level);
+          if (typeof d.settings.extra_volume === 'boolean') {
+            Player.extraVolume = d.settings.extra_volume;
+            store.set('extra_volume', Player.extraVolume);
+            setPlaybackVolume();
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -4410,7 +4406,7 @@ function openSettingsModal(tab = 'about') {
   }
   const extraVol = $('#set-volume-extra');
   if (extraVol) {
-    updateVolumeControls(Player.volumeLevel);
+    updateVolumeControls(Player.extraVolume);
     extraVol.onclick = toggleExtraVolume;
   }
   const fl = $('#set-float');
@@ -5721,7 +5717,7 @@ updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
 if (!window.matchMedia('(max-width: 860px)').matches) enableDrag($('#float-widget'));
-updateVolumeControls(Player.volumeLevel);
+updateVolumeControls(Player.extraVolume);
 document.addEventListener(
   'error',
   (e) => {
