@@ -11,7 +11,9 @@ describe('server', ()=>{
   it('volume has three levels without changing playback entrypoints', ()=> {
     assert.match(frontend, /volumeLevel/);
     assert.match(frontend, /100, 200, 300/);
-    assert.match(frontend, /volumeBoost\(level\)/);
+    assert.match(frontend, /VOL_LEVELS/);
+    assert.match(frontend, /0, 50, 100, 200, 300/);
+    assert.match(frontend, /volumeBoost\(/);
     assert.match(frontend, /function startCurrent\(\)/);
     assert.match(frontend, /function playViaAudio\(song\)/);
     assert.doesNotMatch(backend, /offline|video-stream/);

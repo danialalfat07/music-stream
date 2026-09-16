@@ -1,4 +1,4 @@
-const APP_VERSION = "2.1.1";
+const APP_VERSION = "2.1.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -541,6 +541,9 @@ function setupVersionChecks() {
   });
 }
 
+const VOL_LEVELS = [0, 50, 100, 200, 300];
+function volIndexOf(l) { const i = VOL_LEVELS.indexOf(Number(l)); return i >= 0 ? i : 2; }
+function volLevelAt(i) { return VOL_LEVELS[Math.max(0, Math.min(VOL_LEVELS.length - 1, i))]; }
 /* ================= player state ================= */
 const Player = {
   yt: null,
@@ -573,33 +576,52 @@ const Player = {
   nativeUrl: null,
   wasPlaying: false,
   native: false,
-  volumeLevel: [100, 200, 300].includes(store.get('volume_level', 100)) ? store.get('volume_level', 100) : (store.get('extra_volume', false) ? 200 : 100),
+  volumeLevel: VOL_LEVELS.includes(Number(store.get('volume_level', 100))) ? Number(store.get('volume_level', 100)) : (store.get('extra_volume', false) ? 200 : 100),
   get current() {
     return this.queue[this.index] || null;
   },
 };
 
 function updateVolumeControls(value) {
-  const level = [100, 200, 300].includes(Number(value)) ? Number(value) : 100;
-  const button = $('#set-volume-extra');
-  const hint = $('#set-volume-hint');
-  if (button) {
-    button.querySelector('span').textContent = `${level}%`;
-    button.classList.toggle('primary', level > 100);
+  const lv = VOL_LEVELS.includes(Number(value)) ? Number(value) : 100;
+  const idx = volIndexOf(lv);
+  const pct = (idx / (VOL_LEVELS.length - 1)) * 100;
+  const slider = document.getElementById('vol-slider');
+  const fill = document.getElementById('vol-fill');
+  const thumb = document.getElementById('vol-thumb');
+  const valEl = document.getElementById('vol-value');
+  const hint = document.getElementById('set-volume-hint');
+  if (slider) slider.setAttribute('aria-valuenow', String(lv));
+  if (fill) fill.style.width = pct + '%';
+  if (thumb) thumb.style.left = pct + '%';
+  if (valEl) valEl.textContent = lv + '%';
+  document.querySelectorAll('.vol-dot').forEach((d) => {
+    const dl = Number(d.dataset.level);
+    d.classList.toggle('active', dl === lv);
+    d.setAttribute('aria-pressed', dl === lv ? 'true' : 'false');
+  });
+  document.querySelectorAll('.vol-labels span').forEach((s) => {
+    s.classList.toggle('active', Number(s.dataset.level) === lv);
+  });
+  if (hint) hint.textContent = lv === 0 ? 'Muted' : lv === 50 ? 'Pelan — 50%' : lv === 100 ? 'Normal — 100%' : lv === 200 ? 'Loud — 200%' : 'Max — 300%';
+  const legacyBtn = document.getElementById('set-volume-extra');
+  if (legacyBtn) {
+    const span = legacyBtn.querySelector('span');
+    if (span) span.textContent = lv + '%';
+    legacyBtn.classList.toggle('primary', lv > 100);
   }
-  if (hint) hint.textContent = 'Pilih 100%, 200%, atau 300%';
 }
 
 function setPlaybackVolume(level = Player.volumeLevel) {
-  level = [100, 200, 300].includes(Number(level)) ? Number(level) : 100;
-  Player.volumeLevel = level;
-  const gain = level / 100;
-  updateVolumeControls(level);
+  const lv = VOL_LEVELS.includes(Number(level)) ? Number(level) : 100;
+  Player.volumeLevel = lv;
+  const gain = lv / 100;
+  updateVolumeControls(lv);
   const nativeBoost = !!window.NativePlayback?.volumeBoost;
   if (nativeBoost) {
-    try { window.NativePlayback.volumeBoost(level); } catch {}
+    try { window.NativePlayback.volumeBoost(lv); } catch {}
   } else if (window.NativePlayback?.extraVolume) {
-    try { window.NativePlayback.extraVolume(level > 100); } catch {}
+    try { window.NativePlayback.extraVolume(lv > 100); } catch {}
   }
   if (Player.audio) {
     try {
@@ -610,7 +632,17 @@ function setPlaybackVolume(level = Player.volumeLevel) {
         source.connect(Player.audioGain).connect(Player.audioContext.destination);
       }
       if (nativeBoost) {
-        Player.audio.volume = 1;
+        if (lv <= 100) {
+          if (Player.audioGain) {
+            Player.audioGain.gain.value = gain;
+            Player.audio.volume = 1;
+          } else {
+            Player.audio.volume = gain;
+          }
+        } else {
+          Player.audio.volume = 1;
+          if (Player.audioGain) Player.audioGain.gain.value = 1;
+        }
       } else if (Player.audioGain) {
         Player.audioGain.gain.value = gain;
         Player.audio.volume = 1;
@@ -619,19 +651,94 @@ function setPlaybackVolume(level = Player.volumeLevel) {
       }
       if (Player.audioContext?.state === 'suspended') Player.audioContext.resume().catch(() => {});
     } catch {
-      Player.audio.volume = Math.min(1, gain);
+      Player.audio.volume = Math.min(1, Math.max(0, gain));
     }
   }
-  if (Player.native && window.NativePlayback) window.NativePlayback.volume(1);
-  if (Player.yt && Player.ready) Player.yt.setVolume(100);
+  if (Player.native && window.NativePlayback) try { window.NativePlayback.volume(lv === 0 ? 0 : 1); } catch {}
+  if (Player.yt && Player.ready) try { Player.yt.setVolume(Math.min(100, lv)); } catch {}
+}
+
+function setVolumeLevel(level) {
+  const lv = VOL_LEVELS.includes(Number(level)) ? Number(level) : 100;
+  Player.volumeLevel = lv;
+  store.set('volume_level', lv);
+  try { store.set('extra_volume', lv > 100); } catch {}
+  setPlaybackVolume(lv);
+  toast(`Volume ${lv}%`);
 }
 
 function toggleExtraVolume() {
-  const next = Player.volumeLevel === 100 ? 200 : Player.volumeLevel === 200 ? 300 : 100;
-  Player.volumeLevel = next;
-  store.set('volume_level', next);
-  setPlaybackVolume(next);
-  toast(`Volume ${next}%`);
+  const idx = volIndexOf(Player.volumeLevel);
+  const next = volLevelAt((idx + 1) % VOL_LEVELS.length);
+  setVolumeLevel(next);
+}
+
+function initVolumeSlider() {
+  const slider = document.getElementById('vol-slider');
+  if (!slider || slider._volBound) return;
+  slider._volBound = true;
+  const posToLevel = (clientX) => {
+    const rect = slider.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const idx = Math.round(pct * (VOL_LEVELS.length - 1));
+    return volLevelAt(idx);
+  };
+  slider.querySelectorAll('.vol-dot').forEach((dot) => {
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setVolumeLevel(Number(dot.dataset.level));
+    });
+  });
+  slider.addEventListener('click', (e) => {
+    if (e.target.closest('.vol-dot')) return;
+    setVolumeLevel(posToLevel(e.clientX));
+  });
+  let dragging = false;
+  let activeId = null;
+  const onMove = (e) => {
+    if (!dragging || e.pointerId !== activeId) return;
+    e.preventDefault();
+    const lv = posToLevel(e.clientX);
+    if (lv !== Player.volumeLevel) {
+      Player.volumeLevel = lv;
+      store.set('volume_level', lv);
+      setPlaybackVolume(lv);
+    }
+  };
+  const onUp = (e) => {
+    if (e.pointerId !== activeId) return;
+    dragging = false;
+    activeId = null;
+    slider.classList.remove('dragging');
+    try { slider.releasePointerCapture(e.pointerId); } catch {}
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    setVolumeLevel(posToLevel(e.clientX));
+  };
+  slider.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    dragging = true;
+    activeId = e.pointerId;
+    slider.classList.add('dragging');
+    try { slider.setPointerCapture(e.pointerId); } catch {}
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    const lv = posToLevel(e.clientX);
+    Player.volumeLevel = lv;
+    store.set('volume_level', lv);
+    setPlaybackVolume(lv);
+    e.preventDefault();
+  });
+  slider.addEventListener('keydown', (e) => {
+    let idx = volIndexOf(Player.volumeLevel);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); idx = Math.min(VOL_LEVELS.length - 1, idx + 1); setVolumeLevel(volLevelAt(idx)); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); idx = Math.max(0, idx - 1); setVolumeLevel(volLevelAt(idx)); }
+    else if (e.key === 'Home') { e.preventDefault(); setVolumeLevel(0); }
+    else if (e.key === 'End') { e.preventDefault(); setVolumeLevel(300); }
+  });
 }
 
 function initAudio(){
@@ -3859,7 +3966,8 @@ function backupLibrary() {
     stats: Library.stats,
     settings: {
       theme: store.get('theme', 'dark'),
-       extra_volume: Player.extraVolume,
+      volume_level: Player.volumeLevel,
+      extra_volume: Player.volumeLevel > 100,
       sb_on: store.get('sb_on', true),
       yt_hq: store.get('yt_hq', false),
     },
@@ -3917,10 +4025,10 @@ function restoreLibrary() {
             );
             updateThemeIcon();
           }
-          if (typeof d.settings.extra_volume === 'boolean') {
-            Player.extraVolume = d.settings.extra_volume;
-            store.set('extra_volume', Player.extraVolume);
-            setPlaybackVolume();
+          if (VOL_LEVELS.includes(Number(d.settings.volume_level))) {
+            setVolumeLevel(Number(d.settings.volume_level));
+          } else if (typeof d.settings.extra_volume === 'boolean') {
+            setVolumeLevel(d.settings.extra_volume ? 200 : 100);
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -4450,11 +4558,10 @@ function openSettingsModal(tab = 'about') {
       spBtn.textContent = Player.speed + '×';
     };
   }
-  const extraVol = $('#set-volume-extra');
-  if (extraVol) {
-    updateVolumeControls(Player.extraVolume);
-    extraVol.onclick = toggleExtraVolume;
-  }
+  initVolumeSlider();
+  updateVolumeControls(Player.volumeLevel);
+  const extraVol = document.getElementById('set-volume-extra');
+  if (extraVol) extraVol.onclick = toggleExtraVolume;
   const fl = $('#set-float');
   if (fl) {
     fl.textContent = Player.floatOn ? 'On' : 'Off';
@@ -5763,7 +5870,7 @@ updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
 if (!window.matchMedia('(max-width: 860px)').matches) enableDrag($('#float-widget'));
-updateVolumeControls(Player.extraVolume);
+initVolumeSlider(); updateVolumeControls(Player.volumeLevel);
 document.addEventListener(
   'error',
   (e) => {
