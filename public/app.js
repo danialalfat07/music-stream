@@ -1,4 +1,4 @@
-const APP_VERSION = "2.1.3";
+const APP_VERSION = "2.1.4";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -431,8 +431,10 @@ async function applyVersionUpdate(latest) {
     console.log('[beta] soft notify new version', latest);
     return;
   }
-  if (_pendingVersionUpdate) return;
-  _pendingVersionUpdate = latest || APP_VERSION;
+  const ver = latest || APP_VERSION;
+  // allow retry after 4s if previous attempt stuck (jangan block pencet update terus)
+  if (_pendingVersionUpdate && _pendingVersionUpdate.ver === ver && Date.now() - _pendingVersionUpdate.at < 4000) return;
+  _pendingVersionUpdate = { ver, at: Date.now() };
   try {
     await clearWebsiteCacheOnly();
   } catch {}
@@ -447,7 +449,7 @@ async function applyVersionUpdate(latest) {
       }));
       if (navigator.serviceWorker.controller) {
         await new Promise((resolve) => {
-          const timer = setTimeout(resolve, 5000);
+          const timer = setTimeout(resolve, 2500);
           navigator.serviceWorker.addEventListener('controllerchange', () => {
             controllerChanged = true;
             clearTimeout(timer);
@@ -460,8 +462,17 @@ async function applyVersionUpdate(latest) {
   try {
     if (latest) localStorage.setItem('dnialify_version', latest);
   } catch {}
-  toast('Updating to v' + (latest || APP_VERSION) + '…');
-  setTimeout(() => location.reload(), controllerChanged ? 150 : 600);
+  toast('Updating to v' + ver + '…');
+  const doHardReload = () => {
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('v', Date.now().toString());
+      location.replace(u.toString());
+    } catch { location.reload(); }
+  };
+  setTimeout(doHardReload, controllerChanged ? 150 : 600);
+  // reset pending biar bisa retry kalau reload masih stale
+  setTimeout(() => { if (_pendingVersionUpdate && _pendingVersionUpdate.ver === ver) _pendingVersionUpdate = null; }, 4000);
 }
 
 async function checkAppVersion({ silent = true, force = false } = {}) {
