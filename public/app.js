@@ -1,4 +1,4 @@
-const APP_VERSION = "2.1.2";
+const APP_VERSION = "2.1.3";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
