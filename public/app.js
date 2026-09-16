@@ -1,4 +1,4 @@
-const APP_VERSION = "2.1.6";
+const APP_VERSION = "2.1.7";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -437,6 +437,9 @@ async function applyVersionUpdate(latest) {
   _pendingVersionUpdate = { ver, at: Date.now() };
   try {
     await clearWebsiteCacheOnly();
+    // force network fetch for versioned assets biar tidak stale 2.1.5
+    try { await fetch('/app.js', { cache: 'reload', cache: 'no-store' }); } catch {}
+    try { await fetch('/index.html', { cache: 'reload', cache: 'no-store' }); } catch {}
   } catch {}
   let controllerChanged = false;
   try {
@@ -457,6 +460,13 @@ async function applyVersionUpdate(latest) {
           }, { once: true });
         });
       }
+      // if still not changed after 2.5s, unregister stale SW as last resort biar tidak serve 2.1.5 terus
+      if (!controllerChanged) {
+        try {
+          const regs2 = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs2.map(r => r.unregister().catch(()=>{})));
+        } catch {}
+      }
     }
   } catch {}
   try {
@@ -467,8 +477,10 @@ async function applyVersionUpdate(latest) {
     try {
       const u = new URL(location.href);
       u.searchParams.set('v', Date.now().toString());
+      // bust both HTML and JS
+      u.searchParams.set('bust', Date.now().toString());
       location.replace(u.toString());
-    } catch { location.reload(); }
+    } catch { location.reload(true); }
   };
   setTimeout(doHardReload, controllerChanged ? 150 : 600);
   // reset pending biar bisa retry kalau reload masih stale
