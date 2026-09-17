@@ -1526,11 +1526,11 @@ html[data-theme="light"] .modal-card .pl-form-input {
 .vol-track{position:absolute;left:6px;right:6px;top:50%;height:4px;background:var(--bar-bg);border-radius:2px;transform:translateY(-50%);border:1px solid color-mix(in srgb,var(--text) 6%,transparent)}
 .vol-fill{position:absolute;left:6px;right:6px;top:50%;height:4px;background:transparent;border-radius:2px;transform:translateY(-50%);pointer-events:none;display:none}
 .vol-dots{position:absolute;left:6px;right:6px;top:50%;display:flex;justify-content:space-between;align-items:center;transform:translateY(-50%);pointer-events:none;padding:0}
-.vol-dot{width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--muted);box-shadow:none;transition:background .15s,border-color .15s;pointer-events:auto;cursor:pointer;padding:0;flex-shrink:0;transform:none}
+.vol-dot{width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--muted);box-shadow:none;transition:none;pointer-events:auto;cursor:pointer;padding:0;flex-shrink:0;transform:none}
 .vol-dot.active{background:var(--accent-bright);border-color:var(--accent-bright);box-shadow:none;transform:none}
 .vol-dot:hover{border-color:var(--text);background:var(--card-hover);transform:none}
 .vol-dot.active:hover{transform:none}
-.vol-thumb{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:var(--accent-bright);border:none;box-shadow:none;transform:translate(-50%,-50%);transition:none;pointer-events:none;z-index:2;left:calc(6px + var(--pct,0.5) * (100% - 12px))}
+.vol-thumb{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:var(--accent-bright);border:none;box-shadow:none;transform:translate(-50%,-50%);transition:none;pointer-events:none;z-index:2;left:calc(12px + var(--pct,0.5) * (100% - 24px))}
 .vol-labels{display:grid;grid-template-columns:repeat(5,1fr);width:100%;font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.01em;padding:0;gap:0;line-height:1}
 .vol-labels span{text-align:center;transition:color .15s}
 .vol-labels span.active{color:var(--accent-bright)}
