@@ -1,4 +1,4 @@
-const APP_VERSION = "2.2.2";
+const APP_VERSION = "2.2.3";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -613,7 +613,6 @@ function updateVolumeControls(value) {
   const fill = document.getElementById('vol-fill');
   const thumb = document.getElementById('vol-thumb');
   const valEl = document.getElementById('vol-value');
-  const hint = document.getElementById('set-volume-hint');
   if (slider) {
     slider.setAttribute('aria-valuenow', String(lv));
     slider.style.setProperty('--pct', String(pct / 100));
@@ -629,7 +628,6 @@ function updateVolumeControls(value) {
   document.querySelectorAll('.vol-labels span').forEach((s) => {
     s.classList.toggle('active', Number(s.dataset.level) === lv);
   });
-  if (hint) hint.textContent = 'Geser titik — loncat 5 level';
   const legacyBtn = document.getElementById('set-volume-extra');
   if (legacyBtn) {
     const span = legacyBtn.querySelector('span');
