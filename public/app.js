@@ -1,4 +1,4 @@
-const APP_VERSION = "2.1.8";
+const APP_VERSION = "2.1.9";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -614,9 +614,12 @@ function updateVolumeControls(value) {
   const thumb = document.getElementById('vol-thumb');
   const valEl = document.getElementById('vol-value');
   const hint = document.getElementById('set-volume-hint');
-  if (slider) slider.setAttribute('aria-valuenow', String(lv));
+  if (slider) {
+    slider.setAttribute('aria-valuenow', String(lv));
+    slider.style.setProperty('--pct', String(pct / 100));
+  }
   if (fill) fill.style.width = pct + '%';
-  if (thumb) thumb.style.left = pct + '%';
+  if (thumb) thumb.style.setProperty('--pct', String(pct / 100));
   if (valEl) valEl.textContent = lv + '%';
   document.querySelectorAll('.vol-dot').forEach((d) => {
     const dl = Number(d.dataset.level);
