@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.2.3" />
+<meta name="app-version" content="2.2.4" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -267,7 +267,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.2.3 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.2.4 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -294,7 +294,7 @@ try {
           <div class="settings-row"><span class="s-label">Quality</span><button id="set-quality" class="pill-btn"><span>YouTube Music</span></button></div>
           <div class="settings-row"><span class="s-label">Playback speed</span><button id="set-speed" class="pill-btn"><span>1×</span></button></div>
           <div class="settings-row vol-row">
-  <div><span class="s-label">Volume</span></div>
+  <div class="vol-label-capsul"><span class="s-label">Volume</span><span id="vol-value" class="vol-value">100%</span></div>
   <div class="vol-slider-wrap">
     <div id="vol-slider" class="vol-slider" role="slider" aria-valuemin="0" aria-valuemax="300" aria-valuenow="100" aria-label="Volume" tabindex="0">
       <div class="vol-track"></div>
@@ -316,11 +316,10 @@ try {
       <span data-level="300">300%</span>
     </div>
   </div>
-  <div class="vol-value" id="vol-value">100%</div>
 </div>
           <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
           <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.2.3</span> · untuk update aplikasi Android download APK baru</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.2.4</span> · untuk update aplikasi Android download APK baru</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
         </div>
         <div data-spane="social" class="s-pane">
@@ -392,7 +391,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.2.3";
+    var VER="2.2.4";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
