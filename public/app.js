@@ -1,4 +1,4 @@
-const APP_VERSION = "2.2.1";
+const APP_VERSION = "2.2.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -629,7 +629,7 @@ function updateVolumeControls(value) {
   document.querySelectorAll('.vol-labels span').forEach((s) => {
     s.classList.toggle('active', Number(s.dataset.level) === lv);
   });
-  if (hint) hint.textContent = lv === 0 ? 'Muted' : lv === 50 ? 'Pelan — 50%' : lv === 100 ? 'Normal — 100%' : lv === 200 ? 'Loud — 200%' : 'Max — 300%';
+  if (hint) hint.textContent = 'Geser titik — loncat 5 level';
   const legacyBtn = document.getElementById('set-volume-extra');
   if (legacyBtn) {
     const span = legacyBtn.querySelector('span');
