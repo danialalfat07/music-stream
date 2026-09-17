@@ -11,12 +11,21 @@ const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
 app.set('trust proxy', 1);
-// static with cache
+// static with no-cache for versioned HTML/JS to prevent 2.1.5 stale loop
 app.use(
   express.static(path.join(__dirname, 'public'), {
-    maxAge: '1d',
+    maxAge: 0,
     etag: true,
     lastModified: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html') || filePath.endsWith('app.js') || filePath.endsWith('sw.js') || filePath.endsWith('styles.css')) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+      }
+    },
   }),
 );
 // basic rate limit: 90 req / 60s per IP for /api
