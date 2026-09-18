@@ -1,10 +1,27 @@
 /* Dnialify Project - Dnialify Music Stream - backend proxy for YouTube Music InnerTube API + LRCLIB lyrics */
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { Readable } = require('stream');
 
 const PKG = (() => { try { return require('./package.json'); } catch { return { version: '1.2.1' }; } })();
+// TEST-ONLY guard: BLOCK_YOUTUBE=1 makes any outbound YouTube/googlevideo fetch fail loudly,
+// proving the local-cache playback path has zero YouTube dependency. Does not alter logic otherwise.
+if (String(process.env.BLOCK_YOUTUBE || '') === '1') {
+  const YT_HOSTS = /(^|\.)(youtube\.com|music\.youtube\.com|googlevideo\.com|youtubei\.googleapis\.com|youtu\.be|ytimg\.com)$/i;
+  const rawFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    try {
+      const host = new URL(typeof input === 'string' ? input : input.url).hostname;
+      if (YT_HOSTS.test(host)) {
+        return Promise.reject(new Error(`BLOCK_YOUTUBE: refused ${host}`));
+      }
+    } catch {}
+    return rawFetch(input, init);
+  };
+  console.warn('BLOCK_YOUTUBE=1: outbound YouTube/googlevideo requests are refused');
+}
 const APP_VERSION_SERVER = PKG.version || '1.2.1';
 const BUILD_CHANNEL = process.env.BUILD_CHANNEL || (String(APP_VERSION_SERVER).includes('-beta') ? 'beta' : 'stable');
 const app = express();
@@ -1167,6 +1184,59 @@ app.get('/api/thumb', async (req, res) => {
   }
 });
 
+// ---- player client selection (env configurable; default keeps legacy behavior) ----
+const PLAYER_CLIENT = String(process.env.YOUTUBE_PLAYER_CLIENT || 'current').toLowerCase();
+const VISIONOS_GAPIS = 'https://youtubei.googleapis.com/youtubei/v1/';
+const VISIONOS_CONTEXT = {
+  client: {
+    clientName: 'VISIONOS',
+    clientVersion: '1.02',
+    deviceModel: 'RealityDevice14,1',
+    osName: 'visionOS',
+    osVersion: '25.6.0.23O471',
+    hl: 'en',
+    gl: 'US',
+  },
+};
+const VISIONOS_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent':
+    'com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)',
+  'X-Goog-Api-Format-Version': '2',
+};
+// cached fresh visitorData (memory/session only; NOT fetched per song)
+let cachedVisitorData = null;
+let visitorFetchedAt = 0;
+async function getVisionOsVisitorData(force = false) {
+  // reuse cached visitorData for a while; force refresh only when LOGIN_REQUIRED retry
+  if (!force && cachedVisitorData && Date.now() - visitorFetchedAt < 60 * 60 * 1000) {
+    return cachedVisitorData;
+  }
+  const res = await fetch(`${VISIONOS_GAPIS}visitor_id?prettyPrint=false`, {
+    method: 'POST',
+    headers: VISIONOS_HEADERS,
+    body: JSON.stringify({ context: VISIONOS_CONTEXT }),
+  });
+  if (!res.ok) throw new Error(`visionos visitor_id HTTP ${res.status}`);
+  const data = await res.json();
+  const vd = data && data.responseContext && data.responseContext.visitorData;
+  if (!vd) throw new Error('visionos could not get visitorData');
+  cachedVisitorData = vd;
+  visitorFetchedAt = Date.now();
+  return vd;
+}
+async function fetchVisionOsPlayer(videoId, visitorData) {
+  const context = JSON.parse(JSON.stringify(VISIONOS_CONTEXT));
+  context.client.visitorData = visitorData;
+  const res = await fetch(`${VISIONOS_GAPIS}player?prettyPrint=false`, {
+    method: 'POST',
+    headers: VISIONOS_HEADERS,
+    body: JSON.stringify({ context, videoId, racyCheckOk: true, contentCheckOk: true }),
+  });
+  if (!res.ok) return { http: res.status };
+  return { data: await res.json() };
+}
+
 // ---- audio stream URL via InnerTube (ANDROID primary, WEB/IOS fallback) ----
 const ANDROID_CONTEXT = {
   client: {
@@ -1201,7 +1271,61 @@ const IOS_HEADERS = {
 };
 
 async function getAudioUrl(videoId) {
-  // Vercel IP diblok untuk ANDROID/IOS di www.youtube.com — coba music.youtube.com + WEB_REMIX juga
+  // VisionOS client (env YOUTUBE_PLAYER_CLIENT=visionos): fresh visitorData + one retry on LOGIN_REQUIRED
+  if (PLAYER_CLIENT === 'visionos') {
+    const visionAttempts = [false, true];
+    for (const forceVisitor of visionAttempts) {
+      let visitorData;
+      try {
+        visitorData = await getVisionOsVisitorData(forceVisitor);
+      } catch (e) {
+        console.warn('getAudioUrl visionos visitorData', e.message);
+        break;
+      }
+      const { http, data } = await fetchVisionOsPlayer(videoId, visitorData);
+      if (http) {
+        console.warn(`getAudioUrl visionos -> HTTP ${http}`);
+        if (forceVisitor) break;
+        continue;
+      }
+      const sd = data && data.streamingData;
+      const ps = data && data.playabilityStatus;
+      if (!sd) {
+        console.warn(`getAudioUrl visionos no streamingData playability=${ps?.status} reason=${ps?.reason}`);
+        if ((ps && ps.status === 'LOGIN_REQUIRED') && !forceVisitor) {
+          console.warn('getAudioUrl visionos LOGIN_REQUIRED -> refreshing visitorData');
+          continue; // retry once with forced fresh visitorData
+        }
+        break;
+      }
+      const formats = [...(sd.adaptiveFormats || []), ...(sd.formats || [])];
+      const audios = formats.filter((f) => f.mimeType && f.mimeType.includes('audio/'));
+      if (!audios.length) break;
+      audios.sort((a, b) => {
+        const aOpus = a.mimeType.includes('opus') ? 1 : 0;
+        const bOpus = b.mimeType.includes('opus') ? 1 : 0;
+        if (aOpus !== bOpus) return bOpus - aOpus;
+        return (b.bitrate || 0) - (a.bitrate || 0);
+      });
+      const best = audios[0];
+      if (best.url) {
+        return {
+          url: best.url,
+          client: 'visionos',
+          mimeType: best.mimeType,
+          bitrate: best.bitrate,
+          itag: best.itag,
+          approxDurationMs: best.approxDurationMs || data.videoDetails?.lengthSeconds * 1000 || null,
+        };
+      }
+      console.warn(`getAudioUrl visionos best has no url, cipher=${!!best.signatureCipher}`);
+      break;
+    }
+    console.warn(`getAudioUrl visionos failed for ${videoId}`);
+    return null;
+  }
+
+  // legacy: Vercel IP diblok untuk ANDROID/IOS di www.youtube.com — coba music.youtube.com + WEB_REMIX juga
   const tryClients = [
     { host: 'https://www.youtube.com', context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
     { host: 'https://www.youtube.com', context: IOS_CONTEXT, headers: IOS_HEADERS },
@@ -1282,17 +1406,217 @@ app.get('/api/audio', async (req, res) => {
   }
 });
 
+// ---- persistent audio cache (Phase 5): <videoId>.webm, atomic .part -> final ----
+const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || path.join(__dirname, 'cache', 'audio');
+const AUDIO_CHUNK = 524288;
+function cacheFilePath(id) {
+  return path.join(AUDIO_CACHE_DIR, `${id}.webm`);
+}
+function cachePartPath(id) {
+  return path.join(AUDIO_CACHE_DIR, `${id}.webm.part`);
+}
+function ensureCacheDir() {
+  fs.mkdirSync(AUDIO_CACHE_DIR, { recursive: true });
+}
+function readFinalCache(id) {
+  // returns { bytes } if a complete final file exists, else null
+  try {
+    const st = fs.statSync(cacheFilePath(id));
+    if (st.isFile() && st.size > 0) return { bytes: st.size };
+  } catch {}
+  return null;
+}
+function hasEbmlMagic(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(4);
+    const n = fs.readSync(fd, buf, 0, 4, 0);
+    fs.closeSync(fd);
+    return n === 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3;
+  } catch {
+    return false;
+  }
+}
+async function downloadToCache(id, url, total, ua) {
+  ensureCacheDir();
+  const part = cachePartPath(id);
+  const final = cacheFilePath(id);
+  try {
+    fs.unlinkSync(part);
+  } catch {}
+  const ws = fs.createWriteStream(part);
+  let received = 0;
+  try {
+    while (received < total) {
+      const end = Math.min(received + AUDIO_CHUNK - 1, total - 1);
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 30000);
+      let r;
+      try {
+        r = await fetch(url, {
+          headers: { Range: `bytes=${received}-${end}`, 'User-Agent': ua },
+          signal: ctl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (r.status !== 206) {
+        const e = new Error(`cache chunk HTTP ${r.status} at ${received}`);
+        e.code = 'CACHE_CHUNK_' + r.status;
+        throw e;
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (!buf.length) throw new Error(`cache empty chunk at ${received}`);
+      await new Promise((resolve, reject) => ws.write(buf, (e) => (e ? reject(e) : resolve())));
+      received += buf.length;
+    }
+  } catch (e) {
+    try {
+      ws.destroy();
+    } catch {}
+    try {
+      fs.unlinkSync(part);
+    } catch {}
+    throw e;
+  }
+  await new Promise((resolve, reject) => ws.end((e) => (e ? reject(e) : resolve())));
+  // validate before atomic finalize: exact size + EBML/WebM magic, else never a valid cache
+  let ok = false;
+  try {
+    ok = fs.statSync(part).size === total && hasEbmlMagic(part);
+  } catch {}
+  if (!ok) {
+    try {
+      fs.unlinkSync(part);
+    } catch {}
+    throw new Error('cache validation failed (size/magic)');
+  }
+  try {
+    fs.unlinkSync(final);
+  } catch {}
+  fs.renameSync(part, final); // atomic finalize
+  return { bytes: total };
+}
+function cacheMetaPath(id) {
+  return path.join(AUDIO_CACHE_DIR, `${id}.json`);
+}
+function readCacheMeta(id) {
+  // sidecar meta only; never affects cache validity
+  try {
+    return JSON.parse(fs.readFileSync(cacheMetaPath(id), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+// Test/support endpoint: ensure <videoId>.webm is cached (download once, then serve from disk)
+app.get('/api/cache-audio', async (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).json({ error: 'bad videoId' });
+  try {
+    const hit = readFinalCache(id);
+    if (hit) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.json({
+        videoId: id,
+        cached: true,
+        bytes: hit.bytes,
+        meta: readCacheMeta(id),
+        file: `${id}.webm`,
+      });
+    }
+    const info = await getAudioUrl(id);
+    if (!info || !info.url) return res.status(404).json({ error: 'no audio url' });
+    let total = 0;
+    try {
+      total = Number(new URL(info.url).searchParams.get('clen')) || 0;
+    } catch {}
+    if (!total) return res.status(502).json({ error: 'no content length' });
+    const ua =
+      info.client === 'visionos' ? VISIONOS_HEADERS['User-Agent'] : ANDROID_HEADERS['User-Agent'];
+    const done = await downloadToCache(id, info.url, total, ua);
+    const meta = {
+      itag: info.itag ?? null,
+      mimeType: info.mimeType ?? null,
+      bitrate: info.bitrate ?? null,
+      client: info.client ?? 'current',
+      bytes: done.bytes,
+      cachedAt: new Date().toISOString(),
+    };
+    try {
+      fs.writeFileSync(cacheMetaPath(id), JSON.stringify(meta));
+    } catch {}
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.json({ videoId: id, cached: false, downloaded: true, bytes: done.bytes, meta, file: `${id}.webm` });
+  } catch (e) {
+    res.status(502).json({ error: String((e && e.message) || e) });
+  }
+});
+
+// ---- local cache playback (Phase 6): serve cached .webm with Range, ZERO YouTube calls ----
+function serveCacheFile(req, res, id) {
+  const file = cacheFilePath(id);
+  let st;
+  try {
+    st = fs.statSync(file);
+    if (!st.isFile() || st.size <= 0) return false;
+  } catch {
+    return false;
+  }
+  const total = st.size;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Type', 'audio/webm');
+  const range = req.headers.range;
+  if (!range) {
+    res.setHeader('Content-Length', String(total));
+    fs.createReadStream(file).pipe(res);
+    return true;
+  }
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+  if (!m) {
+    res.status(416).end();
+    return true;
+  }
+  let start = m[1] === '' ? total - Number(m[2] || 0) : Number(m[1]);
+  let end = m[2] === '' ? total - 1 : Number(m[2]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end >= total || start > end) {
+    res.setHeader('Content-Range', `bytes */${total}`);
+    res.status(416).end();
+    return true;
+  }
+  res.status(206);
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+  res.setHeader('Content-Length', String(end - start + 1));
+  fs.createReadStream(file, { start, end }).pipe(res);
+  return true;
+}
+app.get('/api/local-audio', (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).end();
+  // no cache -> 404; never resolve/download YouTube here
+  if (!serveCacheFile(req, res, id)) return res.status(404).end();
+});
+
 // Stream proxy for TWA background (same-origin, Range 206, no IP mismatch)
 app.get('/api/stream', async (req, res) => {
   const id = String(req.query.videoId || '').trim();
   if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).end();
+  // Phase 7B: cache-first — cached ids are served from local disk, zero YouTube calls
+  if (readFinalCache(id)) {
+    console.log(`stream cache-hit ${id} range=${req.headers.range || 'full'}`);
+    serveCacheFile(req, res, id);
+    return;
+  }
   try {
     const info = await getAudioUrl(id);
     if (!info || !info.url) return res.status(404).end();
     const headers = {};
     if (req.headers.range) headers['Range'] = req.headers.range;
-    // Use ANDROID UA for googlevideo
-    headers['User-Agent'] = ANDROID_HEADERS['User-Agent'];
+    // Use client-appropriate UA for googlevideo
+    headers['User-Agent'] =
+      info.client === 'visionos'
+        ? VISIONOS_HEADERS['User-Agent']
+        : ANDROID_HEADERS['User-Agent'];
     headers['Accept'] = '*/*';
     const upstream = await fetch(info.url, { headers });
     // Forward status and headers

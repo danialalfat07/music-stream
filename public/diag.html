@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diag Player — Dnialify</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111;color:#eee;max-width:720px;margin:0 auto;padding:16px}
+input{width:100%;font-size:16px;padding:10px;margin:6px 0;box-sizing:border-box;background:#222;color:#eee;border:1px solid #444}
+button{font-size:15px;margin:4px 4px 4px 0;padding:10px 16px;cursor:pointer}
+#method{font-size:18px;font-weight:bold;margin:12px 0;padding:10px;background:#1c1c1c;border-left:6px solid #888}
+#meta{font-size:13px;white-space:pre-wrap;background:#1a1a1a;padding:10px;min-height:80px}
+#elog{font-size:12px;background:#151515;padding:8px;height:150px;overflow:auto;white-space:pre-wrap}
+audio{width:100%;margin-top:8px}
+.stat{font-size:14px}
+</style>
+</head>
+<body>
+<h2>Diag Player</h2>
+<input id="vid" value="M7lc1UVf-VE" placeholder="YouTube video ID atau URL" />
+<div>
+<button id="bCheck">Check Cache</button>
+<button id="bPlay">Ensure + Play (cached/local)</button>
+<button id="bDirect">Play Direct Stream</button>
+<button id="bIframe">iFrame Fallback</button>
+<button id="bStop">Stop</button>
+</div>
+<div id="method">● idle</div>
+<div id="meta">videoId: -</div>
+<div class="stat">duration: <span id="dur">?</span> | currentTime: <span id="cur">?</span></div>
+<audio id="a" controls preload="metadata"></audio>
+<iframe id="f" width="100%" height="200" style="display:none" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+<div id="elog"></div>
+<script>
+var $ = function(id){ return document.getElementById(id); };
+var a = $('a'), f = $('f');
+function idFromInput(){
+  var v = $('vid').value.trim();
+  var m = v.match(/[?&]v=([\w-]{6,20})/) || v.match(/youtu\.be\/([\w-]{6,20})/) || v.match(/^([\w-]{6,20})$/);
+  return m ? m[1] : null;
+}
+function elog(m){ var el=$('elog'); el.textContent += new Date().toISOString().substr(11,12)+' '+m+'\n'; el.scrollTop = el.scrollHeight; }
+function setMethod(html, color){ var el=$('method'); el.innerHTML = html; el.style.borderLeftColor = color; }
+function showMeta(o){ $('meta').textContent = JSON.stringify(o, null, 1); }
+function hideIframe(){ f.style.display='none'; f.src='about:blank'; }
+['loadedmetadata','durationchange','canplay','play','playing','pause','waiting','stalled','error','ended'].forEach(function(ev){
+  a.addEventListener(ev, function(){
+    var extra = (ev==='error' && a.error) ? ' code='+a.error.code : '';
+    elog('audio '+ev+' dur='+a.duration+' cur='+a.currentTime+extra);
+    $('dur').textContent = a.duration; $('cur').textContent = a.currentTime;
+  });
+});
+a.addEventListener('timeupdate', function(){ $('dur').textContent = a.duration; $('cur').textContent = a.currentTime; });
+async function api(p){
+  var r = await fetch(p);
+  if(!r.ok) throw new Error('HTTP '+r.status+' '+p);
+  return r.json();
+}
+$('bCheck').onclick = async function(){
+  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  hideIframe();
+  try {
+    var j = await api('/api/cache-audio?videoId='+encodeURIComponent(id));
+    // NOTE: /api/cache-audio downloads on MISS. Use only to observe; prefer Ensure+Play flow.
+    showMeta(j);
+    if(j.cached){ setMethod('● Cached Audio — HIT ('+(j.bytes||'?')+'B)','#4c4'); }
+    else { setMethod('● Cached Audio — MISS, just downloaded ('+(j.bytes||'?')+'B)','#cc4'); }
+    elog('check cached='+j.cached+' bytes='+j.bytes);
+  } catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('check err '+e.message); }
+};
+$('bPlay').onclick = async function(){
+  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  hideIframe();
+  setMethod('● resolving/ensuring cache…','#888');
+  try {
+    var j = await api('/api/cache-audio?videoId='+encodeURIComponent(id));
+    showMeta(j);
+    var m = j.meta||{};
+    var hit = j.cached ? 'HIT' : 'MISS→downloaded';
+    setMethod('● Cached Audio — '+hit+' — WebM/Opus'+(m.itag?' itag '+m.itag:'')+' ('+(j.bytes||'?')+'B)','#4c4');
+    elog('ensure cached='+j.cached+' bytes='+j.bytes);
+    a.src = '/api/local-audio?videoId='+encodeURIComponent(id);
+    await a.play();
+  } catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('play err '+e.message); }
+};
+$('bDirect').onclick = async function(){
+  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  hideIframe();
+  setMethod('● VisionOS Audio — direct stream via /api/stream (uncached path)','#48c');
+  elog('direct stream src set');
+  showMeta({videoId:id, path:'/api/stream', note:'server resolves+proxies; cache-first if cached'});
+  try { a.src = '/api/stream?videoId='+encodeURIComponent(id); await a.play(); }
+  catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('direct err '+e.message); }
+};
+$('bIframe').onclick = function(){
+  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  try{ a.pause(); }catch(e){}
+  a.removeAttribute('src'); a.load();
+  f.style.display='block';
+  f.src = 'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0';
+  setMethod('● iFrame — fallback (youtube-nocookie embed)','#c84');
+  showMeta({videoId:id, path:'youtube-nocookie embed'});
+  elog('iframe fallback set');
+};
+$('bStop').onclick = function(){ try{ a.pause(); a.removeAttribute('src'); a.load(); }catch(e){} hideIframe(); setMethod('● idle','#888'); elog('stopped'); };
+</script>
+</body>
+</html>

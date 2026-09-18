@@ -1,9 +1,11 @@
 {
   "name": "dnialify-music-stream",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "bump": "node scripts/bump.js",
+    "release": "node scripts/release.js",
     "version:bump": "node scripts/bump-version.js",
     "test": "node --test --experimental-test-coverage 2>&1 || echo \"no tests yet\"",
     "lint": "eslint server.js public/app.js",
