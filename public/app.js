@@ -1,4 +1,4 @@
-const APP_VERSION = "2.2.6";
+const APP_VERSION = "2.2.8";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -918,11 +918,13 @@ function initAudio(){
         return;
       }
       if (ev.state === 'ERROR' && Player.nativeActive) {
-        // classified fallback: same track, metadata/lyrics/queue untouched
+        // classified fallback: same track, metadata/lyrics/queue untouched.
+        // BUGFIX 2.2.7: surface the real reason, never fail silently.
         Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
         Player.nativeActive = false;
         try { if (window.NativePlayback && NativePlayback.nativeStop) NativePlayback.nativeStop(); } catch {}
         try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[FALLBACK] reason=' + (ev.reason || '?') + ' action=iFrame videoId=' + Player._nativeFailed); } catch {}
+        try { toast('Native error (' + (ev.reason || '?') + '), trying iFrame…'); } catch {}
         startCurrent();
       }
     } catch {}
@@ -1580,6 +1582,9 @@ const OfflineLib = {
           updatedAt: Date.now(),
         };
       });
+      // BUGFIX 2.2.7: native records are source of truth — prune mirror ghosts
+      // (deleted on native side) so every row is playable, none dead.
+      Object.keys(m).forEach((k) => { if (!seen[k]) delete m[k]; });
       this.save(m);
       return m;
     } catch { return this.map(); }
@@ -1717,13 +1722,30 @@ function startNativeTrack(s, loadId) {
   Player.useAudio = false;
   Player.nativeActive = true;
   Player._nativeFailed = null;
+  // BUGFIX 2.2.7: optimistic reset so playbar starts at 0:00 immediately on click
+  // (engine always starts cached tracks at 0; icon follows on PLAYING event).
+  // Never fake PLAYING: mirror starts at BUFFERING, never a terminal Ready state.
+  Player.native = { state: 'BUFFERING', source: 'CACHED_AUDIO', cur: 0, dur: 0 };
+  try {
+    $('#np-cur').textContent = '0:00';
+    $('#np-range').value = 0;
+    const mc0 = document.getElementById('mini-cur'); if (mc0) mc0.textContent = '0:00';
+    const bf0 = document.getElementById('mini-progress-fill'); if (bf0) bf0.style.width = '0%';
+    const kn0 = document.querySelector('.pb-knob'); if (kn0) kn0.style.left = '0%';
+  } catch {}
+  try { renderPlayButtons(); } catch {}
   try {
     if (window.NativePlayback && NativePlayback.diagLog)
       NativePlayback.diagLog('[ENGINE_SWITCH] from=WEBVIEW to=NATIVE oldYtStopped=' + ytStopped + ' oldAudioStopped=' + audioStopped + ' videoId=' + s.videoId);
+    if (window.NativePlayback && NativePlayback.diagLog)
+      NativePlayback.diagLog('[NATIVE_START] request videoId=' + s.videoId + ' t=' + Date.now());
   } catch {}
   try {
     NativePlayback.nativePlay(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '');
   } catch (e) {
+    // BUGFIX 2.2.7: never fail silently — log the real reason before retry.
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[NATIVE_START] FAIL videoId=' + s.videoId + ' err=' + (e && e.message || e)); } catch {}
+    try { toast('Native start failed: ' + (e && e.message || e)); } catch {}
     Player.nativeActive = false;
     Player._nativeFailed = s.videoId;
     startCurrent();
@@ -2287,8 +2309,12 @@ function progressLoop(ts){
 requestAnimationFrame(progressLoop);
 
 function renderPlayButtons() {
+  // BUGFIX 2.2.7: icon follows ACTUAL native engine state (event mirror),
+  // not the legacy PlaybackService mirror (always false during Engine B).
   let nativePlaying = false;
-  if (Player.native && window.NativePlayback) {
+  if (Player.nativeActive && Player.native) {
+    nativePlaying = Player.native.state === 'PLAYING';
+  } else if (Player.native && window.NativePlayback) {
     try { nativePlaying = window.NativePlayback.isPlaying(); } catch {}
   }
   const actuallyPlaying = nativePlaying || (

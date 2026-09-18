@@ -866,6 +866,12 @@ public final class VisionOsHarness {
         evalMain("location.hash='#/library/offline'", 10000);
         sleep(6000);
         wlog("curUrl", evalMain("location.href", 10000));
+        wlog("bridgeDiag", evalMain(
+                "(function(){try{var n=0;try{n=JSON.parse("
+                        + "NativePlayback.getCachedSongs()||'[]').length;}catch(x){}"
+                        + "return 'hasBridge='+OfflineLib.hasBridge()+' n='+n"
+                        + "+' keys='+Object.keys(OfflineLib.map()).length;}"
+                        + "catch(e){return 'ERR:'+e;}})()", 15000));
         wlog("rows", evalMain("document.querySelectorAll('.off-wrap').length", 10000));
         wlog("doneBadges", evalMain("document.querySelectorAll('.off-done').length", 10000));
         wlog("doneText", evalMain(
@@ -955,6 +961,10 @@ public final class VisionOsHarness {
             wlog("offlinePlay", "playing=" + playing
                     + " googlevideoRequests=" + g + " gapisRequests=" + rr
                     + " state=" + nativeStateStr());
+            wlog("history", evalMain(
+                    "(function(){try{return JSON.stringify((Library.history||[])"
+                            + ".slice(0,3).map(function(h){return h.videoId;}));}"
+                            + "catch(e){return 'ERR:'+e;}})()", 10000));
         } finally {
             VisionOsNet.setBlockNetwork(false);
             NativeAudioEngine.get().stop("web-offline-test");
