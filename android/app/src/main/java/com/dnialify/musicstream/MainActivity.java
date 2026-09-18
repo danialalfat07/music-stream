@@ -927,6 +927,51 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void pause() { PlaybackService.pause(MainActivity.this); }
 
+        // Phase 8 additive bridge: diagnostic log + native stream settings for web UI.
+        @JavascriptInterface
+        public void diagLog(String m) {
+            android.util.Log.d("DnialifyVisionOS", "web " + m);
+        }
+
+        @JavascriptInterface
+        public int getStreamMode() { return StreamSettings.getStreamMode(MainActivity.this); }
+
+        @JavascriptInterface
+        public void setStreamMode(int mode) {
+            StreamSettings.setStreamMode(MainActivity.this, mode);
+            android.util.Log.d("DnialifyVisionOS", "web setStreamMode=" + mode);
+        }
+
+        @JavascriptInterface
+        public boolean isAudioCacheOn() { return StreamSettings.isAudioCacheOn(MainActivity.this); }
+
+        @JavascriptInterface
+        public void setAudioCache(boolean on) {
+            StreamSettings.setAudioCache(MainActivity.this, on);
+            android.util.Log.d("DnialifyVisionOS", "web setAudioCache=" + on);
+        }
+
+        @JavascriptInterface
+        public int getMaxCachedSongs() { return StreamSettings.getMaxCachedSongs(MainActivity.this); }
+        @JavascriptInterface
+        public void setMaxCachedSongs(int v) {
+            StreamSettings.setMaxCachedSongs(MainActivity.this, v);
+            android.util.Log.d("DnialifyVisionOS", "web setMaxCachedSongs=" + v);
+        }
+
+        @JavascriptInterface
+        public void openVisionOsDiag() {
+            try {
+                android.content.Intent i = new android.content.Intent(
+                        MainActivity.this, VisionOsDiagActivity.class);
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                MainActivity.this.startActivity(i);
+                android.util.Log.d("DnialifyVisionOS", "web openVisionOsDiag");
+            } catch (Exception e) {
+                android.util.Log.d("DnialifyVisionOS", "web openVisionOsDiag err " + e);
+            }
+        }
+
         @JavascriptInterface
         public void stop() { PlaybackService.stop(MainActivity.this); }
 
@@ -950,6 +995,168 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void volume(double value) { PlaybackService.volume(MainActivity.this, value); }
+
+        // Phase 8 Engine B command API (WebView -> native). Each logs [NATIVE_CMD].
+        @JavascriptInterface
+        public void nativePlay(String videoId, String title, String artist, String artwork) {
+            android.util.Log.d("DnialifyVisionOS",
+                    "[NATIVE_CMD] play videoId=" + videoId);
+            NativeAudioEngine.get().play(MainActivity.this, videoId, title, artist, artwork);
+        }
+
+        @JavascriptInterface
+        public void nativePause() { NativeAudioEngine.get().pause(); }
+
+        @JavascriptInterface
+        public void nativeResume() { NativeAudioEngine.get().resume(); }
+
+        @JavascriptInterface
+        public void nativeSeek(double seconds) {
+            NativeAudioEngine.get().seek((int) Math.max(0, seconds));
+        }
+
+        @JavascriptInterface
+        public void nativeStop() { NativeAudioEngine.get().stop("web"); }
+
+        @JavascriptInterface
+        public void nativeVolume(double value) {
+            NativeAudioEngine.get().setVolume((float) value);
+        }
+
+        @JavascriptInterface
+        public String nativeState() {
+            try {
+                return NativeAudioEngine.get().getState().toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+
+        // Phase 8 full-song cache API (WebView logical Library <-> native records).
+        @JavascriptInterface
+        public String cacheSong(String metaJson) {
+            try {
+                org.json.JSONObject meta = new org.json.JSONObject(metaJson);
+                String vid = meta.optString("videoId", "");
+                android.util.Log.d("DnialifyVisionOS", "[NATIVE_CMD] cacheSong videoId=" + vid);
+                SongCache.ensureMeta(MainActivity.this, meta);
+                // kick writer when URL known (resolve here, stream-first for UI via nativePlay)
+                new Thread(() -> {
+                    try {
+                        if (SongCache.isComplete(MainActivity.this, vid)) return;
+                        VisionOsResolver.Result r = VisionOsResolver.resolve(vid);
+                        SongCache.download(MainActivity.this, vid, r.url, clenOf(r.url));
+                        SongCache.fetchArtwork(MainActivity.this, vid,
+                                meta.optString("artworkUrl", ""));
+                    } catch (Exception e) {
+                        android.util.Log.d("DnialifyVisionOS",
+                                "[SONG] cacheSong writer FAIL " + e);
+                    }
+                }).start();
+                return "{\"ok\":true}";
+            } catch (Exception e) {
+                return "{\"ok\":false}";
+            }
+        }
+
+        private long clenOf(String url) {
+            try {
+                String q = new java.net.URL(url).getQuery();
+                if (q != null) {
+                    for (String kv : q.split("&")) {
+                        int eq = kv.indexOf('=');
+                        if (eq > 0 && kv.substring(0, eq).equals("clen")) {
+                            return Long.parseLong(java.net.URLDecoder.decode(
+                                    kv.substring(eq + 1), "UTF-8"));
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            return -1;
+        }
+
+        @JavascriptInterface
+        public String getCachedSong(String videoId) {
+            try {
+                org.json.JSONObject r = SongCache.getRecord(MainActivity.this, videoId);
+                return r != null ? r.toString() : "null";
+            } catch (Exception e) {
+                return "null";
+            }
+        }
+
+        @JavascriptInterface
+        public String getCachedSongs() {
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray();
+                for (org.json.JSONObject r : SongCache.listRecords(MainActivity.this)) {
+                    arr.put(r);
+                }
+                return arr.toString();
+            } catch (Exception e) {
+                return "[]";
+            }
+        }
+
+        @JavascriptInterface
+        public String deleteCachedSong(String videoId) {
+            try {
+                android.util.Log.d("DnialifyVisionOS",
+                        "[NATIVE_CMD] deleteCachedSong videoId=" + videoId);
+                return SongCache.delete(MainActivity.this, videoId).toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+
+        @JavascriptInterface
+        public void clearCachedSongs() {
+            try {
+                android.util.Log.d("DnialifyVisionOS", "[NATIVE_CMD] clearCachedSongs");
+                for (org.json.JSONObject r : SongCache.listRecords(MainActivity.this)) {
+                    SongCache.delete(MainActivity.this, r.optString("videoId", ""));
+                }
+                // legacy flat audio without records
+                try {
+                    java.io.File[] fs = VisionOsCache.dir(MainActivity.this).listFiles();
+                    if (fs != null) {
+                        for (java.io.File f : fs) {
+                            if (f.getName().endsWith(".webm")
+                                    || f.getName().endsWith(".part")) f.delete();
+                        }
+                    }
+                } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public void pauseCacheDownload(String videoId) {
+            SongCache.pauseDownload(videoId);
+        }
+
+        @JavascriptInterface
+        public void resumeCacheDownload(String videoId) {
+            android.util.Log.d("DnialifyVisionOS",
+                    "[NATIVE_CMD] resumeCache videoId=" + videoId);
+            new Thread(() -> {
+                try {
+                    if (SongCache.isComplete(MainActivity.this, videoId)) return;
+                    if (SongCache.isDownloading(videoId)) {
+                        android.util.Log.d("DnialifyVisionOS",
+                                "[SONG] resumeCache SKIP already running " + videoId);
+                        return;
+                    }
+                    org.json.JSONObject r =
+                            SongCache.getRecord(MainActivity.this, videoId);
+                    VisionOsResolver.Result res = VisionOsResolver.resolve(videoId);
+                    SongCache.download(MainActivity.this, videoId, res.url,
+                            clenOf(res.url));
+                } catch (Exception e) {
+                    android.util.Log.d("DnialifyVisionOS",
+                            "[SONG] resumeCache FAIL " + e);
+                }
+            }).start();
+        }
 
         @JavascriptInterface
         public void extraVolume(boolean enabled) { setExtraVolume(enabled); }

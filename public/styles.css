@@ -1588,3 +1588,13 @@ body.pip-system .fw-lyric-line { font-size: 12px; color: #8A8A8A !important; opa
 body.pip-system .fw-lyric-line.active { color: #1ED760 !important; font-size: 16px !important; font-weight: 700 !important; opacity: 1 !important; }
 body.pip-system .fw-bar, body.pip-system .fw-controls { opacity: .6; }
 
+
+/* Phase 8 offline rows */
+.off-wrap{margin:6px 0}
+.off-row{width:100%;text-align:left}
+.off-bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:90px;margin-left:auto}
+.off-fill{height:100%;background:#1db954;border-radius:3px}
+.off-pct{font-size:11px;opacity:.8;margin-top:2px}
+.off-done{font-size:11px;color:#1db954;font-weight:700;margin-left:auto;white-space:nowrap}
+.off-actions{margin:2px 0 8px 56px}
+

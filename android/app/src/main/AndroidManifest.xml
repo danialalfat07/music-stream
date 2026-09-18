@@ -15,6 +15,33 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- Phase 8 diag only: native stream settings dialog (no launcher icon). -->
+        <activity
+            android:name=".StreamSettingsActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar" />
+
+        <!-- Phase 8 diag only: staged VisionOS diagnostic screen (no launcher icon). -->
+        <activity
+            android:name=".VisionOsDiagActivity"
+            android:exported="true"
+            android:excludeFromRecents="true" />
+
+        <!-- Phase 8 diag only: Quick Settings tile opens the stream settings dialog. -->
+        <service
+            android:name=".StreamTileService"
+            android:enabled="true"
+            android:exported="false"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Dnialify Stream"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:name=".MainActivity"

@@ -1,4 +1,4 @@
-const APP_VERSION = "2.2.5";
+const APP_VERSION = "2.2.6";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -136,6 +136,11 @@ function closePlayer() {
   try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); _isClosed = true; Player.loadId++; } catch {}
   // force native notif gone — single stop, no extra updateWebViewState that could resurrect
   try {
+    if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
+      try { if (NativePlayback.diagLog) NativePlayback.diagLog('[ENGINE_SWITCH] from=NATIVE to=NONE (close)'); } catch {}
+      NativePlayback.nativeStop();
+      Player.nativeActive = false;
+    }
     if (window.NativePlayback && typeof window.NativePlayback.stop === 'function') window.NativePlayback.stop();
     else if (window.NativePlayback && typeof window.NativePlayback.updateWebViewState === 'function') window.NativePlayback.updateWebViewState("", "", "", false, 0, 0);
   } catch {}
@@ -776,8 +781,154 @@ function initAudio(){
   if (window.NativePlayback) try { window.NativePlayback.arm(); } catch {}
   setPlaybackVolume();
   a.playbackRate = Player.speed;
+  // Playback-method badge (VisionOS Audio / Cached Audio / iFrame / Error / Server Stream).
+  // Derived from the ACTUAL media source, never assumed.
+  window.setPlayMethod = function (m) {
+    try {
+      const t = m || '';
+      ['play-method', 'np-method'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = t ? '● ' + t : '';
+        el.style.display = t ? '' : 'none';
+      });
+    } catch {}
+  };
+  window.playMethodFromSrc = function (src) {
+    const s = String(src || '');
+    if (s.indexOf('googlevideo.com') >= 0) return 'VisionOS Audio';
+    if (s.indexOf('content://') === 0) return 'Cached Audio';
+    if (s.indexOf('/api/') >= 0) return 'Server Stream';
+    return '';
+  };
+  // ADB diag harness: drive/query the PRODUCTION audio element + YT player.
+  // Control-only + event forwarding. Never changes production decisions.
+  window.__vosDiag = function (action, argJson) {
+    const out = { ok: false };
+    try {
+      const a = Player.audio;
+      let p = {};
+      try { p = JSON.parse(argJson || '{}'); } catch {}
+      const dlog = (m) => { try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog(m); } catch {} };
+      const ytState = () => { try { return Player.yt && Player.yt.getPlayerState ? Player.yt.getPlayerState() : -99; } catch { return -98; } };
+      const snap = () => ({
+        cur: a ? a.currentTime : -1, dur: a ? (a.duration || 0) : 0,
+        paused: a ? !!a.paused : true, rs: a ? a.readyState : -1, ns: a ? a.networkState : -1,
+        err: a && a.error ? a.error.code : 0, src: a ? (a.currentSrc || a.src || '') : '',
+        useAudio: !!Player.useAudio, yt: ytState(),
+        vid: Player.current ? (Player.current.videoId || '') : '',
+        method: (() => { try { return document.getElementById('np-method').textContent || ''; } catch { return ''; } })(),
+      });
+      // persistent MEDIA event forwarding (once)
+      if (!window.__vosDiagWired && a) {
+        window.__vosDiagWired = true;
+        ['loadstart', 'loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'pause', 'error', 'ended'].forEach((ev) => {
+          a.addEventListener(ev, () => {
+            try {
+              const ec = a.error ? a.error.code : 0;
+              dlog('[MEDIA] ' + ev + ' cur=' + (a.currentTime || 0).toFixed(1)
+                + ' dur=' + (a.duration || 0) + ' rs=' + a.readyState + ' ns=' + a.networkState
+                + (ev === 'error' ? ' code=' + ec : ''));
+            } catch {}
+          });
+        });
+      }
+      if (action === 'state') { out.ok = true; out.state = snap(); }
+      else if (action === 'visionos-play') {
+        Player._fallbackTried = null;
+        Player.current = { videoId: p.videoId || 'M7lc1UVf-VE', title: p.title || 'DIAG', artist: '', thumbnail: p.thumb || '' };
+        Player.useAudio = true;
+        a.preload = 'auto';
+        try { a.crossOrigin = null; } catch {}
+        a.src = p.url || '';
+        dlog('[PLAY] source=set requestedMethod=VisionOS host=' + (window.__vosHost ? window.__vosHost(p.url) : p.url));
+        try { const r = a.play(); if (r && r.catch) r.catch((e) => dlog('[MEDIA] play rejected ' + e)); } catch (e) { dlog('[MEDIA] play threw ' + e); }
+        out.ok = true; out.state = snap();
+      } else if (action === 'pause') { a.pause(); out.ok = true; out.state = snap(); }
+      else if (action === 'resume') { try { const r = a.play(); if (r && r.catch) r.catch(() => {}); } catch {} out.ok = true; out.state = snap(); }
+      else if (action === 'seek') { a.currentTime = Number(p.seconds || 0); out.ok = true; out.state = snap(); }
+      else if (action === 'stop') { try { a.pause(); } catch {} try { a.removeAttribute('src'); a.load(); } catch {} out.ok = true; out.state = snap(); }
+      else if (action === 'yt-stop') {
+        try {
+          if (Player.yt) { try { Player.yt.pauseVideo(); } catch {} try { Player.yt.stopVideo(); } catch {} }
+          out.ok = true;
+        } catch (e) { out.err = String(e); }
+        out.state = snap();
+      }
+      else if (action === 'iframe-play') {
+        Player.useAudio = false;
+        try { Player.yt.loadVideoById({ videoId: p.videoId || 'M7lc1UVf-VE', suggestedQuality: suggestedQuality() }); Player.yt.playVideo(); out.ok = true; }
+        catch (e) { out.err = String(e); }
+        out.state = snap();
+      } else if (action === 'metadata') {
+        out.ok = true; out.state = snap();
+        out.meta = Player.current ? { title: Player.current.title || '', artist: Player.current.artist || Player.current.subtitle || '', thumb: Player.current.thumbnail || '', videoId: Player.current.videoId || '' } : null;
+      }
+    } catch (e) { out.err = String(e && e.message || e); }
+    return JSON.stringify(out);
+  };
+  window.__vosHost = function (u) {
+    try { return new URL(u).host; } catch { return String(u || '').slice(0, 60); }
+  };
+  // Phase 8 Engine B orchestration: native is the audio engine, WebView owns
+  // logical Player (track/queue/lyrics/metadata). Events come from native.
+  window.__nativeEvent = function (payload) {
+    let ev = null;
+    try { ev = JSON.parse(payload); } catch { return; }
+    if (!ev) return;
+    // cache channel: record mirror + Library UI, never playback state
+    if (ev.channel === 'cache') {
+      try { OfflineLib.onCacheEvent(ev); } catch {}
+      return;
+    }
+    if (ev.engine !== 'NATIVE') return;
+    try {
+      Player.native = {
+        state: ev.state, source: ev.source, cur: Number(ev.currentTime || 0),
+        dur: Number(ev.duration || 0),
+      };
+      const method = ev.source === 'CACHED_AUDIO' ? 'Cached Audio'
+        : ev.source === 'VISIONOS' ? 'VisionOS Audio' : '';
+      if (method && (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING')) {
+        try { window.setPlayMethod(method); } catch {}
+      }
+      // progress UI from native time (source of truth when nativeActive)
+      if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {
+        const cur = Player.native.cur, dur = Player.native.dur;
+        try {
+          $('#np-cur').textContent = fmtTime(cur);
+          if (dur) $('#np-dur').textContent = fmtTime(dur);
+          $('#np-range').value = dur ? Math.round((cur / dur) * 1000) : 0;
+          const mc = document.getElementById('mini-cur'); if (mc) mc.textContent = fmtTime(cur);
+          if (dur) { const md = document.getElementById('mini-dur'); if (md) md.textContent = fmtTime(dur); }
+          const pct = dur ? (cur / dur) * 100 : 0;
+          const bf = document.getElementById('mini-progress-fill'); if (bf) bf.style.width = pct + '%';
+          const kn = document.querySelector('.pb-knob'); if (kn) kn.style.left = pct + '%';
+        } catch {}
+        try { if (!isPreviewing()) updateLyricHighlight(cur); } catch {}
+        try {
+          if ('mediaSession' in navigator && dur)
+            navigator.mediaSession.setPositionState({ duration: dur, playbackRate: 1, position: Math.min(cur, dur) });
+        } catch {}
+        renderPlayButtons();
+      }
+      if (ev.state === 'ENDED' && Player.nativeActive) {
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[NATIVE_STATE] ENDED -> nextTrack'); } catch {}
+        nextTrack(true);
+        return;
+      }
+      if (ev.state === 'ERROR' && Player.nativeActive) {
+        // classified fallback: same track, metadata/lyrics/queue untouched
+        Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
+        Player.nativeActive = false;
+        try { if (window.NativePlayback && NativePlayback.nativeStop) NativePlayback.nativeStop(); } catch {}
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[FALLBACK] reason=' + (ev.reason || '?') + ' action=iFrame videoId=' + Player._nativeFailed); } catch {}
+        startCurrent();
+      }
+    } catch {}
+  };
   a.addEventListener('ended', ()=>{ if (_isClosed) return; if (typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return; nextTrack(true); });
-  a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); });
+  a.addEventListener('play', ()=>{ Player.wasPlaying = true; document.body.classList.remove('paused'); renderPlayButtons(); updateMediaSessionState('playing'); try{ const m = window.playMethodFromSrc(a.currentSrc || a.src); if (m) window.setPlayMethod(m); }catch{} });
   a.addEventListener('pause', ()=>{ if (!Player.native) Player.wasPlaying = false; document.body.classList.add('paused'); renderPlayButtons(); updateMediaSessionState('paused'); });
   a.addEventListener('timeupdate', ()=>{
     if(isPreviewing()) return;
@@ -808,6 +959,7 @@ function initAudio(){
   a.addEventListener('stalled', ()=>{
     if (Player.current && Player.useAudio && a.duration === 0 && a.currentTime === 0 && !a.paused) {
       console.warn('audio stalled 00:00, fallback');
+      try{ window.NativePlayback && NativePlayback.diagLog('[FALLBACK] START reason=STALLED_NO_DATA rs=' + a.readyState + ' ns=' + a.networkState + ' sourceBefore=' + window.__vosHost(a.currentSrc || a.src) + ' action=iFrame'); }catch{}
       Player.useAudio = false;
       const s = Player.current;
       if (Player.ready) { try { Player.yt.loadVideoById({videoId: s.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); toast('Memuat ulang pemutar…'); } catch {} }
@@ -815,8 +967,10 @@ function initAudio(){
   });
   a.addEventListener('error', (e)=>{
     console.warn('audio error', e);
+    try{ window.setPlayMethod('Error'); }catch{}
     // fallback to YT IFrame if audio fails
     if(Player.current){
+      try{ window.NativePlayback && NativePlayback.diagLog('[FALLBACK] START reason=MEDIA_ERROR code=' + (a.error ? a.error.code : 0) + ' sourceBefore=' + window.__vosHost(a.currentSrc || a.src) + ' action=iFrame'); }catch{}
       toast('Audio fallback to YouTube');
       Player.useAudio = false;
       // try YT
@@ -891,6 +1045,7 @@ async function playViaAudio(song){
   if(!Player.audio || !song || !song.videoId) return false;
   // Use same-origin stream proxy (Vercel, no IP mismatch, Range 206, TWA bg)
   const streamUrl = `/api/stream?videoId=${encodeURIComponent(song.videoId)}`;
+  try{ window.NativePlayback && NativePlayback.diagLog('[PLAY] requested streamMode=' + (window.NativePlayback.getStreamMode ? window.NativePlayback.getStreamMode() : '?') + ' src=/api/stream videoId=' + song.videoId); }catch{}
   if (Player.native) {
     Player.audioUrl = `${location.origin}${streamUrl}`;
     try { Player.audio.pause(); } catch {}
@@ -936,6 +1091,7 @@ async function playViaAudio(song){
     return true;
   }catch(e){
     console.warn('audio play failed', e);
+    try{ window.NativePlayback && NativePlayback.diagLog('[PLAY] stream FAIL err=' + (e && e.message || e) + ' trying /api/audio'); }catch{}
     // fallback: try direct url via /api/audio
     try{
       const direct = await fetchAudioUrl(song.videoId);
@@ -949,9 +1105,12 @@ async function playViaAudio(song){
         await race2;
         Player.useAudio = true;
         setMediaSessionForAudio(song);
+        try{ window.NativePlayback && NativePlayback.diagLog('[PLAY] direct /api/audio OK'); }catch{}
         return true;
       }
+      try{ window.NativePlayback && NativePlayback.diagLog('[PLAY] direct /api/audio EMPTY action=caller-iFrame'); }catch{}
     }catch{}
+    try{ window.NativePlayback && NativePlayback.diagLog('[PLAY] audio FAIL useAudio=false action=caller-iFrame'); }catch{}
     Player.useAudio = false;
     return false;
   }
@@ -1086,6 +1245,7 @@ window.onYouTubeIframeAPIReady = () => {
           nextTrack(true);
         }
         if (e.data === YT.PlayerState.PLAYING) {
+          try{ window.setPlayMethod('iFrame'); }catch{}
           setTimeout(maybeRetryLyrics, 600);
           applyPlaybackQuality();
           setTimeout(applyPlaybackQuality, 500);
@@ -1384,6 +1544,191 @@ function bindQueueDrag(row) {
   }
 }
 
+/* Phase 8 offline library: logical mirror of native song records (videoId-keyed).
+   Native <id>.song.json is source of truth for bytes/status; this mirror (smw_off)
+   drives Library UI without bridge roundtrips. Lyrics full text stays native;
+   fetched on demand for the playing cached track. */
+const OfflineLib = {
+  map() { try { return store.get('off', {}); } catch { return {}; } },
+  save(m) { try { store.set('off', m); } catch {} },
+  get(videoId) { return this.map()[videoId] || null; },
+  hasBridge() { try { return !!(window.NativePlayback && NativePlayback.getCachedSongs); } catch { return false; } },
+  async syncFromNative() {
+    if (!this.hasBridge()) return this.map();
+    try {
+      const arr = JSON.parse(NativePlayback.getCachedSongs() || '[]');
+      const m = this.map();
+      const seen = {};
+      arr.forEach((r) => {
+        if (!r || !r.videoId) return;
+        seen[r.videoId] = 1;
+        const prev = m[r.videoId] || {};
+        m[r.videoId] = {
+          videoId: r.videoId,
+          title: r.title || prev.title || '',
+          artist: r.artist || prev.artist || '',
+          thumbnail: r.artworkUrl || prev.thumbnail || '',
+          duration: r.duration || prev.duration || 0,
+          cacheStatus: r.cacheStatus || 'QUEUED',
+          downloadPercent: r.downloadPercent || 0,
+          downloadedBytes: r.downloadedBytes || 0,
+          audioSize: r.audioSize || 0,
+          failReason: r.failReason || '',
+          lyricsStatus: r.lyricsStatus || 'PENDING',
+          artworkThumb: r.artworkThumb || '',
+          offlineAvailable: r.cacheStatus === 'COMPLETE',
+          updatedAt: Date.now(),
+        };
+      });
+      this.save(m);
+      return m;
+    } catch { return this.map(); }
+  },
+  cacheSong(song) {
+    if (!song || !song.videoId) return;
+    const meta = {
+      videoId: song.videoId,
+      title: displayTitle(song.title) || song.title || '',
+      artist: song.artist || song.subtitle || '',
+      album: song.album || '',
+      artworkUrl: song.thumbnail || '',
+      duration: song.duration || song.lengthSeconds || 0,
+      source: 'VISIONOS',
+    };
+    // attach timed lyrics when caching the currently playing track (keep timestamps)
+    try {
+      if (Player.current && Player.current.videoId === song.videoId && Player.lyrics) {
+        if (Player.lyrics.synced) { meta.lyrics = Player.lyrics.synced; meta.lyricsFormat = 'lrc'; }
+        else if (Player.lyrics.plain) { meta.lyrics = Player.lyrics.plain; meta.lyricsFormat = 'plain'; }
+      }
+    } catch {}
+    try {
+      NativePlayback.cacheSong(JSON.stringify(meta));
+      toast(`Caching "${meta.title}"…`);
+    } catch { return; }
+    const m = this.map();
+    const prev = m[song.videoId] || {};
+    m[song.videoId] = {
+      videoId: song.videoId, title: meta.title, artist: meta.artist,
+      thumbnail: meta.artworkUrl, duration: meta.duration,
+      cacheStatus: prev.cacheStatus === 'COMPLETE' ? 'COMPLETE' : 'QUEUED',
+      downloadPercent: prev.downloadPercent || 0,
+      downloadedBytes: prev.downloadedBytes || 0, audioSize: prev.audioSize || 0,
+      failReason: '', lyricsStatus: prev.lyricsStatus || 'PENDING',
+      offlineAvailable: prev.cacheStatus === 'COMPLETE',
+      updatedAt: Date.now(),
+    };
+    this.save(m);
+    if ((location.hash || '').startsWith('#/library')) route();
+  },
+  onCacheEvent(ev) {
+    const vid = ev.videoId;
+    if (!vid) return;
+    const m = this.map();
+    const prev = m[vid] || { videoId: vid };
+    m[vid] = {
+      ...prev,
+      videoId: vid,
+      title: ev.title || prev.title || '',
+      artist: ev.artist || prev.artist || '',
+      cacheStatus: ev.status || prev.cacheStatus || 'QUEUED',
+      downloadPercent: Number(ev.percent || 0),
+      downloadedBytes: Number(ev.downloadedBytes || 0),
+      audioSize: Number(ev.totalBytes || prev.audioSize || 0),
+      failReason: ev.reason || '',
+      offlineAvailable: ev.status === 'COMPLETE',
+      updatedAt: Date.now(),
+    };
+    this.save(m);
+    if (ev.event === 'cacheComplete') toast(`Offline ready: ${m[vid].title || vid}`);
+    else if (ev.event === 'cacheError') toast(`Cache failed: ${m[vid].title || vid}`);
+    if ((location.hash || '').startsWith('#/library/offline')) route();
+    try { renderSidebarLibrary(); } catch {}
+  },
+  continueDownload(videoId) {
+    if (!videoId) return;
+    const cur = this.get(videoId);
+    // never duplicate a running job: DOWNLOADING rows carry no button by design,
+    // double-guard here in case of stale mirror
+    if (cur && cur.cacheStatus === 'DOWNLOADING') { toast('Already downloading…'); return; }
+    if (cur && cur.cacheStatus === 'COMPLETE') return;
+    try {
+      if (window.NativePlayback && NativePlayback.resumeCacheDownload) {
+        NativePlayback.resumeCacheDownload(videoId);
+        toast('Resuming download…');
+      } else { toast('Native cache unavailable'); return; }
+    } catch { return; }
+    const m = this.map();
+    if (m[videoId]) {
+      m[videoId] = { ...m[videoId], cacheStatus: 'DOWNLOADING', failReason: '', updatedAt: Date.now() };
+      this.save(m);
+    }
+    if ((location.hash || '').startsWith('#/library/offline')) route();
+  },
+  play(videoId) {    const e = this.get(videoId);
+    if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
+    const song = {
+      videoId: e.videoId, title: e.title, artist: e.artist,
+      subtitle: e.artist, thumbnail: e.thumbnail, duration: e.duration,
+    };
+    Player.queue = [song];
+    Player.index = 0;
+    Player.current = song;
+    Player._playCached = videoId;
+    Player._nativeFailed = null;
+    startCurrent();
+    // lyrics from native record (offline, no /api/lyrics needed when stored)
+    const lid = Player.loadId;
+    (async () => {
+      try {
+        if (!this.hasBridge() || !NativePlayback.getCachedSong) return;
+        const raw = NativePlayback.getCachedSong(videoId);
+        if (!raw || raw === 'null') return;
+        const r = JSON.parse(raw);
+        if (Player.loadId !== lid || !Player.current || Player.current.videoId !== videoId) return;
+        if (r.lyrics) {
+          Player.lyrics = {
+            synced: r.lyricsFormat === 'lrc' ? r.lyrics : null,
+            plain: r.lyricsFormat === 'plain' ? r.lyrics : null,
+            source: 'offline-cache',
+            lines: r.lyricsFormat === 'lrc' ? parseLRC(r.lyrics) : [],
+          };
+          renderLyrics();
+        }
+      } catch {}
+    })();
+  },
+};
+
+// Phase 8 Engine B handoff (top-level: called by startCurrent for cached/VisionOS tracks).
+function startNativeTrack(s, loadId) {
+  // explicit handoff: stop WebView engines first, confirm, then start native
+  let ytStopped = true, audioStopped = true;
+  try { if (Player.yt && Player.ready) { Player.yt.pauseVideo(); try { Player.yt.stopVideo(); } catch {} } } catch { ytStopped = false; }
+  try {
+    if (Player.audio) {
+      Player.audio.pause();
+      Player.audio.removeAttribute('src');
+      try { Player.audio.load(); } catch {}
+      audioStopped = Player.audio.paused;
+    }
+  } catch { audioStopped = false; }
+  try { if (Player.yt && Player.ready) { const st = Player.yt.getPlayerState(); ytStopped = st !== 1; } } catch {}
+  Player.useAudio = false;
+  Player.nativeActive = true;
+  Player._nativeFailed = null;
+  try {
+    if (window.NativePlayback && NativePlayback.diagLog)
+      NativePlayback.diagLog('[ENGINE_SWITCH] from=WEBVIEW to=NATIVE oldYtStopped=' + ytStopped + ' oldAudioStopped=' + audioStopped + ' videoId=' + s.videoId);
+  } catch {}
+  try {
+    NativePlayback.nativePlay(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '');
+  } catch (e) {
+    Player.nativeActive = false;
+    Player._nativeFailed = s.videoId;
+    startCurrent();
+  }
+}
 function startCurrent() {
   if (_isClosed) return;
   Player.cued = false;
@@ -1393,6 +1738,41 @@ function startCurrent() {
   const loadId = ++Player.loadId;
   Player.loadStartedAt = Date.now();
   Player._fallbackTried = null;
+  // Phase 8 Engine B: VisionOS mode -> native engine (WebView = orchestrator only).
+  // Cached COMPLETE always native (never iFrame). Desktop/no-bridge untouched.
+  if (Player._nativeFailed !== s.videoId
+      && window.NativePlayback && NativePlayback.nativePlay && NativePlayback.getStreamMode) {
+    let wantNative = Player._playCached === s.videoId;
+    if (!wantNative) {
+      try { wantNative = NativePlayback.getStreamMode() === 1; } catch {}
+    } else {
+      Player._playCached = null;
+    }
+    if (wantNative) {
+        startNativeTrack(s, loadId);
+        Library.pushHistory(s);
+        Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
+        Player._lyricsRetried = false;
+        Player._lyricsDur = 0;
+        lastLyricIdx = -1;
+        syncFloatLyric('');
+        renderNowPlaying();
+        renderQueue();
+        updateLikeButtons();
+        $('#miniplayer').classList.remove('hidden');
+        document.body.classList.add('has-player');
+        document.title = `${s.title} • Dnialify Music Stream`;
+        applyTint(s.videoId || s.title);
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: displayTitle(s.title) || s.title,
+            artist: s.artist || '',
+            artwork: s.thumbnail ? [{ src: s.thumbnail, sizes: '544x544' }] : [],
+          });
+        }
+        return;
+    }
+  }
   // try audio first (background capable)
   (async () => {
     const audioOk = Player.useAudio && Player.audioReady ? await playViaAudio(s) : false;
@@ -1430,8 +1810,14 @@ function startCurrent() {
           });
           navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
           navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
-          navigator.mediaSession.setActionHandler('play', () => Player.yt && Player.yt.playVideo());
-          navigator.mediaSession.setActionHandler('pause', () => Player.yt && Player.yt.pauseVideo());
+          navigator.mediaSession.setActionHandler('play', () => {
+            if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeResume) { try { NativePlayback.nativeResume(); } catch {} return; }
+            if (Player.yt) Player.yt.playVideo();
+          });
+          navigator.mediaSession.setActionHandler('pause', () => {
+            if (Player.nativeActive && window.NativePlayback && NativePlayback.nativePause) { try { NativePlayback.nativePause(); } catch {} return; }
+            if (Player.yt) Player.yt.pauseVideo();
+          });
         } catch {}
       }
     }
@@ -1530,6 +1916,11 @@ function nextTrack(auto) {
   }
   if(Player.native) { try { window.NativePlayback.pause(); } catch {} }
   else if(Player.audio && !Player.audio.paused) try{ Player.audio.pause(); }catch{}
+  // Phase 8 handoff: never two engines at once
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
+    try { NativePlayback.nativeStop(); } catch {}
+    Player.nativeActive = false;
+  }
   if (Player.repeat === 2 && auto) {
     if(Player.native){ window.NativePlayback.seek(0); window.NativePlayback.play(Player.audioUrl, Player.current.title, Player.current.artist || '', Player.current.thumbnail || ''); return; }
     if(Player.useAudio && Player.audio && Player.audio.src){ Player.audio.currentTime=0; Player.audio.play().catch(()=>{}); return; }
@@ -1566,6 +1957,10 @@ function prevTrack() {
     togglePlay();
     return;
   }
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
+    try { NativePlayback.nativeStop(); } catch {}
+    Player.nativeActive = false;
+  }
   if(Player.useAudio && Player.audio && Player.audio.currentTime > 4){ Player.audio.currentTime=0; return; }
   if (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime() > 4) {
     Player.yt.seekTo(0);
@@ -1578,11 +1973,19 @@ function prevTrack() {
 }
 function togglePlay() {
   if (!Player.current) return;
-  if (Player.cued) {
-    const s = Player.current;
+  if (Player.cued) {    const s = Player.current;
     const hasRadio = Player.queue.some((q, i) => i > Player.index && !q._user);
     startCurrent();
     if (!hasRadio) fetchQueue(s);
+    return;
+  }
+  // Phase 8 Engine B: route transport to native, logical Player unchanged.
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeState) {
+    try {
+      const st = JSON.parse(NativePlayback.nativeState());
+      if (st && st.state === 'PLAYING') NativePlayback.nativePause();
+      else NativePlayback.nativeResume();
+    } catch {}
     return;
   }
   if(Player.native && Player.current) {
@@ -1760,6 +2163,17 @@ function progressLoop(ts){
   requestAnimationFrame(progressLoop);
   if (ts - _rafLast < 220) return;
   _rafLast = ts;
+  // Phase 8 Engine B: native time is source of truth; events already updated UI.
+  if (Player.nativeActive) {
+    const nc = Player.native;
+    if (nc && Player.current) {
+      const nowN = Date.now();
+      if (nc.state === 'PLAYING' && _lastTick)
+        Library.addListenTime(Player.current.videoId, Math.min(2, (nowN - _lastTick) / 1000));
+      _lastTick = nowN;
+    }
+    return;
+  }
   const isAudio = Player.native
     ? !!window.NativePlayback && !!Player.current
     : Player.audio && !Player.audio.paused && Player.useAudio && Player.audioReady && Player.audio.src;
@@ -1818,11 +2232,12 @@ function progressLoop(ts){
     }
     dur = Player.yt.getDuration() || 0;
   }
-  // auto fallback when stuck at 00:00 (no duration, not playing)
-  if (Player.current && Player.loadStartedAt && dur === 0 && cur === 0 && Date.now() - Player.loadStartedAt > 4500) {
+  // auto fallback when stuck at 00:00 (no duration, not playing) — never in native mode
+  if (!Player.nativeActive && Player.current && Player.loadStartedAt && dur === 0 && cur === 0 && Date.now() - Player.loadStartedAt > 4500) {
     if (Player.useAudio && Player._fallbackTried !== Player.current.videoId) {
       Player._fallbackTried = Player.current.videoId;
       console.warn('00:00 stuck → fallback YouTube');
+      try{ window.NativePlayback && NativePlayback.diagLog('[FALLBACK] START reason=STUCK_00_00 sourceBefore=' + window.__vosHost(Player.audio ? (Player.audio.currentSrc || Player.audio.src) : '') + ' action=iFrame'); }catch{}
       Player.useAudio = false;
       toast('Memuat ulang pemutar…');
       if (Player.ready) try { Player.yt.loadVideoById({videoId: Player.current.videoId, suggestedQuality: suggestedQuality()}); Player.yt.playVideo(); } catch {}
@@ -2456,6 +2871,11 @@ function clickDownload(href, name) {
 }
 async function downloadSong(song) {
   if (!song || !song.videoId) return;
+  // Phase 8 native full-song cache (APK only; desktop falls through to MP3 flow)
+  if (window.NativePlayback && NativePlayback.cacheSong) {
+    OfflineLib.cacheSong(song);
+    return;
+  }
   if (activeDownloads.has(song.videoId)) {
     toast('Already downloading this song…');
     return;
@@ -3770,6 +4190,7 @@ function viewLibrary(view, tab) {
     ['playlists', 'Playlists'],
     ['favorites', 'Favorites'],
     ['saved', 'Saved'],
+    ['offline', 'Offline'],
     ['history', 'History'],
     ['stats', 'Stats'],
   ];
@@ -3788,6 +4209,46 @@ function viewLibrary(view, tab) {
           'Tap the heart on any song to save it here.',
           { label: 'Find songs', go: '#/search', ic: 'i-heart-o' },
         );
+  } else if (tab === 'offline') {
+    // Phase 8 offline library: native records mirrored in smw_off (sync paint + async refresh)
+    if (OfflineLib.hasBridge()) {
+      try {
+        OfflineLib.syncFromNative().then(() => {
+          if ((location.hash || '') === '#/library/offline') route();
+        });
+      } catch {}
+    }
+    const m = OfflineLib.map();
+    const items = Object.values(m).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const statusText = (e) => {
+      switch (e.cacheStatus) {
+        case 'COMPLETE': return 'Downloaded · Offline';
+        case 'DOWNLOADING': return `Downloading… ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+        case 'QUEUED': return 'Queued';
+        case 'PAUSED': return `Paused · ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+        case 'FAILED': return `Failed · ${e.failReason || ''}`;
+        default: return e.cacheStatus || 'Queued';
+      }
+    };
+    const actionBtn = (e) => {
+      if (e.cacheStatus === 'PAUSED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↓ Continue Download</span></button>`;
+      if (e.cacheStatus === 'FAILED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↻ Retry Download</span></button>`;
+      return '';
+    };
+    body = items.length
+      ? `<div class="track-list">${items.map((e) => {
+          const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
+          const art = e.artworkThumb || e.thumbnail || '';
+          const badge = e.cacheStatus === 'COMPLETE' ? `<div class="off-done">✓ Downloaded</div>`
+            : `<div class="off-bar"><div class="off-fill" style="width:${pct}%"></div></div><div class="off-pct">${pct.toFixed(0)}%</div>`;
+          const click = e.offlineAvailable ? ` data-offplay="${esc(e.videoId)}"` : '';
+          return `<div class="off-wrap"><button type="button" class="track off-row"${click}>
+            ${coverHTML(art, 'trk')}
+            <span class="tr-meta"><span class="tr-t">${esc(e.title || e.videoId)}</span><br><span class="lr-s">${esc(e.artist || '')} · ${esc(statusText(e))}</span></span>
+            ${badge}
+          </button>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
+        }).join('')}</div>`
+      : emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { ic: 'i-download' });
   } else if (tab === 'history') {
     const h = Library.history;
     body = h.length
@@ -3833,6 +4294,19 @@ function viewLibrary(view, tab) {
   view.innerHTML = `<div class="page-title">Library</div>
     <div class="chip-row">${tabs.map(([id, l]) => `<button class="chip ${tab === id ? 'active' : ''}" onclick="location.hash='#/library/${id}'">${l}</button>`).join('')}</div>${body}`;
   bindItems(view);
+  // Phase 8 offline rows: COMPLETE -> native CACHED_AUDIO, never iFrame
+  $$('[data-offplay]', view).forEach((b) =>
+    b.addEventListener('click', () => {
+      try { OfflineLib.play(b.dataset.offplay); } catch {}
+    }),
+  );
+  // PARTIAL/PAUSED/FAILED -> resume via proven record mechanism (never byte 0)
+  $$('[data-offcont]', view).forEach((b) =>
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      try { OfflineLib.continueDownload(b.dataset.offcont); } catch {}
+    }),
+  );
   const np = $('#btn-newpl');
   if (np) np.addEventListener('click', openCreatePlaylist);
   const im = $('#btn-import');
@@ -4599,6 +5073,58 @@ function openSettingsModal(tab = 'about') {
     };
   }
   const verEl = $('#set-version');
+  // Native-only stream settings (hidden on web; never leaks to production web UI).
+  try {
+    const wrap = $('#set-native-wrap');
+    const NB = window.NativePlayback;
+    if (wrap) wrap.style.display = NB ? '' : 'none';
+    if (NB) {
+      const sBtn = $('#set-stream');
+      const cRow = $('#set-cache-row');
+      const cBtn = $('#set-cache');
+      const mRow = $('#set-max-row');
+      const mBtn = $('#set-max');
+      const dBtn = $('#set-diag');
+      const syncNative = () => {
+        let mode = 0, cache = false, max = 50;
+        try { mode = NB.getStreamMode() | 0; } catch {}
+        try { cache = !!NB.isAudioCacheOn(); } catch {}
+        try { max = NB.getMaxCachedSongs() | 0 || 50; } catch {}
+        if (sBtn) sBtn.querySelector('span').textContent = mode === 1 ? 'VisionOS' : 'iFrame';
+        if (cBtn) {
+          cBtn.querySelector('span').textContent = cache ? 'On' : 'Off';
+          cBtn.classList.toggle('primary', !!cache);
+        }
+        if (mBtn) mBtn.querySelector('span').textContent = String(max);
+        // iFrame -> hide cache rows; VisionOS -> show cache; VisionOS+cache -> show max
+        if (cRow) cRow.style.display = mode === 1 ? '' : 'none';
+        if (mRow) mRow.style.display = mode === 1 && cache ? '' : 'none';
+      };
+      if (sBtn) sBtn.onclick = () => {
+        try {
+          const cur = NB.getStreamMode() | 0;
+          NB.setStreamMode(cur === 1 ? 0 : 1);
+        } catch {}
+        syncNative();
+      };
+      if (cBtn) cBtn.onclick = () => {
+        try { NB.setAudioCache(!NB.isAudioCacheOn()); } catch {}
+        syncNative();
+      };
+      if (mBtn) mBtn.onclick = () => {
+        try {
+          const cur = NB.getMaxCachedSongs() | 0 || 50;
+          NB.setMaxCachedSongs(cur >= 200 ? 5 : cur + 5);
+        } catch {}
+        syncNative();
+      };
+      if (dBtn) dBtn.onclick = () => {
+        try { NB.openVisionOsDiag(); } catch { toast('Diagnostic unavailable'); }
+      };
+      syncNative();
+    }
+  } catch {}
+  if (verEl) verEl.textContent = APP_VERSION;
   if (verEl) verEl.textContent = APP_VERSION;
   const updBtn = $('#set-update');
   const updLabel = $('#set-update-label');
@@ -5118,6 +5644,7 @@ $('#np-artist').addEventListener('click', (e) => {
 let seekDragging = false;
 const range = $('#np-range');
 function npSeekDuration(){
+  if (Player.nativeActive && Player.native && Player.native.dur) return Player.native.dur;
   if (Player.native && window.NativePlayback) try { return window.NativePlayback.duration() || 0; } catch {}
   if (Player.useAudio && Player.audio && Number.isFinite(Player.audio.duration)) return Player.audio.duration || 0;
   if (Player.yt && Player.ready && Player.yt.getDuration) try { return Player.yt.getDuration() || 0; } catch {}
@@ -5126,6 +5653,11 @@ function npSeekDuration(){
 function npDoSeek(frac){
   if (Player.cued || isPreviewing()) return;
   frac = Math.min(1, Math.max(0, frac));
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+    const dur = (Player.native && Player.native.dur) || 0;
+    if (dur) NativePlayback.nativeSeek(frac * dur);
+    return;
+  }
   if (Player.native && window.NativePlayback) {
     const dur = window.NativePlayback.duration() || 0;
     if (dur) window.NativePlayback.seek(frac * dur);

@@ -96,6 +96,63 @@ public class PlaybackService extends Service {
         ContextCompat.startForegroundService(context, intent);
     }
 
+    // Phase 8 Engine B: native-driven notification. While native engine active,
+    // notification mirrors NATIVE state; WebView pushes ignored for playing flag
+    // (web still owns queue/metadata decisions via events).
+    public static void nativeProgress(Context context, String title, String artist,
+            String artwork, boolean playing, long positionMs, long durationMs) {
+        if (instance != null) {
+            if (instance.isStopped) return;
+            if (title != null && !title.isEmpty()) instance.title = title;
+            if (artist != null) instance.artist = artist;
+            if (artwork != null && !artwork.equals(instance.artworkUrl)) {
+                instance.artworkUrl = artwork;
+                instance.loadArtwork(artwork);
+            }
+            instance.dismissedPaused = false;
+            instance.playing = playing;
+            instance.positionMs = Math.max(0, positionMs);
+            if (durationMs > 0) instance.durationMs = durationMs;
+            instance.updateMediaSession();
+            instance.publishNotification();
+            return;
+        }
+        Intent intent = new Intent(context, PlaybackService.class).setAction("nativeProgress")
+                .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
+                .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
+                .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
+        ContextCompat.startForegroundService(context, intent);
+    }
+
+    /** Native engine released (stop/switch to iFrame): clear native-owned state. */
+    public static void nativeReleased(Context context) {
+        if (instance != null) {
+            instance.playing = false;
+            instance.updateMediaSession();
+            return;
+        }
+    }
+
+    /** Phase 8 harness: one-line media-session truth for ADB. */
+    public static String diagSession() {
+        try {
+            if (instance == null || instance.mediaSession == null) return "nosession";
+            android.support.v4.media.session.PlaybackStateCompat ps =
+                    instance.mediaSession.getController().getPlaybackState();
+            android.support.v4.media.MediaMetadataCompat md =
+                    instance.mediaSession.getController().getMetadata();
+            int st = ps != null ? ps.getState() : -1;
+            long pos = ps != null ? ps.getPosition() : -1;
+            String t = md != null ? md.getString(
+                    android.support.v4.media.MediaMetadataCompat.METADATA_KEY_TITLE) : "?";
+            String a = md != null ? md.getString(
+                    android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST) : "?";
+            return "state=" + st + " posMs=" + pos + " title=" + t + " artist=" + a;
+        } catch (Exception e) {
+            return "err=" + e;
+        }
+    }
+
     // Kept for existing JS bridge callers. Playback itself remains WebView-owned.
     public static void play(Context context, String url, String title, String artist, String artwork) {
         updateNotificationStatic(context, title, artist);
@@ -331,6 +388,22 @@ public class PlaybackService extends Service {
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
+        else if ("nativeProgress".equals(action)) {
+            if (isStopped) return START_NOT_STICKY;
+            String t = intent.getStringExtra(EXTRA_TITLE);
+            String ar = intent.getStringExtra(EXTRA_ARTIST);
+            String aw = intent.getStringExtra(EXTRA_ARTWORK);
+            if (t != null && !t.isEmpty()) title = t;
+            if (ar != null) artist = ar;
+            if (aw != null && !aw.equals(artworkUrl)) { artworkUrl = aw; loadArtwork(aw); }
+            dismissedPaused = false;
+            playing = intent.getBooleanExtra("isPlaying", false);
+            positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
+            long d = intent.getLongExtra("durationMs", 0);
+            if (d > 0) durationMs = d;
+            updateMediaSession();
+            publishNotification();
+        }
         else if ("webViewLyrics".equals(action)) {
             if (isStopped) return START_NOT_STICKY;
             String cur = intent.getStringExtra("current");
@@ -370,10 +443,23 @@ public class PlaybackService extends Service {
             if (nextTitle != null) title = nextTitle;
             if (nextArtist != null) artist = nextArtist;
             publishNotification();
-        } else if ("prev".equals(action)) sendToWebView("if(window.prevTrack) prevTrack();");
+        }         else if ("prev".equals(action)) sendToWebView("if(window.prevTrack) prevTrack();");
         else if ("next".equals(action)) sendToWebView("if(window.nextTrack) nextTrack(false);");
-        else if ("toggle".equals(action)) sendToWebView("if(window.togglePlay) togglePlay();");
-        else if ("pause".equals(action)) sendToWebView("if(window.togglePlay) togglePlay();");
+        else if ("toggle".equals(action)) {
+            // Engine-aware: native controls itself; web queue otherwise.
+            if (NativeAudioEngine.get().isActive()) {
+                try {
+                    org.json.JSONObject s = NativeAudioEngine.get().getState();
+                    if ("PLAYING".equals(s.optString("state"))) NativeAudioEngine.get().pause();
+                    else NativeAudioEngine.get().resume();
+                } catch (Exception ignored) {}
+            } else sendToWebView("if(window.togglePlay) togglePlay();");
+        }
+        else if ("pause".equals(action)) {
+            if (NativeAudioEngine.get().isActive()) {
+                try { NativeAudioEngine.get().pause(); } catch (Exception ignored) {}
+            } else sendToWebView("if(window.togglePlay) togglePlay();");
+        }
         else if ("seek".equals(action)) {
             double seconds = intent.getDoubleExtra("seconds", 0);
             long pos = (long)(Math.max(0, seconds) * 1000);
