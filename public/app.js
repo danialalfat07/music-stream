@@ -3456,7 +3456,8 @@ async function route() {
   const _cached = cacheGet(hash);
   if (_cached) {
     view.innerHTML = _cached;
-    bindItems(view);
+  bindItems(view);
+  bindEmptyCtas(view);
     view.classList.add('view-enter');
   }
   const runRoute = async () => {
@@ -4236,33 +4237,35 @@ function viewLibrary(view, tab) {
           { label: 'Find songs', go: '#/search', ic: 'i-heart-o' },
         );
   } else if (tab === 'offline') {
-    // Phase 8 offline library: native records mirrored in smw_off (sync paint + async refresh)
-    if (OfflineLib.hasBridge()) {
-      try {
-        OfflineLib.syncFromNative().then(() => {
-          if ((location.hash || '') === '#/library/offline') route();
-        });
-      } catch {}
-    }
-    const m = OfflineLib.map();
-    const items = Object.values(m).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    const statusText = (e) => {
-      switch (e.cacheStatus) {
-        case 'COMPLETE': return 'Downloaded · Offline';
-        case 'DOWNLOADING': return `Downloading… ${Number(e.downloadPercent || 0).toFixed(0)}%`;
-        case 'QUEUED': return 'Queued';
-        case 'PAUSED': return `Paused · ${Number(e.downloadPercent || 0).toFixed(0)}%`;
-        case 'FAILED': return `Failed · ${e.failReason || ''}`;
-        default: return e.cacheStatus || 'Queued';
+    // Phase 8 offline library: native records mirrored in smw_off (sync paint + async refresh).
+    // Blank-screen guard: ANY failure here must fall back to the empty state, never an empty body.
+    try {
+      if (typeof OfflineLib !== 'undefined' && OfflineLib.hasBridge()) {
+        try {
+          OfflineLib.syncFromNative().then(() => {
+            if ((location.hash || '') === '#/library/offline') route();
+          }).catch(() => {});
+        } catch {}
       }
-    };
-    const actionBtn = (e) => {
-      if (e.cacheStatus === 'PAUSED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↓ Continue Download</span></button>`;
-      if (e.cacheStatus === 'FAILED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↻ Retry Download</span></button>`;
-      return '';
-    };
-    body = items.length
-      ? `${trackHeadHTML()}<div class="track-list">${items.map((e) => {
+      const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
+      const items = Object.values(m).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const statusText = (e) => {
+        switch (e.cacheStatus) {
+          case 'COMPLETE': return 'Downloaded · Offline';
+          case 'DOWNLOADING': return `Downloading… ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+          case 'QUEUED': return 'Queued';
+          case 'PAUSED': return `Paused · ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+          case 'FAILED': return `Failed · ${e.failReason || ''}`;
+          default: return e.cacheStatus || 'Queued';
+        }
+      };
+      const actionBtn = (e) => {
+        if (e.cacheStatus === 'PAUSED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↓ Continue Download</span></button>`;
+        if (e.cacheStatus === 'FAILED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↻ Retry Download</span></button>`;
+        return '';
+      };
+      const rowHTML = (e) => {
+        try {
           const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
           const art = e.artworkThumb || e.thumbnail || '';
           const badge = e.cacheStatus === 'COMPLETE' ? `<div class="off-done">✓ Downloaded</div>`
@@ -4275,8 +4278,17 @@ function viewLibrary(view, tab) {
             ${dur}
             ${badge}
           </div>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
-        }).join('')}</div>`
-      : emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { ic: 'i-download' });
+        } catch {
+          return '';
+        }
+      };
+      const rows = items.map(rowHTML).join('');
+      body = rows
+        ? `${trackHeadHTML()}<div class="track-list">${rows}</div>`
+        : emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
+    } catch {
+      body = emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
+    }
   } else if (tab === 'history') {
     const h = Library.history;
     body = h.length
