@@ -1186,6 +1186,7 @@ app.get('/api/thumb', async (req, res) => {
 
 // ---- player client selection (env configurable; default keeps legacy behavior) ----
 const PLAYER_CLIENT = String(process.env.YOUTUBE_PLAYER_CLIENT || 'current').toLowerCase();
+const IS_VERCEL = !!process.env.VERCEL;
 const VISIONOS_GAPIS = 'https://youtubei.googleapis.com/youtubei/v1/';
 const VISIONOS_CONTEXT = {
   client: {
@@ -1270,9 +1271,9 @@ const IOS_HEADERS = {
   'X-Goog-Api-Format-Version': '2',
 };
 
-async function getAudioUrl(videoId) {
-  // VisionOS client (env YOUTUBE_PLAYER_CLIENT=visionos): fresh visitorData + one retry on LOGIN_REQUIRED
-  if (PLAYER_CLIENT === 'visionos') {
+async function getAudioUrl(videoId, clientOverride) {
+  // VisionOS client (env YOUTUBE_PLAYER_CLIENT=visionos or per-call override): fresh visitorData + one retry on LOGIN_REQUIRED
+  if (PLAYER_CLIENT === 'visionos' || clientOverride === 'visionos') {
     const visionAttempts = [false, true];
     for (const forceVisitor of visionAttempts) {
       let visitorData;
@@ -1597,6 +1598,115 @@ app.get('/api/local-audio', (req, res) => {
   if (!serveCacheFile(req, res, id)) return res.status(404).end();
 });
 
+// ---- direct-stream diagnostics (Phase diag): staged VisionOS resolve + upstream probe ----
+function isEgressError(e) {
+  const m = String((e && e.message) || e);
+  return /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|aborted|network/i.test(m);
+}
+app.get('/api/stream-diag', async (req, res) => {
+  const id = String(req.query.videoId || '').trim();
+  const client = String(req.query.client || 'visionos').toLowerCase();
+  const probeUpstream = String(req.query.probe || '1') === '1';
+  if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).json({ error: 'bad videoId' });
+  const out = {
+    videoId: id,
+    env: { vercel: IS_VERCEL, playerClient: PLAYER_CLIENT, node: process.version },
+    cache: { hit: !!readFinalCache(id) },
+    resolve: { client, ok: false },
+    upstream: { probed: false, ok: false },
+    diagnosis: 'UNKNOWN',
+  };
+  const fail = (stage, obj) => {
+    out.diagnosis = stage;
+    Object.assign(out, obj);
+    return res.json(out);
+  };
+  // resolve (VisionOS path only for diag determinism)
+  if (client !== 'visionos') {
+    return fail('RESOLVER_FAIL', { error: 'diag supports client=visionos only' });
+  }
+  let info = null;
+  try {
+    info = await getAudioUrl(id, 'visionos');
+  } catch (e) {
+    const net = isEgressError(e);
+    return fail(net && IS_VERCEL ? 'VERCEL_EGRESS_REJECTED' : 'RESOLVER_FAIL', {
+      error: `resolve threw: ${(e && e.message) || e}`,
+      resolve: { client, ok: false, threw: true, networkError: net },
+    });
+  }
+  if (!info || !info.url) {
+    return fail('RESOLVER_FAIL', {
+      error: 'VisionOS resolver returned no playable URL (no streamingData / no audio format)',
+      resolve: { client, ok: false },
+    });
+  }
+  let host = '';
+  try {
+    host = new URL(info.url).host;
+  } catch {}
+  out.resolve = {
+    client: info.client || 'visionos',
+    ok: true,
+    itag: info.itag ?? null,
+    mime: info.mimeType ?? null,
+    bitrate: info.bitrate ?? null,
+    host,
+  };
+  if (!probeUpstream) {
+    out.diagnosis = 'RESOLVER_PASS';
+    return res.json(out);
+  }
+  // upstream 1KB probe with Range (same request shape as media element start)
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    let r;
+    try {
+      r = await fetch(info.url, {
+        headers: {
+          Range: 'bytes=0-1023',
+          'User-Agent': VISIONOS_HEADERS['User-Agent'],
+          Accept: '*/*',
+        },
+        signal: ctl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    const ct = r.headers.get('content-type');
+    const magicOk = buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3;
+    out.upstream = {
+      probed: true,
+      ok: r.status === 206 || r.status === 200,
+      status: r.status,
+      contentType: ct,
+      contentLength: r.headers.get('content-length'),
+      contentRange: r.headers.get('content-range'),
+      bodyBytes: buf.length,
+      magicEbml: magicOk,
+    };
+    if (r.status === 403) {
+      return fail('UPSTREAM_FAIL', { error: 'direct googlevideo request returned 403' });
+    }
+    if (r.status < 200 || r.status > 299) {
+      return fail('UPSTREAM_FAIL', { error: `direct googlevideo request returned ${r.status}` });
+    }
+    if (ct && !ct.includes('audio/') && !ct.includes('video/') && !ct.includes('octet-stream')) {
+      return fail('MEDIA_INVALID', { error: `unexpected Content-Type=${ct}` });
+    }
+    out.diagnosis = 'PASS';
+    return res.json(out);
+  } catch (e) {
+    const net = isEgressError(e);
+    return fail(net && IS_VERCEL ? 'VERCEL_EGRESS_REJECTED' : 'UPSTREAM_FAIL', {
+      error: `upstream probe threw: ${(e && e.message) || e}`,
+      upstream: { probed: true, ok: false, networkError: net },
+    });
+  }
+});
+
 // Stream proxy for TWA background (same-origin, Range 206, no IP mismatch)
 app.get('/api/stream', async (req, res) => {
   const id = String(req.query.videoId || '').trim();
@@ -1604,12 +1714,15 @@ app.get('/api/stream', async (req, res) => {
   // Phase 7B: cache-first — cached ids are served from local disk, zero YouTube calls
   if (readFinalCache(id)) {
     console.log(`stream cache-hit ${id} range=${req.headers.range || 'full'}`);
+    res.setHeader('X-Diag-Source', 'cache');
     serveCacheFile(req, res, id);
     return;
   }
   try {
-    const info = await getAudioUrl(id);
+    const clientOverride = String(req.query.client || '').toLowerCase() || undefined;
+    const info = await getAudioUrl(id, clientOverride);
     if (!info || !info.url) return res.status(404).end();
+    res.setHeader('X-Diag-Source', 'upstream-' + (info.client || 'current'));
     const headers = {};
     if (req.headers.range) headers['Range'] = req.headers.range;
     // Use client-appropriate UA for googlevideo

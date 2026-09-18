@@ -86,11 +86,43 @@ $('bPlay').onclick = async function(){
 $('bDirect').onclick = async function(){
   var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
   hideIframe();
-  setMethod('● VisionOS Audio — direct stream via /api/stream (uncached path)','#48c');
-  elog('direct stream src set');
-  showMeta({videoId:id, path:'/api/stream', note:'server resolves+proxies; cache-first if cached'});
-  try { a.src = '/api/stream?videoId='+encodeURIComponent(id); await a.play(); }
-  catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('direct err '+e.message); }
+  function FL(stage, extra){ setMethod('● FAIL — '+stage+(extra?' — '+extra:''),'#f33'); elog('[FAIL] '+stage+(extra?' | '+extra:'')); }
+  elog('[1] PLAY_DIRECT START id='+id);
+  // [2] staged backend diagnosis (VisionOS resolve + 1KB upstream probe)
+  var d;
+  try {
+    elog('[2] REQUEST /api/stream-diag?client=visionos&probe=1');
+    var rd = await fetch('/api/stream-diag?videoId='+encodeURIComponent(id)+'&client=visionos&probe=1');
+    d = await rd.json();
+    showMeta(d);
+  } catch(e){ FL('DIAG_REQUEST_FAIL', e.message); return; }
+  elog('[3] DIAGNOSIS='+d.diagnosis+' envVercel='+(d.env&&d.env.vercel));
+  if(d.resolve) elog('[4] RESOLVER client='+(d.resolve.client||'?')+' ok='+d.resolve.ok);
+  if(d.resolve && d.resolve.ok) elog('[5] ITAG='+d.resolve.itag+' MIME='+d.resolve.mime+' DIRECT_HOST='+d.resolve.host);
+  else { FL('VISIONOS_RESOLVER_FAIL', d.error||'no playable URL'); return; }
+  if(d.upstream && d.upstream.probed) elog('[6] UPSTREAM status='+d.upstream.status+' content-type='+d.upstream.contentType+' magicEbml='+d.upstream.magicEbml);
+  if(d.diagnosis === 'VERCEL_EGRESS_REJECTED'){ FL('VERCEL_EGRESS_REJECTED', d.error||''); return; }
+  if(d.diagnosis === 'UPSTREAM_FAIL'){ FL('UPSTREAM_FAIL '+(d.upstream&&d.upstream.status), d.error||''); return; }
+  if(d.diagnosis === 'MEDIA_INVALID'){ FL('MEDIA_INVALID '+(d.upstream&&d.upstream.contentType), d.error||''); return; }
+  if(d.diagnosis !== 'PASS'){ FL(d.diagnosis, d.error||''); return; }
+  // [7] player-path probe: same endpoint the <audio> element reads
+  try {
+    elog('[7] REQUEST /api/stream?client=visionos (Range 0-1023 probe)');
+    var rp = await fetch('/api/stream?videoId='+encodeURIComponent(id)+'&client=visionos', {headers:{Range:'bytes=0-1023'}});
+    var src = rp.headers.get('X-Diag-Source'), ct = rp.headers.get('Content-Type'), cr = rp.headers.get('Content-Range');
+    var pb = await rp.arrayBuffer();
+    elog('[7] MEDIA_RESPONSE status='+rp.status+' source='+src+' content-type='+ct+' range='+cr+' bytes='+pb.byteLength);
+    if(rp.status !== 206 && rp.status !== 200){ FL('MEDIA_RESPONSE_FAIL status='+rp.status, 'source='+src); return; }
+    if(ct && ct.indexOf('audio/')!==0 && ct.indexOf('video/')!==0){ FL('MEDIA_INVALID content-type='+ct, 'source='+src); return; }
+  } catch(e){ FL('MEDIA_REQUEST_FAIL', e.message); return; }
+  // [8-9] HTML5 playback
+  setMethod('● VisionOS Audio — resolver+media PASS, starting HTML5…','#48c');
+  elog('[8] AUDIO SRC SET, calling play()');
+  try {
+    a.src = '/api/stream?videoId='+encodeURIComponent(id)+'&client=visionos';
+    await a.play();
+    elog('[9] play() accepted — waiting playing/timeupdate events');
+  } catch(e){ FL('HTML5_PLAYBACK_FAIL', e.message||e.name); return; }
 };
 $('bIframe').onclick = function(){
   var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
