@@ -4262,17 +4262,19 @@ function viewLibrary(view, tab) {
       return '';
     };
     body = items.length
-      ? `<div class="track-list">${items.map((e) => {
+      ? `${trackHeadHTML()}<div class="track-list">${items.map((e) => {
           const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
           const art = e.artworkThumb || e.thumbnail || '';
           const badge = e.cacheStatus === 'COMPLETE' ? `<div class="off-done">✓ Downloaded</div>`
             : `<div class="off-bar"><div class="off-fill" style="width:${pct}%"></div></div><div class="off-pct">${pct.toFixed(0)}%</div>`;
           const click = e.offlineAvailable ? ` data-offplay="${esc(e.videoId)}"` : '';
-          return `<div class="off-wrap"><button type="button" class="track off-row"${click}>
-            ${coverHTML(art, 'trk')}
-            <span class="tr-meta"><span class="tr-t">${esc(e.title || e.videoId)}</span><br><span class="lr-s">${esc(e.artist || '')} · ${esc(statusText(e))}</span></span>
+          const dur = Number(e.duration) > 0 ? `<span class="tdur">${esc(fmtTime(Number(e.duration)))}</span>` : '';
+          return `<div class="off-wrap"><div class="track off-row"${click}>
+            ${coverHTML(art, 'track')}
+            <div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div><div class="ts">${esc(e.artist || '')} · ${esc(statusText(e))}</div></div>
+            ${dur}
             ${badge}
-          </button>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
+          </div>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
         }).join('')}</div>`
       : emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { ic: 'i-download' });
   } else if (tab === 'history') {
