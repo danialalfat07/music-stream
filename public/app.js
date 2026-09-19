@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.8";
+const APP_VERSION = "2.3.9";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1774,6 +1774,14 @@ function startNativeTrack(s, loadId) {
     startCurrent();
   }
 }
+function onTrackChanged(s) {
+  // Single choke point: every track change refreshes track-bound UI here.
+  // (Player.current is a queue[index] getter, so all paths funnel via startCurrent.)
+  if (!s || !s.videoId) return;
+  try { loadLyrics(s); } catch {}
+  try { if (s.thumbnail) loadPipArt(s.thumbnail); } catch {}
+  try { drawPipFrame(); } catch {}
+}
 function startCurrent() {
   if (_isClosed) return;
   Player.cued = false;
@@ -1804,6 +1812,7 @@ function startCurrent() {
         renderNowPlaying();
         renderQueue();
         updateLikeButtons();
+        onTrackChanged(s);
         $('#miniplayer').classList.remove('hidden');
         document.body.classList.add('has-player');
         document.title = `${s.title} • Dnialify Music Stream`;
@@ -1913,7 +1922,7 @@ function startCurrent() {
       },
     );
   }
-  loadLyrics(s);
+  onTrackChanged(s);
   loadSponsorBlock(s.videoId);
   // refresh related tab lazily
   Player.relatedBrowseId = null; // stale - belongs to the previous song until fetchQueue returns
@@ -6569,6 +6578,7 @@ try {
       document.body.classList.add('has-player');
       try { renderNowPlaying(); } catch {}
       try { renderPlayButtons(); } catch {}
+      try { onTrackChanged(Player.current); } catch {}
     }
   }
 } catch {}
