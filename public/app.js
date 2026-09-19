@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.6";
+const APP_VERSION = "2.3.7";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -897,6 +897,10 @@ function initAudio(){
         : ev.source === 'VISIONOS' ? 'VisionOS Audio' : '';
       if (method && (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING')) {
         try { window.setPlayMethod(method); } catch {}
+      }
+      // cache-first fill: never silent — badge shows progress state during MISS
+      if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS') {
+        try { window.setPlayMethod('Menghubungkan…'); } catch {}
       }
       // progress UI from native time (source of truth when nativeActive)
       if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {

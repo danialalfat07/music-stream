@@ -43,7 +43,7 @@ public final class SongCache {
     public static final String LY_FAILED = "FAILED";
 
     private static final int CHUNK = 524288;
-    private static final int TIMEOUT_MS = 20000;
+    static final int TIMEOUT_MS = 20000;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
     private static final String UA =
             "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
@@ -457,14 +457,100 @@ public final class SongCache {
         }
     }
 
+    /**
+     * CACHE-FIRST helpers (engine playback never reads network).
+     * Bytes available locally WITHOUT any network call:
+     * final file when COMPLETE+valid, else current .part length (0 when absent).
+     */
+    public static long localBytes(Context c, String videoId) {
+        try {
+            if (isComplete(c, videoId)) {
+                File a = audioFile(c, videoId);
+                return a.isFile() ? a.length() : 0;
+            }
+            File p = partFile(c, videoId);
+            return p.isFile() ? p.length() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Chunk end (exclusive byte count) covering targetMs. Reuses 512KB CHUNK. */
+    public static long chunkEndFor(long targetMs, int durationMs, long total) {
+        if (total <= 0) return total;
+        if (durationMs <= 0 || targetMs <= 0) return Math.min(total, (long) CHUNK);
+        long need = total * Math.max(0, targetMs) / durationMs;
+        long idx = need / CHUNK;
+        return Math.min(total, (idx + 1) * (long) CHUNK);
+    }
+
+    /** True when the whole chunk containing targetMs is on disk (final or .part). */
+    public static boolean hasBytes(Context c, String videoId, long needEnd) {
+        if (needEnd <= 0) return true;
+        return localBytes(c, videoId) >= needEnd;
+    }
+
+    /**
+     * Stable playback snapshot: copies available prefix [0, needEnd) to
+     * <id>.play.webm so MediaPlayer never reads a file the writer is
+     * appending to. Returns null when source short or EBML header invalid.
+     */
+    public static File snapshotPrefix(Context c, String videoId, long needEnd) {
+        try {
+            File src = null;
+            if (isComplete(c, videoId)) {
+                File a = audioFile(c, videoId);
+                if (a.isFile() && (needEnd <= 0 || a.length() >= needEnd)) src = a;
+            }
+            if (src == null) {
+                File p = partFile(c, videoId);
+                if (p.isFile() && (needEnd <= 0 || p.length() >= needEnd)) src = p;
+            }
+            if (src == null) return null;
+            long n = needEnd > 0 ? Math.min(needEnd, src.length()) : src.length();
+            if (n <= 0) return null;
+            File dst = new File(dir(c), videoId + ".play.webm");
+            FileInputStream in = new FileInputStream(src);
+            FileOutputStream out = new FileOutputStream(dst);
+            try {
+                byte[] buf = new byte[65536];
+                long left = n;
+                int r;
+                while (left > 0
+                        && (r = in.read(buf, 0, (int) Math.min(buf.length, left))) != -1) {
+                    out.write(buf, 0, r);
+                    left -= r;
+                }
+            } finally {
+                try { in.close(); } catch (Exception ignored) {}
+                try { out.close(); } catch (Exception ignored) {}
+            }
+            if (dst.length() != n || !VisionOsCache.ebmlMagic(dst)) {
+                dst.delete();
+                return null;
+            }
+            return dst;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Drop corrupt .part so the next wait re-fetches from byte 0. Never throws. */
+    public static void dropPart(Context c, String videoId) {
+        try {
+            File p = partFile(c, videoId);
+            if (p.isFile()) p.delete();
+        } catch (Exception ignored) {}
+    }
+
     /** Delete owned files only (audio/part/record/art). History/playlists untouched. */
-    public static JSONObject delete(Context c, String videoId) {
-        JSONObject out = new JSONObject();
+    public static JSONObject delete(Context c, String videoId) {        JSONObject out = new JSONObject();
         int n = 0;
         long bytes = 0;
         try {
             File[] fs = {audioFile(c, videoId), partFile(c, videoId),
-                    recordFile(c, videoId), artFile(c, videoId)};
+                    recordFile(c, videoId), artFile(c, videoId),
+                    new File(dir(c), videoId + ".play.webm")};
             for (File f : fs) {
                 if (f.isFile()) {
                     bytes += f.length();

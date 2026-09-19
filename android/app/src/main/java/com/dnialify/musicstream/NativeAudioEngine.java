@@ -51,6 +51,13 @@ public final class NativeAudioEngine {
     private long lastTickMs;
     private int currentMs;
     private int durationMs;
+    // CACHE-FIRST bookkeeping (never read network for playback)
+    private int playGen = 0;          // idempotency: stale waiters/threads abort
+    private int pendingStartMs = 0;   // startPathAt offset (initial + seek-refill)
+    private long lastTotal = -1;      // clen of current track (time<->byte math)
+    private String lastUrl = "";      // stream url (refill restarts writer with it)
+    private String lastCache = "";    // HIT | MISS (surfaced to WebView badge)
+    private String playFile = "";     // snapshot/final path currently opened
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -66,10 +73,16 @@ public final class NativeAudioEngine {
 
     // ---------- public commands (bridge + harness) ----------
 
-    /** Play: cache HIT -> file; MISS -> resolve then stream-first (+writer if cacheOn). */
+    /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
+        final int gen;
         synchronized (lock) {
             stopLocked("replay");
+            playGen++;
+            gen = playGen;
+            pendingStartMs = 0;
+            lastTotal = -1;
+            lastCache = "";
             appCtx = c.getApplicationContext();
             videoId = vid != null ? vid : "";
             title = t != null ? t : "";
@@ -79,7 +92,7 @@ public final class NativeAudioEngine {
             failMessage = null;
             setStateLocked(State.RESOLVING);
         }
-        nlog("[NATIVE_CMD] play videoId=" + videoId);
+        nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen);
         pushEvent("sourceChanged", null);
         // metadata persisted at START (never wait for audio to finish)
         try {
@@ -91,7 +104,9 @@ public final class NativeAudioEngine {
             meta.put("source", "VISIONOS");
             SongCache.ensureMeta(c.getApplicationContext(), meta);
         } catch (Exception ignored) {}
-        new Thread(() -> resolveAndStart(c, vid)).start();
+        final Context ac = c.getApplicationContext();
+        final String v = vid;
+        new Thread(() -> resolveAndStart(ac, v, gen)).start();
     }
 
     public void pause() {
@@ -127,22 +142,106 @@ public final class NativeAudioEngine {
     }
 
     public void seek(int seconds) {
+        int ms = Math.max(0, seconds * 1000);
+        String pf;
+        long total;
+        int dur;
         synchronized (lock) {
-            if (mp != null && (state == State.PLAYING || state == State.PAUSED)) {
-                int ms = Math.max(0, seconds * 1000);
-                if (durationMs > 0) ms = Math.min(ms, durationMs);
+            if (mp == null || (state != State.PLAYING && state != State.PAUSED)) return;
+            if (durationMs > 0) ms = Math.min(ms, durationMs);
+            pf = playFile;
+            total = lastTotal;
+            dur = durationMs;
+        }
+        // cache-first: instant direct seek only inside locally available bytes
+        long have = 0;
+        try {
+            java.io.File f = new java.io.File(pf);
+            if (f.isFile()) have = f.length();
+        } catch (Exception ignored) {}
+        long needEnd = SongCache.chunkEndFor(ms, dur, total);
+        if (total > 0 && needEnd > 0 && have >= Math.min(needEnd, total)) {
+            synchronized (lock) {
+                if (mp == null || (state != State.PLAYING && state != State.PAUSED)) return;
                 try {
                     seeking = true;
                     wasPlayingBeforeSeek = (state == State.PLAYING);
                     setStateLocked(State.SEEKING);
-                    nlog("[NATIVE_CMD] seek=" + seconds + ".000 videoId=" + videoId);
+                    nlog("[NATIVE_CMD] seek=" + seconds + ".000 local videoId=" + videoId);
                     mp.seekTo(ms);
                 } catch (Exception e) {
                     seeking = false;
                     failLocked(VisionOsResolver.R_MEDIA_ERROR, "seek threw " + e);
                 }
             }
+            pushAll();
+            return;
         }
+        // beyond local bytes -> pause, fill, then play at target (never remote seek)
+        nlog("[NATIVE_CMD] seek=" + seconds + ".000 refill videoId=" + videoId);
+        refillAndPlayAt(ms);
+    }
+
+    /**
+     * Pause, fill bytes covering targetMs (resume-aware writer), then startPathAt
+     * a fresh snapshot there. Generation-guarded and idempotent; failures ERROR
+     * (caller falls back to iFrame, never hangs).
+     */
+    private void refillAndPlayAt(int targetMs) {
+        final int gen;
+        final String vid;
+        final Context ac;
+        final long total;
+        final int dur;
+        final String url;
+        synchronized (lock) {
+            if (mp == null) return;
+            gen = playGen;
+            vid = videoId;
+            ac = appCtx;
+            total = lastTotal;
+            dur = durationMs;
+            url = lastUrl;
+            try {
+                if (state == State.PLAYING) mp.pause();
+            } catch (Exception ignored) {}
+            seeking = true;
+            wasPlayingBeforeSeek = true;
+            setStateLocked(State.SEEKING);
+            pendingStartMs = Math.max(0, targetMs);
+            nlog("[CACHE] refill targetMs=" + targetMs + " videoId=" + vid + " gen=" + gen);
+        }
+        pushAll();
+        if (ac == null || total <= 0 || url == null || url.isEmpty()) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "refill unavailable");
+            }
+            pushAll();
+            return;
+        }
+        final Context fac = ac;
+        new Thread(() -> SongCache.download(fac, vid, url, total)).start();
+        long needEnd = SongCache.chunkEndFor(targetMs, dur, total);
+        if (!waitForBytes(fac, vid, needEnd, gen, total)) return;
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        java.io.File snap = SongCache.snapshotPrefix(fac, vid, needEnd);
+        if (snap == null) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "refill snapshot invalid");
+            }
+            pushAll();
+            return;
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        nlog("[CACHE] refill ready videoId=" + vid + " bytes=" + snap.length()
+                + " at=" + targetMs);
+        startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, fac, gen, targetMs);
     }
 
     public void stop(String why) {
@@ -180,28 +279,39 @@ public final class NativeAudioEngine {
 
     // ---------- internals ----------
 
-    private void resolveAndStart(Context c, String vid) {
+    private void resolveAndStart(Context c, String vid, int gen) {
         // 1. cache HIT? record COMPLETE + file valid (repairs stale COMPLETE)
         if (SongCache.isComplete(c, vid)) {
             java.io.File hf = SongCache.audioFile(c, vid);
             nlog("[CACHE] HIT videoId=" + vid + " bytes=" + hf.length());
-            startPath(hf.getAbsolutePath(), Source.CACHED_AUDIO, c);
+            synchronized (lock) {
+                lastCache = "HIT";
+                lastTotal = hf.length();
+                playFile = hf.getAbsolutePath();
+            }
+            startPathAt(hf.getAbsolutePath(), Source.CACHED_AUDIO, c, gen, 0);
             return;
         }
         // legacy flat file without record still counts as HIT (backward compat)
         java.io.File f = VisionOsCache.fileFor(c, vid);
         if (f.isFile() && f.length() > 0 && SongCache.getRecord(c, vid) == null) {
             nlog("[CACHE] HIT(legacy) videoId=" + vid + " bytes=" + f.length());
-            startPath(f.getAbsolutePath(), Source.CACHED_AUDIO, c);
+            synchronized (lock) {
+                lastCache = "HIT";
+                lastTotal = f.length();
+                playFile = f.getAbsolutePath();
+            }
+            startPathAt(f.getAbsolutePath(), Source.CACHED_AUDIO, c, gen, 0);
             return;
         }
-        nlog("[CACHE] MISS videoId=" + vid);
+        nlog("[CACHE] MISS videoId=" + vid + " gen=" + gen);
         // 2. resolve (LOGIN_REQUIRED retry lives inside resolver, max 1x)
         VisionOsResolver.Result r;
         try {
             r = VisionOsResolver.resolve(vid);
         } catch (VisionOsResolver.ResolverException e) {
             synchronized (lock) {
+                if (gen != playGen) return;
                 failLocked(e.reason != null ? e.reason
                         : VisionOsResolver.R_RESOLVER_FAIL,
                         e.stage + " " + e.getMessage());
@@ -209,7 +319,10 @@ public final class NativeAudioEngine {
             pushAll();
             return;
         }
-        nlog("[ENGINE] logical=NATIVE source=VISIONOS itag=" + r.itag);
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        nlog("[ENGINE] logical=NATIVE source=CACHE_FILL itag=" + r.itag);
         final String url = r.url;
         // record duration as soon as resolver knows it
         try {
@@ -219,23 +332,113 @@ public final class NativeAudioEngine {
                 SongCache.putRecord(c, vid, rec);
             }
         } catch (Exception ignored) {}
-        // 3. stream-first: start playback now; record writer runs apart when cache ON
-        if (StreamSettings.isAudioCacheOn(c) && r != null) {
-            final long total = clenOf(url);
-            new Thread(() -> {
-                SongCache.download(c, vid, url, total);
-                // best-effort artwork, never fails audio
-                try {
-                    JSONObject rec = SongCache.getRecord(c, vid);
-                    if (rec != null && !rec.has("artworkFile")) {
-                        SongCache.fetchArtwork(c, vid, rec.optString("artworkUrl", ""));
-                    }
-                } catch (Exception ignored) {}
-            }).start();
+        final long total = clenOf(url);
+        if (total <= 0) {            // bottom fallback only: no length, chunking impossible -> legacy stream
+            nlog("[CACHE] total<=0, bottom-fallback stream videoId=" + vid);
+            synchronized (lock) {
+                lastCache = "MISS";
+            }
+            startUrl(url, Source.VISIONOS);
+            return;
         }
-        startUrl(url, Source.VISIONOS);
+        synchronized (lock) {
+            lastTotal = total;
+            lastUrl = url;
+            lastCache = "MISS";
+        }
+        // 3. CACHE-FIRST: writer fills (resume-aware, proven path), waiter plays
+        // local snapshot as soon as the first chunk lands. Never streams.
+        final Context ac = c;
+        new Thread(() -> {
+            SongCache.download(ac, vid, url, total);
+            // best-effort artwork, never fails audio
+            try {
+                JSONObject rec = SongCache.getRecord(ac, vid);
+                if (rec != null && !rec.has("artworkFile")) {
+                    SongCache.fetchArtwork(ac, vid, rec.optString("artworkUrl", ""));
+                }
+            } catch (Exception ignored) {}
+        }).start();
+        long need = Math.min(total, 524288L);
+        if (!waitForBytes(ac, vid, need, gen, total)) return;
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        java.io.File snap = SongCache.snapshotPrefix(ac, vid, need);
+        if (snap == null) {
+            // corrupt prefix -> drop part, re-fetch once, never silent
+            nlog("[CACHE] prefix invalid, re-fetch videoId=" + vid);
+            SongCache.dropPart(ac, vid);
+            new Thread(() -> SongCache.download(ac, vid, url, total)).start();
+            if (!waitForBytes(ac, vid, need, gen, total)) return;
+            synchronized (lock) {
+                if (gen != playGen) return;
+            }
+            snap = SongCache.snapshotPrefix(ac, vid, need);
+            if (snap == null) {
+                synchronized (lock) {
+                    if (gen != playGen) return;
+                    failLocked(VisionOsResolver.R_MEDIA_ERROR, "prefix invalid after refetch");
+                }
+                pushAll();
+                return;
+            }
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+            playFile = snap.getAbsolutePath();
+        }
+        nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + snap.length());
+        startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
     }
 
+    /**
+     * Wait (off main thread) until localBytes >= need or terminal condition.
+     * Terminal: gen stale, stop, record FAILED, or no progress for TIMEOUT_MS
+     * (reuses SongCache timeout, no new watchdog). Returns true when playable.
+     */
+    private boolean waitForBytes(Context c, String vid, long need, int gen, long total) {
+        long lastSeen = -1;
+        long lastMoveAt = System.currentTimeMillis();
+        for (;;) {
+            synchronized (lock) {
+                if (gen != playGen) return false;
+                if (state == State.STOPPED || state == State.IDLE || state == State.ERROR) return false;
+            }
+            if (SongCache.hasBytes(c, vid, need)) return true;
+            try {
+                JSONObject rec = SongCache.getRecord(c, vid);
+                if (rec != null
+                        && SongCache.ST_FAILED.equals(rec.optString("cacheStatus", ""))) {
+                    synchronized (lock) {
+                        if (gen != playGen) return false;
+                        failLocked(rec.optString("failReason", "cache-failed"), "fill failed");
+                    }
+                    pushAll();
+                    return false;
+                }
+            } catch (Exception ignored) {}
+            long have = SongCache.localBytes(c, vid);
+            long now = System.currentTimeMillis();
+            if (have != lastSeen) {
+                lastSeen = have;
+                lastMoveAt = now;
+            } else if (now - lastMoveAt > SongCache.TIMEOUT_MS
+                    && !SongCache.isDownloading(vid)) {
+                synchronized (lock) {
+                    if (gen != playGen) return false;
+                    failLocked(VisionOsResolver.R_TIMEOUT, "fill stalled");
+                }
+                pushAll();
+                return false;
+            }
+            try {
+                Thread.sleep(250);
+            } catch (InterruptedException e) {
+                return false;
+            }
+        }
+    }
     private void startPath(String path, Source src, Context c) {
         synchronized (lock) {
             prepareLocked();
@@ -253,7 +456,32 @@ public final class NativeAudioEngine {
         pushAll();
     }
 
+    /** startPath with generation + start offset (initial fill and seek-refill share it). */
+    private void startPathAt(String path, Source src, Context c, int gen, int startMs) {
+        synchronized (lock) {
+            if (gen != playGen) return;
+            pendingStartMs = Math.max(0, startMs);
+            prepareLocked();
+            seeking = false;
+            source = src;
+            playFile = path;
+            setStateLocked(State.BUFFERING);
+            nlog("[ENGINE] logical=NATIVE source=" + src
+                    + " data=file gen=" + gen + " startMs=" + pendingStartMs
+                    + " videoId=" + videoId);
+            try {
+                mp.setDataSource(path);
+                mp.prepareAsync();
+            } catch (Exception e) {
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "setDataSource file " + e);
+            }
+        }
+        pushAll();
+    }
+
     private void startUrl(String url, Source src) {
+        // BOTTOM FALLBACK ONLY (cache-first bypass): total<=0, chunking impossible.
+        nlog("[ENGINE] BOTTOM-FALLBACK stream (cache-first bypassed) videoId=" + videoId);
         synchronized (lock) {
             prepareLocked();
             source = src;
@@ -297,6 +525,15 @@ public final class NativeAudioEngine {
                     pushAll();
                     return;
                 }
+                if (pendingStartMs > 0) {
+                    try {
+                        int at = durationMs > 0
+                                ? Math.min(pendingStartMs, durationMs) : pendingStartMs;
+                        p.seekTo(at);
+                        currentMs = at;
+                    } catch (Exception ignored) {}
+                    pendingStartMs = 0;
+                }
                 setStateLocked(State.PLAYING);
                 nlog("[NATIVE_STATE] state=PLAYING videoId=" + videoId
                         + " duration=" + (durationMs / 1000.0));
@@ -304,14 +541,38 @@ public final class NativeAudioEngine {
             pushAll();
         });
         mp.setOnCompletionListener(p -> {
+            boolean extend = false;
+            int resumeMs = 0;
             synchronized (lock) {
                 try {
                     currentMs = p.getDuration();
                 } catch (Exception ignored) {}
-                setStateLocked(State.ENDED);
-                nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                // snapshot EOF while writer still filling -> extend with fresh
+                // snapshot, don't end. True end only when download complete.
+                try {
+                    JSONObject rec = appCtx != null
+                            ? SongCache.getRecord(appCtx, videoId) : null;
+                    boolean complete = rec != null && SongCache.ST_COMPLETE.equals(
+                            rec.optString("cacheStatus", ""));
+                    if (!complete && durationMs > 0 && currentMs < durationMs - 3000
+                            && state != State.STOPPED && state != State.IDLE) {
+                        extend = true;
+                        resumeMs = currentMs;
+                    }
+                } catch (Exception ignored) {}
+                if (extend) {
+                    nlog("[CACHE] snapshot EOF, extend videoId=" + videoId
+                            + " at=" + resumeMs);
+                } else {
+                    setStateLocked(State.ENDED);
+                    nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                }
             }
-            pushAll();
+            if (extend) {
+                refillAndPlayAt(resumeMs);
+            } else {
+                pushAll();
+            }
         });
         mp.setOnErrorListener((p, what, extra) -> {
             synchronized (lock) {
@@ -415,6 +676,7 @@ public final class NativeAudioEngine {
             o.put("engine", "NATIVE");
             o.put("source", String.valueOf(source));
             o.put("state", String.valueOf(state));
+            o.put("cache", lastCache);
             o.put("videoId", videoId);
             o.put("currentTime", currentMs / 1000.0);
             o.put("duration", durationMs / 1000.0);
