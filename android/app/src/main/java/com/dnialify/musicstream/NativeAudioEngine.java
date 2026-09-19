@@ -133,6 +133,7 @@ public final class NativeAudioEngine {
                 if (durationMs > 0) ms = Math.min(ms, durationMs);
                 try {
                     seeking = true;
+                    wasPlayingBeforeSeek = (state == State.PLAYING);
                     setStateLocked(State.SEEKING);
                     nlog("[NATIVE_CMD] seek=" + seconds + ".000 videoId=" + videoId);
                     mp.seekTo(ms);
@@ -337,7 +338,7 @@ public final class NativeAudioEngine {
             nlog("[NATIVE_STATE] buffering pct=" + pct + " videoId=" + videoId);
             pushEvent("bufferingChanged", pct);
         });
-        wasPlayingBeforeSeek = state == State.PLAYING;
+        wasPlayingBeforeSeek = false; // reset per track; real value captured in seek()
     }
 
     private boolean wasPlayingBeforeSeek;
@@ -430,11 +431,9 @@ public final class NativeAudioEngine {
     }
 
     private void pushAll() {
-        JSONObject s;
-        synchronized (lock) {
-            s = snapshotLocked("playbackStateChanged");
-        }
-        pushEvent(null, s);
+        // NOTE: pass the event NAME, not a prebuilt snapshot — pushEvent(null, snapshot)
+        // silently drops the event field, so JS never refreshes the play/pause icon.
+        pushEvent("playbackStateChanged", null);
         // notification follows native while active or just ended/errored
         try {
             if (appCtx != null) {

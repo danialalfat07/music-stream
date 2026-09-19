@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.3";
+const APP_VERSION = "2.3.4";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2353,10 +2353,13 @@ function renderPlayButtons() {
     Player.yt.getPlayerState() === YT.PlayerState.PLAYING
   );
   const preview = isPreviewing();
-  $('#mini-play').innerHTML = icon(actuallyPlaying ? 'i-pause' : 'i-play');
-  $('#np-play').innerHTML = icon(
-    !preview && actuallyPlaying ? 'i-pause' : 'i-play',
-  );
+  // loading (resolving/buffering/seeking): spinner, never a play triangle that looks like a bug
+  const nativeLoading = Player.nativeActive && Player.native &&
+    (Player.native.state === 'RESOLVING' || Player.native.state === 'BUFFERING' || Player.native.state === 'SEEKING');
+  $('#mini-play').innerHTML = nativeLoading ? icon('i-spin', 'ic spin') : icon(actuallyPlaying ? 'i-pause' : 'i-play');
+  $('#np-play').innerHTML = (!preview && nativeLoading)
+    ? icon('i-spin', 'ic spin')
+    : icon(!preview && actuallyPlaying ? 'i-pause' : 'i-play');
   const pn = $('#np-playnext');
   const qa = $('#np-queueadd');
   if (pn) pn.classList.toggle('hidden', !preview);
