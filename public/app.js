@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.1";
+const APP_VERSION = "2.3.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1795,6 +1795,14 @@ function startCurrent() {
         return;
     }
   }
+  // Single-engine invariant: entering the WebView path (audio/YT) always stops
+  // Engine B first and clears its flags. Otherwise native keeps playing under
+  // the new track and pause only silences one engine (unstoppable song + stuck icon).
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
+    try { NativePlayback.nativeStop(); } catch {}
+  }
+  Player.nativeActive = false;
+  Player.native = false;
   // try audio first (background capable)
   (async () => {
     const audioOk = Player.useAudio && Player.audioReady ? await playViaAudio(s) : false;
