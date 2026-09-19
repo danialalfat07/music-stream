@@ -100,8 +100,10 @@ public final class NativeAudioEngine {
             windowChunk = -1;
             windowEnd = -1;
         }
-        // track change: cancel old window, never stack fills
-        if (prevVid != null && !prevVid.isEmpty() && !prevVid.equals(vid)) {
+        // track change: cancel old window, never stack fills.
+        // FULL jobs ("Download offline") survive: writer runs to COMPLETE.
+        if (prevVid != null && !prevVid.isEmpty() && !prevVid.equals(vid)
+                && !SongCache.isFull(prevVid)) {
             SongCache.pauseDownload(prevVid);
         }
         nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen);
@@ -182,7 +184,9 @@ public final class NativeAudioEngine {
             windowChunk = -1;
             windowEnd = -1;
         }
-        if (vid != null && !vid.isEmpty()) SongCache.pauseDownload(vid);
+        if (vid != null && !vid.isEmpty() && !SongCache.isFull(vid)) {
+            SongCache.pauseDownload(vid);
+        }
         pushAll();
     }
 
@@ -393,7 +397,9 @@ public final class NativeAudioEngine {
         windowEnd = windowEndForPos(curMs, durMs, total);
         if (ac == null || total <= 0) return;
         if (SongCache.hasBytes(ac, vid, Math.min(windowEnd, total))) {
-            if (SongCache.isDownloading(vid)) SongCache.pauseDownload(vid);
+            if (SongCache.isDownloading(vid) && !SongCache.isFull(vid)) {
+                SongCache.pauseDownload(vid);
+            }
             return;
         }
         if (!SongCache.isDownloading(vid) && url != null && !url.isEmpty()) {
@@ -650,7 +656,8 @@ public final class NativeAudioEngine {
                     if (ci != windowChunk) {
                         setWindow(videoId, lastUrl, lastTotal, currentMs,
                                 durationMs, appCtx);
-                    } else if (windowEnd > 0 && SongCache.isDownloading(videoId)) {
+                    } else if (windowEnd > 0 && SongCache.isDownloading(videoId)
+                            && !SongCache.isFull(videoId)) {
                         long have = 0;
                         try {
                             java.io.File pf = SongCache.partFile(appCtx, videoId);

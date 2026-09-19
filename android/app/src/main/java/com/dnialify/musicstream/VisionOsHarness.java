@@ -1242,8 +1242,8 @@ public final class VisionOsHarness {
             // lyrics via real app source (same shape as /api/lyrics)
             fetchLyricsInto(act, videoId, lyricsBase, title, artist,
                     Math.round(r.durationMs / 1000.0));
-            // audio (progress persisted inside)
-            SongCache.download(act, videoId, r.url, total);
+            // audio (progress persisted inside; FULL = no window cap, no stop pause)
+            SongCache.downloadFull(act, videoId, r.url, total);
             // artwork (best effort, explicit status)
             if (!artworkUrl.isEmpty()) {
                 String lp = SongCache.fetchArtwork(act, videoId, artworkUrl);

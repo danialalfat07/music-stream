@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.20" />
+<meta name="app-version" content="2.3.21" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -75,6 +75,7 @@ try {
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.7L5 21V4a1 1 0 0 1 1-1zm1 2v12.3l5-3.3 5 3.3V5H7z"/></symbol>
   <symbol id="i-save-f" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.7L5 21V4a1 1 0 0 1 1-1z"/></symbol>
   <symbol id="i-pin" viewBox="0 0 24 24"><path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M11 3h2v10.2l3.6-3.6L18 11l-6 6-6-6 1.4-1.4L11 13.2V3zM4 19h16v2H4v-2z"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M13 21h-2V10.8l-3.6 3.6L6 13l6-6 6 6-1.4 1.4-3.6-3.6V21zM4 3h16v2H4V3z"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M3 3h8v2H5v6H3V3zm10 0h8v8h-2V5h-6V3zM3 13h2v6h6v2H3v-8zm16 0h2v8h-8v-2h6v-6z"/></symbol>
@@ -277,7 +278,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.20 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.3.21 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -335,7 +336,7 @@ try {
             <div class="settings-row"><span class="s-label">VisionOS Diagnostic</span><button id="set-diag" class="pill-btn"><span>Open</span></button></div>
           </div>
           <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.3.20</span> · untuk update aplikasi Android download APK baru</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.3.21</span> · untuk update aplikasi Android download APK baru</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
         </div>
         <div data-spane="social" class="s-pane">
@@ -407,7 +408,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.20";
+    var VER="2.3.21";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);

@@ -1,7 +1,7 @@
 {
   "name": "dnialify-music-stream",
-  "version": "2.2.13",
-  "webVersion": "2.3.20",
+  "version": "2.2.14",
+  "webVersion": "2.3.21",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",

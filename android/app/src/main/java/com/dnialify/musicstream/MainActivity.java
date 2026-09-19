@@ -1045,7 +1045,7 @@ public class MainActivity extends BridgeActivity {
                     try {
                         if (SongCache.isComplete(MainActivity.this, vid)) return;
                         VisionOsResolver.Result r = VisionOsResolver.resolve(vid);
-                        SongCache.download(MainActivity.this, vid, r.url, clenOf(r.url));
+                        SongCache.downloadFull(MainActivity.this, vid, r.url, clenOf(r.url));
                         SongCache.fetchArtwork(MainActivity.this, vid,
                                 meta.optString("artworkUrl", ""));
                     } catch (Exception e) {
@@ -1149,7 +1149,7 @@ public class MainActivity extends BridgeActivity {
                     org.json.JSONObject r =
                             SongCache.getRecord(MainActivity.this, videoId);
                     VisionOsResolver.Result res = VisionOsResolver.resolve(videoId);
-                    SongCache.download(MainActivity.this, videoId, res.url,
+                    SongCache.downloadFull(MainActivity.this, videoId, res.url,
                             clenOf(res.url));
                 } catch (Exception e) {
                     android.util.Log.d("DnialifyVisionOS",

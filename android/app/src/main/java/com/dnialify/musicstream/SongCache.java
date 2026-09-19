@@ -52,6 +52,43 @@ public final class SongCache {
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Set<String> RUNNING =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /**
+     * Explicit full-download jobs ("Download offline"). Flagged ids are exempt
+     * from the engine window-5 cap and from stop/track-change pauses, so the
+     * writer runs to COMPLETE whether the song is playing or stopped.
+     * Cleared on COMPLETE / FAILED / delete; kept on explicit PAUSE so a
+     * later resume continues in full mode.
+     */
+    private static final java.util.Set<String> FULL =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public static void downloadFull(Context c, String videoId, String url, long total) {
+        if (videoId != null && !videoId.isEmpty()) {
+            FULL.add(videoId);
+            Log.d(TAG, "[SONG] full-download flagged videoId=" + videoId);
+        }
+        download(c, videoId, url, total);
+    }
+
+    public static boolean isFull(String videoId) {
+        return videoId != null && FULL.contains(videoId);
+    }
+
+    static void clearFull(String videoId) {
+        if (videoId != null) FULL.remove(videoId);
+    }
+
+    /**
+     * Delete tombstone: a dying writer (killed by delete()) must not rewrite
+     * the record or emit events, or the deleted song resurrects as a ghost
+     * partial row. Cleared when a new download starts.
+     */
+    private static final java.util.Set<String> DELETED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    static boolean isDeleted(String videoId) {
+        return videoId != null && DELETED.contains(videoId);
+    }
 
     private SongCache() {}
 
@@ -207,6 +244,7 @@ public final class SongCache {
                 // stale COMPLETE (file gone/replaced) -> repair to FAILED, never lie
                 try {
                     r.put("cacheStatus", ST_FAILED);
+                    clearFull(videoId);
                     r.put("failReason", "file-missing");
                     putRecord(c, videoId, r);
                 } catch (Exception ignored) {}
@@ -249,6 +287,7 @@ public final class SongCache {
 
     private static void downloadInner(Context c, String videoId, String url, long total) {
         CANCEL.remove(videoId);
+        DELETED.remove(videoId);
         JSONObject r = getRecord(c, videoId);
         if (r == null) {
             r = new JSONObject();
@@ -286,37 +325,68 @@ public final class SongCache {
                     throw new PausedException(received);
                 }
                 long end = Math.min(received + CHUNK - 1, total - 1);
-                HttpURLConnection h = null;
-                try {
-                    VisionOsNet.noteRequest(new URL(url).getHost());
-                    h = (HttpURLConnection) new URL(url).openConnection();
-                    h.setRequestMethod("GET");
-                    h.setConnectTimeout(TIMEOUT_MS);
-                    h.setReadTimeout(TIMEOUT_MS);
-                    h.setRequestProperty("Range", "bytes=" + received + "-" + end);
-                    h.setRequestProperty("User-Agent", UA);
-                    int status = h.getResponseCode();
-                    if (status != 206) {
-                        throw new Exception("chunk HTTP " + status + " at " + received);
+                // chunk bytes assemble in memory, flushed only on full success:
+                // a retry re-fetches the same range without duplicating bytes.
+                // Bounded retries (3x, backoff) survive throttling RSTs on big files.
+                long want = end - received + 1;
+                byte[] cbuf = new byte[(int) want];
+                Exception lastErr = null;
+                boolean ok = false;
+                for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+                    if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
+                        throw new PausedException(received);
                     }
-                    InputStream in = h.getInputStream();
-                    byte[] buf = new byte[65536];
-                    int n;
-                    long want = end - received + 1;
-                    long got = 0;
-                    while (got < want
-                            && (n = in.read(buf, 0,
-                                    (int) Math.min(buf.length, want - got))) != -1) {
-                        out.write(buf, 0, n);
-                        got += n;
+                    if (attempt > 0) {
+                        try {
+                            Thread.sleep(1000L * attempt);
+                        } catch (InterruptedException ie) {
+                            throw new PausedException(received);
+                        }
+                        Log.d(TAG, "[SONG] chunk retry videoId=" + videoId
+                                + " at=" + received + " try=" + (attempt + 1));
                     }
-                    in.close();
-                    if (got != want) throw new Exception("short chunk at " + received);
-                    received += got;
-                    chunks++;
-                } finally {
-                    if (h != null) h.disconnect();
+                    HttpURLConnection h = null;
+                    try {
+                        VisionOsNet.noteRequest(new URL(url).getHost());
+                        h = (HttpURLConnection) new URL(url).openConnection();
+                        h.setRequestMethod("GET");
+                        h.setConnectTimeout(TIMEOUT_MS);
+                        h.setReadTimeout(TIMEOUT_MS);
+                        h.setRequestProperty("Range", "bytes=" + received + "-" + end);
+                        h.setRequestProperty("User-Agent", UA);
+                        int status = h.getResponseCode();
+                        if (status != 206) {
+                            throw new Exception("chunk HTTP " + status + " at " + received);
+                        }
+                        InputStream in = h.getInputStream();
+                        byte[] buf = new byte[65536];
+                        int n;
+                        long got = 0;
+                        while (got < want
+                                && (n = in.read(buf, 0,
+                                        (int) Math.min(buf.length, want - got))) != -1) {
+                            System.arraycopy(buf, 0, cbuf, (int) got, n);
+                            got += n;
+                        }
+                        in.close();
+                        if (got != want) throw new Exception("short chunk at " + received);
+                        ok = true;
+                    } catch (Exception ce) {
+                        lastErr = ce;
+                        if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
+                            throw new PausedException(received);
+                        }
+                    } finally {
+                        if (h != null) h.disconnect();
+                    }
                 }
+                if (!ok) {
+                    throw new Exception("chunk failed x3 at " + received
+                            + ": " + lastErr);
+                }
+                out.write(cbuf);
+                received += want;
+                chunks++;
                 if (received - lastRecordAt >= RECORD_EVERY_BYTES) {
                     lastRecordAt = received;
                     progress(c, videoId, r, received, total);
@@ -337,12 +407,19 @@ public final class SongCache {
                 r.put("cacheStatus", ST_COMPLETE);
                 r.put("downloadedBytes", total);
                 r.put("downloadPercent", 100);
+                clearFull(videoId);
                 r.put("audioFile", fin.getAbsolutePath());
-                putRecord(c, videoId, r);
+                if (!isDeleted(videoId)) {
+                    putRecord(c, videoId, r);
+                }
             } catch (Exception ignored) {}
-            Log.d(TAG, "[SONG] COMPLETE videoId=" + videoId + " bytes=" + total
-                    + " chunks=" + chunks);
-            CacheEvents.emit(c, "cacheComplete", videoId, r);
+            if (isDeleted(videoId)) {
+                Log.d(TAG, "[SONG] COMPLETE skipped (deleted) videoId=" + videoId);
+            } else {
+                Log.d(TAG, "[SONG] COMPLETE videoId=" + videoId + " bytes=" + total
+                        + " chunks=" + chunks);
+                CacheEvents.emit(c, "cacheComplete", videoId, r);
+            }
         } catch (PausedException p) {
             try {
                 out.close();
@@ -351,10 +428,14 @@ public final class SongCache {
                 r.put("cacheStatus", ST_PAUSED);
                 r.put("downloadedBytes", p.received);
                 r.put("downloadPercent", pct(p.received, total));
-                putRecord(c, videoId, r);
+                if (!isDeleted(videoId)) {
+                    putRecord(c, videoId, r);
+                }
             } catch (Exception ignored) {}
             Log.d(TAG, "[SONG] PAUSED videoId=" + videoId + " at=" + p.received);
-            CacheEvents.emit(c, "cacheState", videoId, r);
+            if (!isDeleted(videoId)) {
+                CacheEvents.emit(c, "cacheState", videoId, r);
+            }
         } catch (Exception e) {
             try {
                 if (out != null) out.close();
@@ -362,14 +443,19 @@ public final class SongCache {
             String reason = VisionOsResolver.reasonFromMessage(String.valueOf(e.getMessage()));
             try {
                 r.put("cacheStatus", ST_FAILED);
+                clearFull(videoId);
                 r.put("failReason", reason + " " + e.getMessage());
                 r.put("downloadedBytes", received);
                 r.put("downloadPercent", pct(received, total));
-                putRecord(c, videoId, r);
+                if (!isDeleted(videoId)) {
+                    putRecord(c, videoId, r);
+                }
             } catch (Exception ignored) {}
             Log.d(TAG, "[SONG] FAILED videoId=" + videoId + " reason=" + reason
                     + " " + e.getMessage());
-            CacheEvents.emit(c, "cacheError", videoId, r);
+            if (!isDeleted(videoId)) {
+                CacheEvents.emit(c, "cacheError", videoId, r);
+            }
         } finally {
             CANCEL.remove(videoId);
         }
@@ -547,6 +633,10 @@ public final class SongCache {
     public static JSONObject delete(Context c, String videoId) {        JSONObject out = new JSONObject();
         int n = 0;
         long bytes = 0;
+        // kill any running writer (full or windowed) before removing files
+        try { pauseDownload(videoId); } catch (Exception ignored) {}
+        clearFull(videoId);
+        if (videoId != null && !videoId.isEmpty()) DELETED.add(videoId);
         try {
             File[] fs = {audioFile(c, videoId), partFile(c, videoId),
                     recordFile(c, videoId), artFile(c, videoId),

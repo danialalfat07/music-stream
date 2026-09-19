@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.20";
+const APP_VERSION = "2.3.21";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3044,13 +3044,27 @@ function clickDownload(href, name) {
   aEl.click();
   aEl.remove();
 }
-async function downloadSong(song) {
+function downloadOffline(song) {
+  // explicit full-song fetch: native FULL mode runs the writer to COMPLETE,
+  // exempt from the window-5 cap and stop pauses (playing or stopped).
   if (!song || !song.videoId) return;
-  // Phase 8 native full-song cache (APK only; desktop falls through to MP3 flow)
   if (window.NativePlayback && NativePlayback.cacheSong) {
-    OfflineLib.cacheSong(song);
+    try { OfflineLib.cacheSong(song); } catch {}
     return;
   }
+  toast('Download offline hanya tersedia di aplikasi Android');
+}
+async function downloadSong(song) {
+  // legacy router (row download buttons): native -> offline cache, web -> MP3
+  if (!song || !song.videoId) return;
+  if (window.NativePlayback && NativePlayback.cacheSong) {
+    try { OfflineLib.cacheSong(song); } catch {}
+    return;
+  }
+  return downloadMp3(song);
+}
+async function downloadMp3(song) {
+  if (!song || !song.videoId) return;
   if (activeDownloads.has(song.videoId)) {
     toast('Already downloading this song…');
     return;
@@ -3205,7 +3219,7 @@ function renderDownloadedIcon(videoId) {
     }
     const e = _dlMapCache[videoId];
     if (e && e.cacheStatus === 'COMPLETE')
-      return '<span class="dl-icon" title="Downloaded">✓</span>';
+      return `<span class="dl-icon" title="Downloaded">${icon('i-check')}</span>`;
   } catch {}
   return '';
 }
@@ -4457,7 +4471,7 @@ function offlineBodyHTML() {
         const sub = [e.artist || '', dur].filter(Boolean).join(' • ');
         const playable = !sel && e.cacheStatus === 'COMPLETE' && e.offlineAvailable;
         const check = sel ? `<input type="checkbox" class="off-check" data-offcheck="${esc(vid)}"${OffUI.checked[vid] ? ' checked' : ''} />` : '';
-        const pin = offIsPinned(vid) ? '<span class="off-pin" title="Pinned">📍</span>' : '';
+        const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
         const bar = `<div class="off-bar2"><div class="off-fill2${e.cacheStatus === 'COMPLETE' ? ' done' : ''}" style="width:${pct}%"></div></div>`;
         const badge = isPartial ? '<span class="off-partial">Partial</span>' : '';
         return `<div class="off-wrap${isPartial ? ' is-partial' : ''}"><div class="track off-row2"${playable ? ` data-offplay="${esc(vid)}"` : ''} data-offrow="${esc(vid)}">`
@@ -5157,8 +5171,9 @@ function openSongMenu(song, opts = {}) {
     ${row('queue', 'i-queue', 'Add to queue')}
     ${row('fav', liked ? 'i-heart-f' : 'i-heart-o', liked ? 'Favorited' : 'Favorite')}
     ${row('pl', 'i-plus', 'Add to playlist')}
-    ${row('dl', 'i-download', 'Download')}
-    ${opts.offlineRow ? row('pin', 'i-pin', offIsPinned(song.videoId) ? 'Unpin 📍' : 'Pin 📍') : ''}
+    ${row('offdl', 'i-download', 'Download offline')}
+    ${row('mp3', 'i-save', 'Download MP3')}
+    ${opts.offlineRow ? row('pin', 'i-pin', offIsPinned(song.videoId) ? 'Unpin' : 'Pin') : ''}
     ${opts.offlineRow ? row('delcache', 'i-trash', 'Delete from cache') : ''}
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
@@ -5175,7 +5190,8 @@ function openSongMenu(song, opts = {}) {
       else if (a === 'pl') {
         openAddToPlaylist(song);
         return;
-      } else if (a === 'dl') downloadSong(song);
+      } else if (a === 'offdl') downloadOffline(song);
+      else if (a === 'mp3') downloadMp3(song);
       else if (a === 'pin') {
         const pinned = toggleOffPin(song.videoId);
         toast(pinned ? 'Pinned to top' : 'Unpinned');
@@ -5219,7 +5235,8 @@ function openNowPlayingMore() {
   const row = (act, ic, label, on) =>
     `<button type="button" class="modal-row${on ? ' on' : ''}" data-npact="${act}">${icon(ic)}<span>${label}</span></button>`;
   body.innerHTML = `
-    ${row('dl', 'i-download', 'Download')}
+    ${row('offdl', 'i-download', 'Download offline')}
+    ${row('mp3', 'i-save', 'Download MP3')}
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
@@ -5229,7 +5246,8 @@ function openNowPlayingMore() {
   $$('[data-npact]', body).forEach((b) =>
     b.addEventListener('click', () => {
       const a = b.dataset.npact;
-      if (a === 'dl') downloadSong(song);
+      if (a === 'offdl') downloadOffline(song);
+      else if (a === 'mp3') downloadMp3(song);
       else if (a === 'share') shareSong(song);
       else if (a === 'artist') goToArtist(song);
       else if (a === 'speed') cycleSpeed();
