@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.7";
+const APP_VERSION = "2.3.8";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1900,11 +1900,17 @@ function startCurrent() {
     );
     navigator.mediaSession.setActionHandler(
       'play',
-      () => Player.yt && Player.yt.playVideo(),
+      () => {
+        if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeResume) { try { NativePlayback.nativeResume(); } catch {} return; }
+        if (Player.yt) Player.yt.playVideo();
+      },
     );
     navigator.mediaSession.setActionHandler(
       'pause',
-      () => Player.yt && Player.yt.pauseVideo(),
+      () => {
+        if (Player.nativeActive && window.NativePlayback && NativePlayback.nativePause) { try { NativePlayback.nativePause(); } catch {} return; }
+        if (Player.yt) Player.yt.pauseVideo();
+      },
     );
   }
   loadLyrics(s);
@@ -1975,6 +1981,8 @@ function nextTrack(auto) {
     Player.nativeActive = false;
   }
   if (Player.repeat === 2 && auto) {
+    // Engine B first: restart natively, never wake legacy Engine A underneath it
+    if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) { try { NativePlayback.nativeSeek(0); } catch {} return; }
     if(Player.native){ window.NativePlayback.seek(0); window.NativePlayback.play(Player.audioUrl, Player.current.title, Player.current.artist || '', Player.current.thumbnail || ''); return; }
     if(Player.useAudio && Player.audio && Player.audio.src){ Player.audio.currentTime=0; Player.audio.play().catch(()=>{}); return; }
     Player.yt.seekTo(0);
@@ -2010,6 +2018,7 @@ function prevTrack() {
     togglePlay();
     return;
   }
+  const wasNative = Player.nativeActive;
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
     try { NativePlayback.nativeStop(); } catch {}
     Player.nativeActive = false;
@@ -2022,6 +2031,8 @@ function prevTrack() {
   if (Player.index > 0) {
     Player.index--;
     startCurrent();
+  } else if (wasNative) {
+    startCurrent(); // native restart-from-0 (ghost yt.seekTo would silence it)
   } else if (Player.yt) Player.yt.seekTo(0);
 }
 function togglePlay() {
@@ -2509,8 +2520,19 @@ function renderLyrics() {
       .join('');
     $$('.lyric-line', c).forEach((el) =>
       el.addEventListener('click', () => {
-        Player.yt.seekTo(parseFloat(el.dataset.t));
-        Player.yt.playVideo();
+        const t = parseFloat(el.dataset.t);
+        if (!isFinite(t)) return;
+        if (Player.cued || isPreviewing()) return;
+        // Engine B first: lyric tap seeks the AUDIBLE engine, never wakes iFrame
+        if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+          try { NativePlayback.nativeSeek(t); } catch {}
+          return;
+        }
+        if (!Player.yt || !Player.ready) return;
+        try {
+          Player.yt.seekTo(t, true);
+          Player.yt.playVideo();
+        } catch {}
       }),
     );
   } else if (L.plain) {
@@ -5075,7 +5097,12 @@ function openSleepTimer() {
     $('#np-sleep') && $('#np-sleep').classList.remove('on');
     if (m > 0) {
       Player.sleepTimer = setTimeout(() => {
-        Player.yt && Player.yt.pauseVideo();
+        // pause whatever engine is audible (was: yt only — native kept playing)
+        try {
+          if (Player.nativeActive && window.NativePlayback && NativePlayback.nativePause) NativePlayback.nativePause();
+          else if (Player.useAudio && Player.audio) Player.audio.pause();
+          else if (Player.yt) Player.yt.pauseVideo();
+        } catch {}
         Player.sleepTimer = null;
         $('#np-sleep') && $('#np-sleep').classList.remove('on');
         toast('Sleep timer: paused');
@@ -6038,9 +6065,17 @@ function bindFloatWidget(rootDoc) {
   });
   root.querySelector('#fw-bar')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!Player.yt || !Player.ready) return;
+    if (Player.cued || isPreviewing()) return;
     const r = e.currentTarget.getBoundingClientRect();
+    if (!r.width) return;
     const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    // Engine B first — same order as npDoSeek
+    if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+      const dur = (Player.native && Player.native.dur) || 0;
+      if (dur) { try { NativePlayback.nativeSeek(frac * dur); } catch {} }
+      return;
+    }
+    if (!Player.yt || !Player.ready) return;
     const dur = Player.yt.getDuration() || 0;
     if (dur) Player.yt.seekTo(frac * dur, true);
   });
@@ -6484,12 +6519,14 @@ function toggleFloatWidget() {
 }
 
 document.addEventListener('visibilitychange', () => {
+  if (Player.nativeActive) return; // native engine owns background playback; never wake yt ghost
   if (!Player.floatOn || !Player.yt || !Player.ready) return;
   try {
     Player.yt.playVideo();
   } catch {}
 });
 setInterval(() => {
+  if (Player.nativeActive) return; // native engine owns background playback; never wake yt ghost
   if (!Player.floatOn || !Player.yt || !Player.ready) return;
   const st = Player.yt.getPlayerState && Player.yt.getPlayerState();
   if (st === 2 && document.hidden) {
