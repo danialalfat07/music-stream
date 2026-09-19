@@ -88,6 +88,7 @@ dependencies {
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     implementation project(':capacitor-android')
     implementation "androidx.media:media:1.7.0"
+    implementation "org.nanohttpd:nanohttpd:2.3.1"
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.xerial:sqlite-jdbc:3.45.0.0"
     testImplementation "org.robolectric:robolectric:4.11.1"

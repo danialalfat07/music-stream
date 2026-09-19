@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.13";
+const APP_VERSION = "2.3.14";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -191,6 +191,7 @@ function closePlayer() {
   $('#np-cur').textContent = '0:00';
   $('#np-dur').textContent = '0:00';
   $('#np-range').value = 0;
+  try { paintNpPlayed(); } catch {}
   $('#np-lyric-preview').textContent = '';
   renderQueue();
   renderPlayButtons();
@@ -913,6 +914,7 @@ function initAudio(){
             $('#np-cur').textContent = fmtTime(cur);
             if (dur) $('#np-dur').textContent = fmtTime(dur);
             $('#np-range').value = dur ? Math.round((cur / dur) * 1000) : 0;
+            try { paintNpPlayed(); } catch {}
             const mc = document.getElementById('mini-cur'); if (mc) mc.textContent = fmtTime(cur);
             if (dur) { const md = document.getElementById('mini-dur'); if (md) md.textContent = fmtTime(dur); }
             const pct = dur ? (cur / dur) * 100 : 0;
@@ -961,6 +963,7 @@ function initAudio(){
     }
     if(!isPreviewing() && !seekDragging){
       $('#np-range').value = dur ? Math.round((cur/dur)*1000):0;
+      try { paintNpPlayed(); } catch {}
       $('#np-cur').textContent = fmtTime(cur);
       $('#np-dur').textContent = fmtTime(dur);
     }
@@ -1763,6 +1766,7 @@ function startNativeTrack(s, loadId) {
   try {
     $('#np-cur').textContent = '0:00';
     $('#np-range').value = 0;
+    try { paintNpPlayed(); } catch {}
     const mc0 = document.getElementById('mini-cur'); if (mc0) mc0.textContent = '0:00';
     const bf0 = document.getElementById('mini-progress-fill'); if (bf0) bf0.style.width = '0%';
     const kn0 = document.querySelector('.pb-knob'); if (kn0) kn0.style.left = '0%';
@@ -1803,6 +1807,15 @@ function paintDlLayer() {
     }
     const a = document.getElementById('mini-dl-fill'); if (a) a.style.width = pct + '%';
     const b = document.getElementById('np-dl-fill'); if (b) b.style.width = pct + '%';
+  } catch {}
+}
+function paintNpPlayed() {
+  // NP played layer + knob follow the input value (single source: #np-range).
+  try {
+    const r = document.getElementById('np-range');
+    const pct = r ? (Number(r.value) || 0) / 10 : 0;
+    const pf = document.getElementById('np-progress-fill'); if (pf) pf.style.width = pct + '%';
+    const kn = document.getElementById('np-knob'); if (kn) kn.style.left = pct + '%';
   } catch {}
 }
 function refreshSourceLabel() {
@@ -2398,6 +2411,7 @@ function progressLoop(ts){
   const mdur = document.getElementById('mini-dur'); if(mdur) mdur.textContent = fmtTime(dur);
   if (!isPreviewing() && !seekDragging) {
     const nr = document.getElementById('np-range'); if(nr) nr.value = dur ? Math.round((cur / dur) * 1000) : 0;
+    try { paintNpPlayed(); } catch {}
     const ncur = document.getElementById('np-cur'); if(ncur) ncur.textContent = fmtTime(cur);
     const ndur = document.getElementById('np-dur'); if(ndur) ndur.textContent = fmtTime(dur);
   }
@@ -5673,6 +5687,7 @@ function miniSeekPreview(clientX) {
 }
 function doMiniSeekFrac(frac) {
   if (Player.cued || isPreviewing()) return;
+  try { paintDlLayer(); } catch {}
   frac = Math.min(1, Math.max(0, frac));
   // Engine B first (was: legacy seek only) — same order as npDoSeek
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
@@ -5885,6 +5900,7 @@ function npSeekDuration(){
 }
 function npDoSeek(frac){
   if (Player.cued || isPreviewing()) return;
+  try { paintDlLayer(); } catch {}
   frac = Math.min(1, Math.max(0, frac));
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
     const dur = (Player.native && Player.native.dur) || 0;
@@ -5909,6 +5925,7 @@ range.addEventListener('input', () => {
   const frac = range.value / 1000;
   const dur = npSeekDuration();
   $('#np-cur').textContent = fmtTime(frac * dur);
+  try { paintNpPlayed(); } catch {}
   // Opsi A: drag = UI only. Engine seek fires once on release (change event below).
 });
 range.addEventListener('change', () => {
@@ -5925,6 +5942,7 @@ if (npSeekRow) {
     if (!rect.width) return;
     const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     range.value = Math.round(frac * 1000);
+    try { paintNpPlayed(); } catch {}
     $('#np-cur').textContent = fmtTime(frac * npSeekDuration());
     // Opsi A: UI only while dragging — single engine seek on release (onNpRowUp).
   };

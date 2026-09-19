@@ -3,6 +3,7 @@ package com.dnialify.musicstream;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -57,7 +58,8 @@ public final class NativeAudioEngine {
     private long lastTotal = -1;      // clen of current track (time<->byte math)
     private String lastUrl = "";      // stream url (refill restarts writer with it)
     private String lastCache = "";    // HIT | MISS (surfaced to WebView badge)
-    private String playFile = "";     // snapshot/final path currently opened
+    private String playFile = "";     // local cache path currently served
+    private LocalStreamServer streamServer; // 127.0.0.1 proxy (no frozen EOF)
     private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
     private int windowChunk = -1;     // playback chunk the window was built for
 
@@ -152,122 +154,24 @@ public final class NativeAudioEngine {
     }
 
     public void seek(int seconds) {
-        int ms = Math.max(0, seconds * 1000);
-        String pf;
-        long total;
-        int dur;
+        // Proxy serves any Range: uncached regions hold (spinner), never EOF.
+        // No refill dance: one direct seek, server waits for the bytes.
         synchronized (lock) {
             if (mp == null || (state != State.PLAYING && state != State.PAUSED)) return;
+            int ms = Math.max(0, seconds * 1000);
             if (durationMs > 0) ms = Math.min(ms, durationMs);
-            pf = playFile;
-            total = lastTotal;
-            dur = durationMs;
-        }
-        // cache-first: instant direct seek only inside locally available bytes
-        long have = 0;
-        try {
-            java.io.File f = new java.io.File(pf);
-            if (f.isFile()) have = f.length();
-        } catch (Exception ignored) {}
-        long needEnd = SongCache.chunkEndFor(ms, dur, total);
-        if (total > 0 && needEnd > 0 && have >= Math.min(needEnd, total)) {
-            synchronized (lock) {
-                if (mp == null || (state != State.PLAYING && state != State.PAUSED)) return;
-                try {
-                    seeking = true;
-                    wasPlayingBeforeSeek = (state == State.PLAYING);
-                    setStateLocked(State.SEEKING);
-                    nlog("[NATIVE_CMD] seek=" + seconds + ".000 local videoId=" + videoId);
-                    mp.seekTo(ms);
-                } catch (Exception e) {
-                    seeking = false;
-                    failLocked(VisionOsResolver.R_MEDIA_ERROR, "seek threw " + e);
-                }
-            }
-            pushAll();
-            return;
-        }
-        // beyond local bytes -> pause, fill, then play at target (never remote seek)
-        nlog("[NATIVE_CMD] seek=" + seconds + ".000 refill videoId=" + videoId);
-        refillAndPlayAt(ms);
-    }
-
-    /**
-     * Pause, fill bytes covering targetMs (resume-aware writer), then startPathAt
-     * a fresh snapshot there. Generation-guarded and idempotent; failures ERROR
-     * (caller falls back to iFrame, never hangs).
-     */
-    private void refillAndPlayAt(int targetMs) {
-        final int gen;
-        final String vid;
-        final Context ac;
-        final long total;
-        final int dur;
-        final String url;
-        synchronized (lock) {
-            if (mp == null) return;
-            gen = playGen;
-            vid = videoId;
-            ac = appCtx;
-            total = lastTotal;
-            dur = durationMs;
-            url = lastUrl;
             try {
-                if (state == State.PLAYING) mp.pause();
-            } catch (Exception ignored) {}
-            seeking = true;
-            wasPlayingBeforeSeek = true;
-            setStateLocked(State.BUFFERING);
-            pendingStartMs = Math.max(0, targetMs);
-            nlog("[CACHE] refill targetMs=" + targetMs + " videoId=" + vid + " gen=" + gen);
+                seeking = true;
+                wasPlayingBeforeSeek = (state == State.PLAYING);
+                setStateLocked(State.SEEKING);
+                nlog("[NATIVE_CMD] seek=" + seconds + ".000 proxy videoId=" + videoId);
+                mp.seekTo(ms);
+            } catch (Exception e) {
+                seeking = false;
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "seek threw " + e);
+            }
         }
         pushAll();
-        if (ac == null || total <= 0 || url == null || url.isEmpty()) {
-            synchronized (lock) {
-                if (gen != playGen) return;
-                failLocked(VisionOsResolver.R_MEDIA_ERROR, "refill unavailable");
-            }
-            pushAll();
-            return;
-        }
-        final Context fac = ac;
-        new Thread(() -> SongCache.download(fac, vid, url, total)).start();
-        // refill headroom: target chunk + 2 extra, so the resumed snapshot
-        // survives past the seek point instead of EOF-looping instantly.
-        // Growing floor: each resume must cover MORE than the snapshot that
-        // just EOFed, or the loop replays the same bytes forever.
-        long oneChunk = SongCache.chunkEndFor(0, dur, total);
-        long prevLen = 0;
-        try {
-            java.io.File pf = new java.io.File(playFile);
-            if (pf.isFile()) prevLen = pf.length();
-        } catch (Exception ignored) {}
-        long needEnd = Math.min(total, Math.max(
-                SongCache.chunkEndFor(targetMs, dur, total) + 2 * oneChunk,
-                prevLen + 2 * oneChunk));
-        if (!waitForBytes(fac, vid, needEnd, gen, total)) return;
-        synchronized (lock) {
-            if (gen != playGen) return;
-        }
-        java.io.File snap = SongCache.snapshotPrefix(fac, vid, needEnd);
-        if (snap == null) {
-            synchronized (lock) {
-                if (gen != playGen) return;
-                failLocked(VisionOsResolver.R_MEDIA_ERROR, "refill snapshot invalid");
-            }
-            pushAll();
-            return;
-        }
-        synchronized (lock) {
-            if (gen != playGen) return;
-        }
-        nlog("[CACHE] refill ready videoId=" + vid + " bytes=" + snap.length()
-                + " at=" + targetMs);
-        synchronized (lock) {
-            if (gen != playGen) return;
-            setWindow(vid, url, total, targetMs, dur, fac);
-        }
-        startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, fac, gen, targetMs);
     }
 
     public void stop(String why) {
@@ -390,44 +294,27 @@ public final class NativeAudioEngine {
                 }
             } catch (Exception ignored) {}
         }).start();
-        // initial need = first TWO chunks (a lone 100KB prefix often yields
-        // ~0ms audio -> instant EOF loop; 200KB carries real clusters)
+        // initial need = first TWO chunks (prepare needs real clusters now).
+        // Playback goes through the local proxy (never a frozen snapshot),
+        // so no snapshot copy here: register the live file and start.
         long oneChunk = SongCache.chunkEndFor(0, (int) r.durationMs, total);
         long need = Math.min(total, 2 * oneChunk);
         if (!waitForBytes(ac, vid, need, gen, total)) return;
         synchronized (lock) {
             if (gen != playGen) return;
         }
-        java.io.File snap = SongCache.snapshotPrefix(ac, vid, need);
-        if (snap == null) {
-            // corrupt prefix -> drop part, re-fetch once, never silent
-            nlog("[CACHE] prefix invalid, re-fetch videoId=" + vid);
-            SongCache.dropPart(ac, vid);
-            new Thread(() -> SongCache.download(ac, vid, url, total)).start();
-            if (!waitForBytes(ac, vid, need, gen, total)) return;
-            synchronized (lock) {
-                if (gen != playGen) return;
-            }
-            snap = SongCache.snapshotPrefix(ac, vid, need);
-            if (snap == null) {
-                synchronized (lock) {
-                    if (gen != playGen) return;
-                    failLocked(VisionOsResolver.R_MEDIA_ERROR, "prefix invalid after refetch");
-                }
-                pushAll();
-                return;
-            }
-        }
+        java.io.File live = SongCache.isComplete(ac, vid)
+                ? SongCache.audioFile(ac, vid) : SongCache.partFile(ac, vid);
         synchronized (lock) {
             if (gen != playGen) return;
-            playFile = snap.getAbsolutePath();
+            playFile = live.getAbsolutePath();
         }
-        nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + snap.length());
+        nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + live.length());
         synchronized (lock) {
             if (gen != playGen) return;
             setWindow(vid, url, total, 0, (int) r.durationMs, ac);
         }
-        startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
+        startPathAt(live.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
     }
 
     /**
@@ -533,6 +420,24 @@ public final class NativeAudioEngine {
         pushAll();
     }
 
+    /** Lazy local proxy; null when it fails (caller falls back to file path). */
+    private LocalStreamServer ensureServer(Context c) {
+        if (streamServer != null) return streamServer;
+        try {
+            Context ac = c != null ? c.getApplicationContext() : appCtx;
+            if (ac == null) return null;
+            LocalStreamServer s = new LocalStreamServer(ac);
+            s.start(10000, true);
+            streamServer = s;
+            nlog("[ENGINE] local proxy port=" + s.port());
+            return s;
+        } catch (Exception e) {
+            nlog("[ENGINE] proxy start FAIL " + e + " -> file fallback");
+            streamServer = null;
+            return null;
+        }
+    }
+
     /** startPath with generation + start offset (initial fill and seek-refill share it). */
     private void startPathAt(String path, Source src, Context c, int gen, int startMs) {
         synchronized (lock) {
@@ -543,11 +448,27 @@ public final class NativeAudioEngine {
             source = src;
             playFile = path;
             setStateLocked(State.BUFFERING);
+            // Serve through the local proxy so a growing file never looks
+            // truncated: the proxy holds Range reads until bytes land.
+            String ds = path;
+            try {
+                LocalStreamServer srv = ensureServer(appCtx != null ? appCtx : c);
+                if (srv != null && lastTotal > 0) {
+                    srv.register(videoId, path, lastTotal);
+                    ds = "http://127.0.0.1:" + srv.port() + "/local-stream/" + videoId;
+                    nlog("[ENGINE] proxy serve videoId=" + videoId);
+                }
+            } catch (Exception ignored) {}
             nlog("[ENGINE] logical=NATIVE source=" + src
-                    + " data=file gen=" + gen + " startMs=" + pendingStartMs
+                    + " data=" + (ds.startsWith("http") ? "proxy" : "file")
+                    + " gen=" + gen + " startMs=" + pendingStartMs
                     + " videoId=" + videoId);
             try {
-                mp.setDataSource(path);
+                if (ds.startsWith("http")) {
+                    mp.setDataSource(appCtx != null ? appCtx : c, Uri.parse(ds));
+                } else {
+                    mp.setDataSource(ds);
+                }
                 mp.prepareAsync();
             } catch (Exception e) {
                 failLocked(VisionOsResolver.R_MEDIA_ERROR, "setDataSource file " + e);
@@ -618,60 +539,18 @@ public final class NativeAudioEngine {
             pushAll();
         });
         mp.setOnCompletionListener(p -> {
-            int playedMs = 0;
-            boolean incomplete = false;
+            // Proxy closes the stream only at true end (or hold timeout):
+            // completion is always real. No re-prepare, no resume loop.
             synchronized (lock) {
-                // truthful position: getDuration() lies (full) on truncated files
                 try {
-                    playedMs = Math.max(0, p.getCurrentPosition());
-                    if (durationMs > 0) playedMs = Math.min(playedMs, durationMs);
+                    currentMs = p.getDuration();
                 } catch (Exception ignored) {}
-                currentMs = playedMs;
-                // premature EOF (snapshot ended, download still filling) -> resume,
-                // never ENDED. True end only when every chunk is on disk.
-                // Fuse: snapshot yielding ~0ms audio repeatedly = unplayable ->
-                // fail over to iFrame instead of busy-looping prepare().
-                try {
-                    JSONObject rec = appCtx != null
-                            ? SongCache.getRecord(appCtx, videoId) : null;
-                    incomplete = !(rec != null && SongCache.ST_COMPLETE.equals(
-                            rec.optString("cacheStatus", "")));
-                } catch (Exception ignored) {
-                    incomplete = true;
-                }
-                // fuse: premature EOFs arriving faster than playback advances
-                // (any position) = stuck loop, ticker starves -> fail over.
-                long nowMs = System.currentTimeMillis();
-                if (incomplete && nowMs - lastPrematureMs < 1500) {
-                    fastResumeStreak++;
-                } else if (incomplete) {
-                    fastResumeStreak = 1;
-                } else {
-                    fastResumeStreak = 0;
-                }
-                lastPrematureMs = nowMs;
-                if (incomplete && fastResumeStreak > 10) {
-                    failLocked(VisionOsResolver.R_MEDIA_ERROR,
-                            "resume loop too fast, fallback");
-                    nlog("[CACHE] resume loop too fast, fallback videoId=" + videoId);
-                    incomplete = false;
-                } else if (incomplete && state != State.STOPPED
-                        && state != State.IDLE && state != State.ERROR) {
-                    nlog("[CACHE] premature EOF, resume at=" + playedMs
-                            + " videoId=" + videoId);
-                } else {
-                    incomplete = false;
-                    if (state != State.ERROR) {
-                        setStateLocked(State.ENDED);
-                        nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
-                    }
+                if (state != State.ERROR) {
+                    setStateLocked(State.ENDED);
+                    nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
                 }
             }
-            if (incomplete) {
-                refillAndPlayAt(playedMs);
-            } else {
-                pushAll();
-            }
+            pushAll();
         });
         mp.setOnErrorListener((p, what, extra) -> {
             synchronized (lock) {
@@ -702,13 +581,12 @@ public final class NativeAudioEngine {
     }
 
     private boolean wasPlayingBeforeSeek;
-    // fuse: premature EOFs arriving faster than playback can advance = stuck
-    // loop (ticker starves, writer stalls) -> fail over instead of spinning.
-    private long lastPrematureMs = 0;
-    private int fastResumeStreak = 0;
 
     private void stopLocked(String why) {
         timer.removeCallbacks(ticker);
+        try {
+            if (streamServer != null) streamServer.unregister(videoId);
+        } catch (Exception ignored) {}
         releaseLocked();
         state = State.STOPPED;
         source = Source.NONE;
@@ -757,9 +635,6 @@ public final class NativeAudioEngine {
     private void tick() {
         synchronized (lock) {
             if (state != State.PLAYING || mp == null) return;
-            // sustained playback proof: snapshots are playable, loops are dead
-            fastResumeStreak = 0;
-            lastPrematureMs = 0;
             try {
                 currentMs = mp.getCurrentPosition();
                 if (durationMs <= 0) durationMs = mp.getDuration();
