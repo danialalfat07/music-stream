@@ -1045,6 +1045,15 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
+        @JavascriptInterface
+        public String nativeVolumeState() {
+            try {
+                return NativeAudioEngine.get().dumpVolumeState();
+            } catch (Exception e) {
+                return "err=" + e;
+            }
+        }
+
         // Phase 8 full-song cache API (WebView logical Library <-> native records).
         @JavascriptInterface
         public String cacheSong(String metaJson) {

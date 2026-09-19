@@ -169,7 +169,13 @@ public class PlaybackService extends Service {
     }
 
     public static void pause(Context context) { dispatch(context, "pause"); }
-    public static void stop(Context context) { dispatch(context, "stop"); }
+    // Stop must never bring the service to foreground: run cleanup directly
+    // when alive, else plain stopService (no ForegroundService timeout risk).
+    public static void stop(Context context) {
+        if (instance != null) { instance.doStop("stop"); return; }
+        try { context.stopService(new Intent(context, PlaybackService.class)); }
+        catch (Exception ignored) {}
+    }
     public static void seek(Context context, double seconds) {
         ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class)
                 .setAction("seek").putExtra("seconds", seconds));
@@ -433,9 +439,41 @@ public class PlaybackService extends Service {
         }
     }
 
+    /** True stop: remove notification, clear state, never re-post until next play. */
+    private int doStop(String action) {
+        try { stopForeground(STOP_FOREGROUND_REMOVE); } catch (Exception ignored) { try { stopForeground(true); } catch (Exception ignored2) {} }
+        try { getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID); } catch (Exception ignored) {}
+        playing = false;
+        isStopped = true;
+        lastStopMs = System.currentTimeMillis();
+        currentLyric = "";
+        // reset title/artist so next publish doesn't resurrect old song title
+        title = "Dnialify Music Stream";
+        artist = "MusicStream";
+        artworkUrl = "";
+        artwork = null;
+        dismissedPaused = true; // stop and swipe alike: no re-push until next play
+        // explicit stop from closePlayer clears session so lockscreen goes away
+        if ("stop".equals(action)) {
+            try { mediaSession.setPlaybackState(new PlaybackStateCompat.Builder().setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f).setActions(0).build()); mediaSession.setActive(false); } catch (Exception ignored) {}
+        }
+        // swipe when paused → stay stopped, don't auto-republish; JS republishes on next play
+        return START_NOT_STICKY;
+    }
+
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        android.util.Log.d("PlaybackService", "onStartCommand action="
+                + (intent != null ? intent.getAction() : "null") + " startId=" + startId);
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
+        // Any non-stop entry must hold foreground immediately: a fresh start
+        // via startForegroundService crashes if startForeground() lags >5s.
+        if (!"stop".equals(action) && !"dismiss".equals(action)) {
+            try { startForeground(NOTIFICATION_ID, buildNotification()); }
+            catch (Exception e) {
+                android.util.Log.w("PlaybackService", "entry startForeground failed: " + e);
+            }
+        }
         if ("webViewState".equals(action)) handleState(intent);
         else if ("nativeProgress".equals(action)) {
             if (isStopped) return START_NOT_STICKY;
@@ -463,29 +501,7 @@ public class PlaybackService extends Service {
             }
         }
         else if ("stop".equals(action) || "dismiss".equals(action)) {
-            // true stop → remove notification and stop foreground, don't recreate until next play
-            try { stopForeground(STOP_FOREGROUND_REMOVE); } catch (Exception ignored) { try { stopForeground(true); } catch (Exception ignored2) {} }
-            try { getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID); } catch (Exception ignored) {}
-            playing = false;
-            isStopped = true;
-            lastStopMs = System.currentTimeMillis();
-            currentLyric = "";
-            // keep title/artist reset to defaults so next publish doesn't resurrect old song title
-            title = "Dnialify Music Stream";
-            artist = "MusicStream";
-            artworkUrl = "";
-            artwork = null;
-            if ("dismiss".equals(action)) dismissedPaused = true;
-            else dismissedPaused = true; // also for explicit stop, prevent re-push until next play
-            // if explicit stop from closePlayer, also clear session state to NONE so lockscreen goes away
-            if ("stop".equals(action)) {
-                try { mediaSession.setPlaybackState(new PlaybackStateCompat.Builder().setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f).setActions(0).build()); mediaSession.setActive(false); } catch (Exception ignored) {}
-            }
-            if ("dismiss".equals(action)) {
-                // swipe when paused → stay stopped, don't auto-republish; JS will republish on next play when pushNativeState playing=true
-                return START_NOT_STICKY;
-            }
-            return START_NOT_STICKY;
+            return doStop(action);
         } else if (ACTION_ARM.equals(action) || "updateNotification".equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);

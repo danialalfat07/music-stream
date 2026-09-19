@@ -2,6 +2,7 @@ package com.dnialify.musicstream;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
@@ -65,6 +66,10 @@ public final class NativeAudioEngine {
     private int windowChunk = -1;     // playback chunk the window was built for
     private int appVolumePercent = 100; // app volume 0..300, multiplies hardware volume
     private LoudnessEnhancer boostEnhancer; // unity-gain boost, attached to mp session
+    private float currentMpVolume = 1.0f; // last gain written to MediaPlayer
+    private AudioManager audioManager; // hardware volume readout for debug logs
+    private boolean capTested = false; // one-shot LoudnessEnhancer cap probe
+    private int enhancerCapMb = -1; // measured device gain ceiling, -1 = unknown
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -208,19 +213,26 @@ public final class NativeAudioEngine {
 
     private void applyVolumeLocked() {
         if (mp == null) return;
+        if (audioManager == null && appCtx != null) {
+            try { audioManager = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE); }
+            catch (Exception ignored) {}
+        }
         float appFraction = appVolumePercent / 100f;
         int gainMb = 0;
         try {
             if (appFraction <= 1.0f) {
+                currentMpVolume = appFraction;
                 mp.setVolume(appFraction, appFraction);
                 if (boostEnhancer != null) {
                     try { boostEnhancer.setTargetGain(0); } catch (Exception ignored) {}
                     try { boostEnhancer.setEnabled(false); } catch (Exception ignored) {}
                 }
             } else {
+                currentMpVolume = 1.0f;
                 mp.setVolume(1.0f, 1.0f);
                 gainMb = (int) (2000 * Math.log10(appFraction));
                 if (boostEnhancer == null) {
+                    probeEnhancerCapLocked();
                     boostEnhancer = new LoudnessEnhancer(mp.getAudioSessionId());
                     boostEnhancer.setEnabled(true);
                 } else {
@@ -232,7 +244,68 @@ public final class NativeAudioEngine {
             nlog("[NATIVE_CMD] volume FAIL " + e);
             return;
         }
-        nlog("[NATIVE_CMD] volumePercent=" + appVolumePercent + " gainMb=" + gainMb);
+        boolean enhOn = false;
+        int enhGain = -1;
+        try {
+            if (boostEnhancer != null) {
+                enhOn = boostEnhancer.getEnabled();
+                enhGain = (int) boostEnhancer.getTargetGain();
+            }
+        } catch (Exception ignored) {}
+        int hwLevel = -1, hwMax = -1;
+        try {
+            if (audioManager != null) {
+                hwLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                hwMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            }
+        } catch (Exception ignored) {}
+        nlog("[NATIVE_CMD] volumePercent=" + appVolumePercent + " gainMb=" + gainMb
+                + " mpVolume=" + currentMpVolume + " enhancerEnabled=" + (enhOn ? "1" : "0")
+                + " enhancerGain=" + enhGain + " hwVolLevel=" + hwLevel + " hwVolMax=" + hwMax
+                + " enhancerCapMb=" + enhancerCapMb);
+    }
+
+    /** One-shot probe: request 2000 mB on this session, read back the real
+     *  ceiling. Reveals device LoudnessEnhancer caps (some cap near 1000 mB). */
+    private void probeEnhancerCapLocked() {
+        if (capTested || mp == null) return;
+        capTested = true;
+        LoudnessEnhancer test = null;
+        try {
+            test = new LoudnessEnhancer(mp.getAudioSessionId());
+            test.setEnabled(true);
+            test.setTargetGain(2000);
+            enhancerCapMb = (int) test.getTargetGain();
+            nlog("[NATIVE_CMD] LoudnessEnhancer cap test: requested=2000 actual=" + enhancerCapMb);
+        } catch (Exception e) {
+            nlog("[NATIVE_CMD] LoudnessEnhancer cap test failed " + e);
+        } finally {
+            try { if (test != null) test.release(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Debug snapshot callable from bridge/ADB: full volume chain in one line. */
+    public String dumpVolumeState() {
+        synchronized (lock) {
+            int enhGain = -1;
+            boolean enhOn = false;
+            try {
+                if (boostEnhancer != null) {
+                    enhGain = (int) boostEnhancer.getTargetGain();
+                    enhOn = boostEnhancer.getEnabled();
+                }
+            } catch (Exception ignored) {}
+            int hwLevel = -1, hwMax = -1;
+            try {
+                if (audioManager != null) {
+                    hwLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                    hwMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                }
+            } catch (Exception ignored) {}
+            return "appVol=" + appVolumePercent + " gainMb=" + enhGain
+                    + " enhEnabled=" + enhOn + " hwVol=" + hwLevel + "/" + hwMax
+                    + " enhancerCapMb=" + enhancerCapMb;
+        }
     }
 
     public JSONObject getState() {
