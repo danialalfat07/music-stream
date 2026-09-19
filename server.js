@@ -23,7 +23,8 @@ if (String(process.env.BLOCK_YOUTUBE || '') === '1') {
   console.warn('BLOCK_YOUTUBE=1: outbound YouTube/googlevideo requests are refused');
 }
 const APP_VERSION_SERVER = PKG.version || '1.2.1';
-const BUILD_CHANNEL = process.env.BUILD_CHANNEL || (String(APP_VERSION_SERVER).includes('-beta') ? 'beta' : 'stable');
+const WEB_VERSION_SERVER = PKG.webVersion || APP_VERSION_SERVER;
+const BUILD_CHANNEL = process.env.BUILD_CHANNEL || (String(WEB_VERSION_SERVER).includes('-beta') ? 'beta' : 'stable');
 const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
@@ -1767,9 +1768,11 @@ app.get('/api/app-version', (req, res) => {
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
   res.json({
-    version: APP_VERSION_SERVER,
+    version: WEB_VERSION_SERVER,
+    webVersion: WEB_VERSION_SERVER,
+    appVersion: APP_VERSION_SERVER,
     channel: BUILD_CHANNEL,
-    assetCache: `dnialify-assets-v${APP_VERSION_SERVER}`,
+    assetCache: `dnialify-assets-v${WEB_VERSION_SERVER}`,
     minVersion: '1.2.0',
     updatedAt: new Date().toISOString(),
   });

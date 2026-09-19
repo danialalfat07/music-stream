@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const ver = pkg.version;
+const ver = pkg.webVersion || pkg.version;
 if (!/^\d+\.\d+\.\d+(-beta\.\d+)?$/.test(ver)) {
   console.error('Invalid version in package.json:', ver);
   process.exit(1);
