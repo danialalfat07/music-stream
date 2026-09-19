@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.21";
+const APP_VERSION = "2.3.22";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -5391,6 +5391,23 @@ function openSleepTimer() {
   modal.classList.remove('hidden');
   setTimeout(() => input && input.focus(), 50);
 }
+function applySettingsEnvironment() {
+  // Section availability follows environment + stream mode.
+  // Disabled sections stay visible at reduced opacity (never hidden).
+  try {
+    const NB = window.NativePlayback;
+    const isApk = !!NB;
+    let mode = 0;
+    try { if (NB) mode = NB.getStreamMode() | 0; } catch {}
+    const dis = (id, off) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('settings-section--disabled', !!off);
+    };
+    dis('sec-engine', !isApk); // web locks Stream to iFrame
+    dis('sec-iframe', isApk && mode === 1); // VisionOS active: iframe rows irrelevant
+    dis('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
+  } catch {}
+}
 function openSettingsModal(tab = 'about') {
   const m = $('#settings-modal');
   if (!m) return;
@@ -5465,57 +5482,68 @@ function openSettingsModal(tab = 'about') {
     };
   }
   const verEl = $('#set-version');
-  // Native-only stream settings (hidden on web; never leaks to production web UI).
-  try {
-    const wrap = $('#set-native-wrap');
-    const NB = window.NativePlayback;
-    if (wrap) wrap.style.display = NB ? '' : 'none';
-    if (NB) {
-      const sBtn = $('#set-stream');
-      const cRow = $('#set-cache-row');
-      const cBtn = $('#set-cache');
-      const mRow = $('#set-max-row');
-      const mBtn = $('#set-max');
-      const dBtn = $('#set-diag');
-      const syncNative = () => {
-        let mode = 0, cache = false, max = 50;
+  // Environment-aware sections: web locks Stream to iFrame; APK follows mode.
+  // Disabled = visible at 50% opacity, not clickable (never hidden).
+  const syncNative = () => {
+    let mode = 0, cache = false, max = 50;
+    try {
+      const NB = window.NativePlayback;
+      if (NB) {
         try { mode = NB.getStreamMode() | 0; } catch {}
         try { cache = !!NB.isAudioCacheOn(); } catch {}
         try { max = NB.getMaxCachedSongs() | 0 || 50; } catch {}
-        if (sBtn) sBtn.querySelector('span').textContent = mode === 1 ? 'VisionOS' : 'iFrame';
-        if (cBtn) {
-          cBtn.querySelector('span').textContent = cache ? 'On' : 'Off';
-          cBtn.classList.toggle('primary', !!cache);
-        }
-        if (mBtn) mBtn.querySelector('span').textContent = String(max);
-        // iFrame -> hide cache rows; VisionOS -> show cache; VisionOS+cache -> show max
-        if (cRow) cRow.style.display = mode === 1 ? '' : 'none';
-        if (mRow) mRow.style.display = mode === 1 && cache ? '' : 'none';
-      };
-      if (sBtn) sBtn.onclick = () => {
-        try {
-          const cur = NB.getStreamMode() | 0;
-          NB.setStreamMode(cur === 1 ? 0 : 1);
-        } catch {}
-        syncNative();
-      };
-      if (cBtn) cBtn.onclick = () => {
-        try { NB.setAudioCache(!NB.isAudioCacheOn()); } catch {}
-        syncNative();
-      };
-      if (mBtn) mBtn.onclick = () => {
-        try {
-          const cur = NB.getMaxCachedSongs() | 0 || 50;
-          NB.setMaxCachedSongs(cur >= 200 ? 5 : cur + 5);
-        } catch {}
-        syncNative();
-      };
-      if (dBtn) dBtn.onclick = () => {
-        try { NB.openVisionOsDiag(); } catch { toast('Diagnostic unavailable'); }
-      };
-      syncNative();
+      }
+    } catch {}
+    const sBtn = $('#set-stream');
+    const cRow = $('#set-cache-row');
+    const cBtn = $('#set-cache');
+    const mRow = $('#set-max-row');
+    const mBtn = $('#set-max');
+    const aqRow = $('#set-aq-row');
+    if (sBtn) {
+      const lbl = sBtn.querySelector('span');
+      if (lbl) lbl.textContent = mode === 1 ? 'VisionOS' : 'iFrame';
     }
+    if (cBtn) {
+      const lbl = cBtn.querySelector('span');
+      if (lbl) lbl.textContent = cache ? 'On' : 'Off';
+      cBtn.classList.toggle('primary', !!cache);
+    }
+    if (mBtn) mBtn.querySelector('span').textContent = String(max);
+    // iFrame -> hide cache rows; VisionOS -> show cache; VisionOS+cache -> show max + quality
+    if (cRow) cRow.style.display = mode === 1 ? '' : 'none';
+    if (mRow) mRow.style.display = mode === 1 && cache ? '' : 'none';
+    if (aqRow) aqRow.style.display = mode === 1 && cache ? '' : 'none';
+    applySettingsEnvironment();
+  };
+  try {
+    const NB = window.NativePlayback;
+    const sBtn = $('#set-stream');
+    const cBtn = $('#set-cache');
+    const mBtn = $('#set-max');
+    if (sBtn) sBtn.onclick = () => {
+      try {
+        if (!NB) return;
+        const cur = NB.getStreamMode() | 0;
+        NB.setStreamMode(cur === 1 ? 0 : 1);
+      } catch {}
+      syncNative();
+    };
+    if (cBtn) cBtn.onclick = () => {
+      try { if (NB) NB.setAudioCache(!NB.isAudioCacheOn()); } catch {}
+      syncNative();
+    };
+    if (mBtn) mBtn.onclick = () => {
+      try {
+        if (!NB) return;
+        const cur = NB.getMaxCachedSongs() | 0 || 50;
+        NB.setMaxCachedSongs(cur >= 200 ? 5 : cur + 5);
+      } catch {}
+      syncNative();
+    };
+    syncNative();
   } catch {}
+  applySettingsEnvironment();
   if (verEl) verEl.textContent = APP_VERSION;
   if (verEl) verEl.textContent = APP_VERSION;
   const updBtn = $('#set-update');
@@ -5559,18 +5587,6 @@ function openSettingsModal(tab = 'about') {
       } finally {
         if (updLabel && updLabel.textContent === 'Checking…') updLabel.textContent = 'Check update';
         if (!pendingWebUpdate) updBtn.disabled = false;
-      }
-    };
-  }
-  const copy = $('#contact-copy');
-  if (copy) {
-    copy.onclick = async () => {
-      const txt = `Dnialify Project\nWA 089648528585\nFB https://www.facebook.com/danial.alfat7/\nIG https://instagram.com/dann4lfat_\nX https://twitter.com/dann4lfat_\nTG https://t.me/dann4lfat`;
-      try {
-        await navigator.clipboard.writeText(txt);
-        toast('Contacts copied');
-      } catch {
-        toast(txt);
       }
     };
   }

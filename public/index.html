@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.21" />
+<meta name="app-version" content="2.3.22" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -278,14 +278,13 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.21 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.3.22 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div class="settings-tabs">
         <button data-stab="about" class="chip active">About</button>
         <button data-stab="settings" class="chip">Settings</button>
-        <button data-stab="social" class="chip">Contact</button>
       </div>
       <div class="settings-body">
         <div data-spane="about" class="s-pane active">
@@ -300,11 +299,14 @@ try {
           <div class="settings-credit">© 2026 Dnialify Project - Gratis. Bebas dipakai.<br><span style="color:var(--muted)">Not affiliated with YouTube, Google, Spotify. Audio via official YouTube IFrame.</span></div>
         </div>
         <div data-spane="settings" class="s-pane">
-          <div class="settings-row"><span class="s-label">Theme</span><button id="set-theme" class="pill-btn"><svg class="ic"><use href="#i-sun"/></svg><span>Toggle</span></button></div>
-          <div class="settings-row"><span class="s-label">SponsorBlock auto-skip</span><button id="set-sb" class="pill-btn"><span>On</span></button></div>
-          <div class="settings-row"><span class="s-label">Quality</span><button id="set-quality" class="pill-btn"><span>YouTube Music</span></button></div>
-          <div class="settings-row"><span class="s-label">Playback speed</span><button id="set-speed" class="pill-btn"><span>1×</span></button></div>
-          <div class="settings-row vol-row">
+          <div class="settings-section" id="sec-appearance">
+            <div class="settings-section-title">Appearance</div>
+            <div class="settings-row"><span class="s-label">Theme</span><button id="set-theme" class="pill-btn"><svg class="ic"><use href="#i-sun"/></svg><span>Toggle</span></button></div>
+            <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
+          </div>
+          <div class="settings-section" id="sec-playback">
+            <div class="settings-section-title">Playback</div>
+            <div class="settings-row vol-row">
   <div class="vol-label-capsul"><span class="s-label">Volume</span><span id="vol-value" class="vol-value">100%</span></div>
   <div class="vol-slider-wrap">
     <div id="vol-slider" class="vol-slider" role="slider" aria-valuemin="0" aria-valuemax="300" aria-valuenow="100" aria-label="Volume" tabindex="0">
@@ -328,26 +330,29 @@ try {
     </div>
   </div>
 </div>
-          <div class="settings-row"><span class="s-label">Widget</span><button id="set-float" class="pill-btn"><svg class="ic"><use href="#i-pip"/></svg><span>Toggle</span></button></div>
-          <div id="set-native-wrap" style="display:none">
-            <div class="settings-row"><span class="s-label">Stream (native)</span><button id="set-stream" class="pill-btn"><span>iFrame</span></button></div>
+            <div class="settings-row"><span class="s-label">Playback speed</span><button id="set-speed" class="pill-btn"><span>1×</span></button></div>
+          </div>
+          <div class="settings-section" id="sec-engine">
+            <div class="settings-section-title">Playback Engine</div>
+            <div class="settings-row"><span class="s-label">Stream mode</span><button id="set-stream" class="pill-btn"><span>iFrame</span></button></div>
+          </div>
+          <div class="settings-section" id="sec-iframe">
+            <div class="settings-section-title">iFrame Mode</div>
+            <div class="settings-row"><span class="s-label">Quality</span><button id="set-quality" class="pill-btn"><span>YouTube Music</span></button></div>
+            <div class="settings-row"><span class="s-label">SponsorBlock auto-skip</span><button id="set-sb" class="pill-btn"><span>On</span></button></div>
+          </div>
+          <div class="settings-section" id="sec-visionos">
+            <div class="settings-section-title">VisionOS Mode</div>
             <div class="settings-row" id="set-cache-row" style="display:none"><span class="s-label">Audio Cache</span><button id="set-cache" class="pill-btn"><span>Off</span></button></div>
             <div class="settings-row" id="set-max-row" style="display:none"><span class="s-label">Max Cached Songs</span><button id="set-max" class="pill-btn"><span>50</span></button></div>
-            <div class="settings-row"><span class="s-label">VisionOS Diagnostic</span><button id="set-diag" class="pill-btn"><span>Open</span></button></div>
+            <div class="settings-row settings-row--locked" id="set-aq-row" style="display:none"><span class="s-label">Audio Quality<span class="badge-soon">Soon</span></span><button class="pill-btn" disabled><span>Auto</span></button></div>
           </div>
-          <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.3.21</span> · untuk update aplikasi Android download APK baru</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
-        </div>
-        <div data-spane="social" class="s-pane">
-          <div class="settings-contact">
-            <div class="sc-row"><svg class="ic"><use href="#i-wa"/></svg><span>WA</span><a href="https://wa.me/6289648528585" target="_blank" rel="noopener">089648528585</a></div>
-            <div class="sc-row"><svg class="ic"><use href="#i-fb"/></svg><span>FB</span><a href="https://www.facebook.com/danial.alfat7/" target="_blank" rel="noopener">danial.alfat7</a></div>
-            <div class="sc-row"><svg class="ic"><use href="#i-ig"/></svg><span>IG</span><a href="https://instagram.com/dann4lfat_" target="_blank" rel="noopener">dann4lfat_</a></div>
-            <div class="sc-row"><svg class="ic"><use href="#i-tw"/></svg><span>X</span><a href="https://twitter.com/dann4lfat_" target="_blank" rel="noopener">dann4lfat_</a></div>
-            <div class="sc-row"><svg class="ic"><use href="#i-tg"/></svg><span>TG</span><a href="https://t.me/dann4lfat" target="_blank" rel="noopener">dann4lfat</a></div>
+          <div class="settings-section" id="sec-about">
+            <div class="settings-section-title">About</div>
+            <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Web v<span id="set-version">2.3.22</span> · for new Android app versions download a new APK</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px"><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Download APK Android (GH Actions → Android Build)</a></div>
           </div>
-          <button id="contact-copy" class="pill-btn primary" style="width:100%;justify-content:center;margin-top:12px"><svg class="ic"><use href="#i-share"/></svg><span>Copy all contacts</span></button>
         </div>
       </div>
     </div>
@@ -408,7 +413,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.21";
+    var VER="2.3.22";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
