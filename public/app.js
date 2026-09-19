@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "2.3.1";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3441,6 +3441,7 @@ function cacheSet(hash, html) {
   pageCache.set(hash, { html, ts: Date.now() });
 }
 
+let _vtRunning = false; // view-transition lock: never nest transitions (stuck black #view on mobile WebView)
 async function route() {
   const hash = location.hash || '#/home';
   const [path, qs] = hash.slice(2).split('?');
@@ -3528,8 +3529,10 @@ async function route() {
   }
   view.classList.add('view-enter');
   };
-  if (document.startViewTransition) {
-    try { await document.startViewTransition(runRoute).finished; } catch { await runRoute(); }
+  if (document.startViewTransition && !_vtRunning) {
+    _vtRunning = true;
+    try { await document.startViewTransition(runRoute).finished; } catch { try { await runRoute(); } catch {} }
+    _vtRunning = false;
   } else {
     await runRoute();
   }
@@ -4212,6 +4215,68 @@ function viewStats(view) {
 }
 
 /* ---- Library ---- */
+function offlineBodyHTML() {
+  // Sync, guarded: returns list HTML or empty state. NEVER throws, NEVER ''.
+  const empty = emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
+  try {
+    const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
+    const items = Object.values(m).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const statusText = (e) => {
+      switch (e.cacheStatus) {
+        case 'COMPLETE': return 'Downloaded · Offline';
+        case 'DOWNLOADING': return `Downloading… ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+        case 'QUEUED': return 'Queued';
+        case 'PAUSED': return `Paused · ${Number(e.downloadPercent || 0).toFixed(0)}%`;
+        case 'FAILED': return `Failed · ${e.failReason || ''}`;
+        default: return e.cacheStatus || 'Queued';
+      }
+    };
+    const actionBtn = (e) => {
+      if (e.cacheStatus === 'PAUSED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↓ Continue Download</span></button>`;
+      if (e.cacheStatus === 'FAILED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↻ Retry Download</span></button>`;
+      return '';
+    };
+    const rowHTML = (e) => {
+      try {
+        const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
+        const art = e.artworkThumb || e.thumbnail || '';
+        const badge = e.cacheStatus === 'COMPLETE' ? `<div class="off-done">✓ Downloaded</div>`
+          : `<div class="off-bar"><div class="off-fill" style="width:${pct}%"></div></div><div class="off-pct">${pct.toFixed(0)}%</div>`;
+        const click = e.offlineAvailable ? ` data-offplay="${esc(e.videoId)}"` : '';
+        const dur = Number(e.duration) > 0 ? `<span class="tdur">${esc(fmtTime(Number(e.duration)))}</span>` : '';
+        return `<div class="off-wrap"><div class="track off-row"${click}>
+          ${coverHTML(art, 'track')}
+          <div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div><div class="ts">${esc(e.artist || '')} · ${esc(statusText(e))}</div></div>
+          ${dur}
+          ${badge}
+        </div>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
+      } catch {
+        return '';
+      }
+    };
+    const rows = items.map(rowHTML).join('');
+    return rows
+      ? `${trackHeadHTML()}<div class="track-list">${rows}</div>`
+      : empty;
+  } catch {
+    return empty;
+  }
+}
+function bindOfflineRows(root) {
+  // Phase 8 offline rows: COMPLETE -> native CACHED_AUDIO, never iFrame
+  $$('[data-offplay]', root).forEach((b) =>
+    b.addEventListener('click', () => {
+      try { OfflineLib.play(b.dataset.offplay); } catch {}
+    }),
+  );
+  // PARTIAL/PAUSED/FAILED -> resume via proven record mechanism (never byte 0)
+  $$('[data-offcont]', root).forEach((b) =>
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      try { OfflineLib.continueDownload(b.dataset.offcont); } catch {}
+    }),
+  );
+}
 function viewLibrary(view, tab) {
   const tabs = [
     ['playlists', 'Playlists'],
@@ -4237,57 +4302,21 @@ function viewLibrary(view, tab) {
           { label: 'Find songs', go: '#/search', ic: 'i-heart-o' },
         );
   } else if (tab === 'offline') {
-    // Phase 8 offline library: native records mirrored in smw_off (sync paint + async refresh).
-    // Blank-screen guard: ANY failure here must fall back to the empty state, never an empty body.
-    try {
-      if (typeof OfflineLib !== 'undefined' && OfflineLib.hasBridge()) {
-        try {
-          OfflineLib.syncFromNative().then(() => {
-            if ((location.hash || '') === '#/library/offline') route();
-          }).catch(() => {});
-        } catch {}
-      }
-      const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
-      const items = Object.values(m).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      const statusText = (e) => {
-        switch (e.cacheStatus) {
-          case 'COMPLETE': return 'Downloaded · Offline';
-          case 'DOWNLOADING': return `Downloading… ${Number(e.downloadPercent || 0).toFixed(0)}%`;
-          case 'QUEUED': return 'Queued';
-          case 'PAUSED': return `Paused · ${Number(e.downloadPercent || 0).toFixed(0)}%`;
-          case 'FAILED': return `Failed · ${e.failReason || ''}`;
-          default: return e.cacheStatus || 'Queued';
-        }
-      };
-      const actionBtn = (e) => {
-        if (e.cacheStatus === 'PAUSED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↓ Continue Download</span></button>`;
-        if (e.cacheStatus === 'FAILED') return `<button type="button" class="pill-btn" data-offcont="${esc(e.videoId)}"><span>↻ Retry Download</span></button>`;
-        return '';
-      };
-      const rowHTML = (e) => {
-        try {
-          const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
-          const art = e.artworkThumb || e.thumbnail || '';
-          const badge = e.cacheStatus === 'COMPLETE' ? `<div class="off-done">✓ Downloaded</div>`
-            : `<div class="off-bar"><div class="off-fill" style="width:${pct}%"></div></div><div class="off-pct">${pct.toFixed(0)}%</div>`;
-          const click = e.offlineAvailable ? ` data-offplay="${esc(e.videoId)}"` : '';
-          const dur = Number(e.duration) > 0 ? `<span class="tdur">${esc(fmtTime(Number(e.duration)))}</span>` : '';
-          return `<div class="off-wrap"><div class="track off-row"${click}>
-            ${coverHTML(art, 'track')}
-            <div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div><div class="ts">${esc(e.artist || '')} · ${esc(statusText(e))}</div></div>
-            ${dur}
-            ${badge}
-          </div>${actionBtn(e) ? `<div class="off-actions">${actionBtn(e)}</div>` : ''}</div>`;
-        } catch {
-          return '';
-        }
-      };
-      const rows = items.map(rowHTML).join('');
-      body = rows
-        ? `${trackHeadHTML()}<div class="track-list">${rows}</div>`
-        : emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
-    } catch {
-      body = emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
+    // Two-phase paint: header+pills+body painted ONCE by generic paint below.
+    // Async native sync only swaps #lib-body content — header/pills never re-rendered,
+    // and no second route() means no nested view transition (the mobile black-screen cause).
+    body = `<div id="lib-body">${offlineBodyHTML()}</div>`;
+    if (typeof OfflineLib !== 'undefined' && OfflineLib.hasBridge()) {
+      try {
+        OfflineLib.syncFromNative().then(() => {
+          if ((location.hash || '') !== '#/library/offline') return;
+          const host = $('#lib-body');
+          if (!host) return;
+          host.innerHTML = offlineBodyHTML();
+          bindOfflineRows(host);
+          bindEmptyCtas(host);
+        }).catch(() => {});
+      } catch {}
     }
   } else if (tab === 'history') {
     const h = Library.history;
@@ -4334,19 +4363,7 @@ function viewLibrary(view, tab) {
   view.innerHTML = `<div class="page-title">Library</div>
     <div class="chip-row">${tabs.map(([id, l]) => `<button class="chip ${tab === id ? 'active' : ''}" onclick="location.hash='#/library/${id}'">${l}</button>`).join('')}</div>${body}`;
   bindItems(view);
-  // Phase 8 offline rows: COMPLETE -> native CACHED_AUDIO, never iFrame
-  $$('[data-offplay]', view).forEach((b) =>
-    b.addEventListener('click', () => {
-      try { OfflineLib.play(b.dataset.offplay); } catch {}
-    }),
-  );
-  // PARTIAL/PAUSED/FAILED -> resume via proven record mechanism (never byte 0)
-  $$('[data-offcont]', view).forEach((b) =>
-    b.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      try { OfflineLib.continueDownload(b.dataset.offcont); } catch {}
-    }),
-  );
+  bindOfflineRows(view);
   const np = $('#btn-newpl');
   if (np) np.addEventListener('click', openCreatePlaylist);
   const im = $('#btn-import');
