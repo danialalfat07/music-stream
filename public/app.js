@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.4";
+const APP_VERSION = "2.3.5";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -887,6 +887,12 @@ function initAudio(){
         state: ev.state, source: ev.source, cur: Number(ev.currentTime || 0),
         dur: Number(ev.duration || 0),
       };
+      // Orphan adoption: page reload (auto-update) wipes JS flags while the engine
+      // keeps playing. Without this, progressLoop writes legacy zeros every frame
+      // (slider jumps, frozen notif, stuck icon). Active states re-assert ownership.
+      if (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING' || ev.state === 'SEEKING') {
+        Player.nativeActive = true;
+      }
       const method = ev.source === 'CACHED_AUDIO' ? 'Cached Audio'
         : ev.source === 'VISIONOS' ? 'VisionOS Audio' : '';
       if (method && (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING')) {
@@ -1808,6 +1814,14 @@ function startCurrent() {
         return;
     }
   }
+  // Single-engine invariant: entering the WebView path (audio/YT) always stops
+  // Engine B first and clears its flags. Required since orphan adoption keeps
+  // nativeActive true across reloads — without this a web tap would double-play.
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
+    try { NativePlayback.nativeStop(); } catch {}
+  }
+  Player.nativeActive = false;
+  Player.native = false;
   // try audio first (background capable)
   (async () => {
     const audioOk = Player.useAudio && Player.audioReady ? await playViaAudio(s) : false;
@@ -6499,6 +6513,24 @@ updateThemeIcon();
 // versioning — website vs user data separated, mandatory update checks
 migrateUserDataIfNeeded();
 setupVersionChecks();
+try {
+  // Adopt orphan engine: reload wipes Player.current while native keeps playing.
+  // Without current, transport buttons early-return (dead pause) even though audible.
+  if (!Player.current && window.NativePlayback && NativePlayback.nativeState) {
+    const st = JSON.parse(NativePlayback.nativeState() || '{}');
+    if (st && (st.state === 'PLAYING' || st.state === 'PAUSED' || st.state === 'BUFFERING' || st.state === 'SEEKING') && st.videoId) {
+      Player.current = { videoId: st.videoId, title: st.title || '', artist: st.artist || '', thumbnail: st.artwork || '' };
+      Player.queue = [Player.current];
+      Player.index = 0;
+      Player.nativeActive = true;
+      Player.native = { state: st.state, source: st.source, cur: Number(st.currentTime || 0), dur: Number(st.duration || 0) };
+      $('#miniplayer').classList.remove('hidden');
+      document.body.classList.add('has-player');
+      try { renderNowPlaying(); } catch {}
+      try { renderPlayButtons(); } catch {}
+    }
+  }
+} catch {}
 try {
   const stored = localStorage.getItem('dnialify_version');
   if (stored && stored !== APP_VERSION) {
