@@ -104,7 +104,16 @@ public class PlaybackService extends Service {
     // (web still owns queue/metadata decisions via events).
     public static void nativeProgress(Context context, String title, String artist,
             String artwork, boolean playing, long positionMs, long durationMs) {
+        android.util.Log.d("PlaybackService", "nativeProgress playing=" + playing
+                + " title=" + title + " hasInstance=" + (instance != null));
         if (instance != null) {
+            // Native resume after a prior stop/swipe: a real PLAYING report must
+            // clear the dead flags, otherwise this returns silently and the
+            // notification never re-appears in VisionOS mode.
+            if (playing) {
+                instance.dismissedPaused = false;
+                instance.isStopped = false;
+            }
             if (instance.isStopped) return;
             if (title != null && !title.isEmpty()) instance.title = title;
             if (artist != null) instance.artist = artist;
