@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.12";
+const APP_VERSION = "2.3.13";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -893,14 +893,16 @@ function initAudio(){
       if (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING' || ev.state === 'SEEKING') {
         Player.nativeActive = true;
       }
-      const method = ev.source === 'CACHED_AUDIO' ? 'Cached Audio'
-        : ev.source === 'VISIONOS' ? 'VisionOS Audio' : '';
-      if (method && (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING')) {
-        try { window.setPlayMethod(method); } catch {}
-      }
-      // cache-first fill: never silent — badge shows progress state during MISS
       if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS') {
         try { window.setPlayMethod('Menghubungkan…'); } catch {}
+      } else if (Player.nativeActive) {
+        refreshSourceLabel();
+      } else {
+        const method = ev.source === 'CACHED_AUDIO' ? 'Cached Audio'
+          : ev.source === 'VISIONOS' ? 'VisionOS Audio' : '';
+        if (method && (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING')) {
+          try { window.setPlayMethod(method); } catch {}
+        }
       }
       // progress UI from native time (source of truth when nativeActive)
       if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {
@@ -1673,6 +1675,12 @@ const OfflineLib = {
     this.save(m);
     if (ev.event === 'cacheComplete') toast(`Offline ready: ${m[vid].title || vid}`);
     else if (ev.event === 'cacheError') toast(`Cache failed: ${m[vid].title || vid}`);
+    try {
+      if (Player.current && Player.current.videoId === vid) {
+        paintDlLayer();
+        refreshSourceLabel();
+      }
+    } catch {}
     if ((location.hash || '').startsWith('#/library/offline')) route();
     try { renderSidebarLibrary(); } catch {}
   },
@@ -1777,6 +1785,44 @@ function startNativeTrack(s, loadId) {
     startCurrent();
   }
 }
+function paintDlLayer() {
+  // Layer 2 (downloaded range): mirror data only, event-driven (cache events
+  // + track change). Never estimated, never polled.
+  try {
+    const s = Player.current;
+    let pct = 0;
+    if (s && typeof OfflineLib !== 'undefined' && OfflineLib.get) {
+      const e = OfflineLib.get(s.videoId);
+      if (e) {
+        if (e.cacheStatus === 'COMPLETE') pct = 100;
+        else if (Number(e.audioSize) > 0) {
+          pct = Math.max(0, Math.min(100,
+            (Number(e.downloadedBytes) || 0) / Number(e.audioSize) * 100));
+        }
+      }
+    }
+    const a = document.getElementById('mini-dl-fill'); if (a) a.style.width = pct + '%';
+    const b = document.getElementById('np-dl-fill'); if (b) b.style.width = pct + '%';
+  } catch {}
+}
+function refreshSourceLabel() {
+  // VisionOS (<100% cached) vs Offline Downloader ✓ (100%). Native only;
+  // other engines keep the legacy badge. Reset on every track change.
+  try {
+    const s = Player.current;
+    if (!Player.nativeActive || !s) return;
+    let done = false;
+    if (typeof OfflineLib !== 'undefined' && OfflineLib.get) {
+      const e = OfflineLib.get(s.videoId);
+      if (e) {
+        done = e.cacheStatus === 'COMPLETE'
+          || (Number(e.audioSize) > 0
+            && (Number(e.downloadedBytes) || 0) >= Number(e.audioSize));
+      }
+    }
+    window.setPlayMethod(done ? 'Offline Downloader ✓' : 'VisionOS');
+  } catch {}
+}
 function onTrackChanged(s) {
   // Single choke point: every track change refreshes track-bound UI here.
   // (Player.current is a queue[index] getter, so all paths funnel via startCurrent.)
@@ -1784,6 +1830,8 @@ function onTrackChanged(s) {
   try { loadLyrics(s); } catch {}
   try { if (s.thumbnail) loadPipArt(s.thumbnail); } catch {}
   try { drawPipFrame(); } catch {}
+  try { paintDlLayer(); } catch {}
+  try { refreshSourceLabel(); } catch {}
 }
 function startCurrent() {
   if (_isClosed) return;
@@ -2056,11 +2104,14 @@ function togglePlay() {
     return;
   }
   // Phase 8 Engine B: route transport to native, logical Player unchanged.
+  // Button never dead: transitional states (BUFFERING/SEEKING/etc) restart the
+  // current track instead of no-op; spinner stays clickable throughout.
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeState) {
     try {
       const st = JSON.parse(NativePlayback.nativeState());
       if (st && st.state === 'PLAYING') NativePlayback.nativePause();
-      else NativePlayback.nativeResume();
+      else if (st && st.state === 'PAUSED') NativePlayback.nativeResume();
+      else if (Player.current) startCurrent();
     } catch {}
     return;
   }
