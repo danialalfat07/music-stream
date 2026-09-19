@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.1";
+const APP_VERSION = "2.3.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -895,15 +895,18 @@ function initAudio(){
       // progress UI from native time (source of truth when nativeActive)
       if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {
         const cur = Player.native.cur, dur = Player.native.dur;
+        // position widgets freeze while dragging (mirror/icon/lyrics still update) — no fight, no blink
         try {
-          $('#np-cur').textContent = fmtTime(cur);
-          if (dur) $('#np-dur').textContent = fmtTime(dur);
-          $('#np-range').value = dur ? Math.round((cur / dur) * 1000) : 0;
-          const mc = document.getElementById('mini-cur'); if (mc) mc.textContent = fmtTime(cur);
-          if (dur) { const md = document.getElementById('mini-dur'); if (md) md.textContent = fmtTime(dur); }
-          const pct = dur ? (cur / dur) * 100 : 0;
-          const bf = document.getElementById('mini-progress-fill'); if (bf) bf.style.width = pct + '%';
-          const kn = document.querySelector('.pb-knob'); if (kn) kn.style.left = pct + '%';
+          if (!(seekDragging || miniSeekDragging)) {
+            $('#np-cur').textContent = fmtTime(cur);
+            if (dur) $('#np-dur').textContent = fmtTime(dur);
+            $('#np-range').value = dur ? Math.round((cur / dur) * 1000) : 0;
+            const mc = document.getElementById('mini-cur'); if (mc) mc.textContent = fmtTime(cur);
+            if (dur) { const md = document.getElementById('mini-dur'); if (md) md.textContent = fmtTime(dur); }
+            const pct = dur ? (cur / dur) * 100 : 0;
+            const bf = document.getElementById('mini-progress-fill'); if (bf) bf.style.width = pct + '%';
+            const kn = document.querySelector('.pb-knob'); if (kn) kn.style.left = pct + '%';
+          }
         } catch {}
         try { if (!isPreviewing()) updateLyricHighlight(cur); } catch {}
         try {
@@ -5513,9 +5516,34 @@ $('#mini-repeat').addEventListener('click', (e) => {
 });
 /* click-to-seek on the bar */
 const miniBar = $('#mini-bar');
-function seekMiniBar(clientX) {
+let miniSeekFrac = 0;
+let miniSeekMoved = false;
+function miniBarFrac(clientX) {
   const r = miniBar.getBoundingClientRect();
-  const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+  if (!r.width) return 0;
+  return Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+}
+function miniSeekPreview(clientX) {
+  // Opsi A: drag = UI only, no engine seek until release
+  const frac = miniBarFrac(clientX);
+  miniSeekFrac = frac;
+  miniSeekMoved = true;
+  try {
+    const dur = npSeekDuration();
+    const mc = document.getElementById('mini-cur'); if (mc) mc.textContent = fmtTime(frac * dur);
+    const bf = document.getElementById('mini-progress-fill'); if (bf) bf.style.width = (frac * 100) + '%';
+    const kn = document.querySelector('#mini-bar .pb-knob'); if (kn) kn.style.left = (frac * 100) + '%';
+  } catch {}
+}
+function doMiniSeekFrac(frac) {
+  if (Player.cued || isPreviewing()) return;
+  frac = Math.min(1, Math.max(0, frac));
+  // Engine B first (was: legacy seek only) — same order as npDoSeek
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+    const dur = (Player.native && Player.native.dur) || 0;
+    if (dur) NativePlayback.nativeSeek(frac * dur);
+    return;
+  }
   if (Player.native && window.NativePlayback) {
     const dur = window.NativePlayback.duration() || 0;
     if (dur) window.NativePlayback.seek(frac * dur);
@@ -5529,26 +5557,38 @@ function seekMiniBar(clientX) {
   const dur = Player.yt.getDuration() || 0;
   if (dur) Player.yt.seekTo(frac * dur, true);
 }
+function seekMiniBar(clientX) {
+  const frac = miniBarFrac(clientX);
+  miniSeekFrac = frac;
+  doMiniSeekFrac(frac);
+}
 miniBar.addEventListener('click', (e) => seekMiniBar(e.clientX));
 let miniSeekDragging = false;
 const onMiniSeekMove = (e) => {
   if (!miniSeekDragging || e.pointerId !== miniSeekPointerId) return;
   if (e.cancelable) e.preventDefault();
-  seekMiniBar(e.clientX);
+  miniSeekPreview(e.clientX); // UI only — engine seek fires once on release
 };
 let miniSeekPointerId = null;
 const stopMiniSeek = (e) => {
   if (miniSeekPointerId !== null && e && e.pointerId !== miniSeekPointerId) return;
+  const was = miniSeekDragging;
+  const moved = miniSeekMoved;
+  const frac = miniSeekFrac;
   miniSeekDragging = false;
   miniSeekPointerId = null;
+  miniSeekMoved = false;
+  // tap already seeked on pointerdown; dragged release seeks once here
+  if (was && moved) { try { doMiniSeekFrac(frac); } catch {} }
 };
 miniBar.addEventListener('pointerdown', (e) => {
   if (e.button !== undefined && e.button !== 0) return;
   miniSeekDragging = true;
+  miniSeekMoved = false;
   miniSeekPointerId = e.pointerId;
   miniBar.setPointerCapture?.(e.pointerId);
   if (e.cancelable) e.preventDefault();
-  seekMiniBar(e.clientX);
+  seekMiniBar(e.clientX); // tap = instant seek (unchanged behavior)
 });
 miniBar.addEventListener('pointermove', onMiniSeekMove, { passive: false });
 miniBar.addEventListener('pointerup', stopMiniSeek);
@@ -5733,8 +5773,7 @@ range.addEventListener('input', () => {
   const frac = range.value / 1000;
   const dur = npSeekDuration();
   $('#np-cur').textContent = fmtTime(frac * dur);
-  // live seek for native/audio for immediate feedback
-  if (Player.native || (Player.useAudio && Player.audio)) npDoSeek(frac);
+  // Opsi A: drag = UI only. Engine seek fires once on release (change event below).
 });
 range.addEventListener('change', () => {
   seekDragging = false;
@@ -5751,7 +5790,7 @@ if (npSeekRow) {
     const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     range.value = Math.round(frac * 1000);
     $('#np-cur').textContent = fmtTime(frac * npSeekDuration());
-    npDoSeek(frac);
+    // Opsi A: UI only while dragging — single engine seek on release (onNpRowUp).
   };
   const onNpRowDown = (e) => {
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -5769,6 +5808,7 @@ if (npSeekRow) {
   const onNpRowUp = () => {
     if (!npRowDragging) return;
     npRowDragging = false;
+    try { npDoSeek(range.value / 1000); } catch {}
     setTimeout(() => { seekDragging = false; }, 80);
   };
   npSeekRow.addEventListener('mousedown', onNpRowDown);
