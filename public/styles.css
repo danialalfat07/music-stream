@@ -1398,7 +1398,7 @@ body.hq-audio #yt-player {
   .pb-center { flex-direction: row; max-width: none; width: auto; }
   .pb-seek { position: absolute; left: 8px; right: 8px; bottom: 0; }
   .pb-seek span { display: none; }
-  .pb-bar { height: 3px; }
+  .pb-bar { height: 6px; }
   .pb-buttons { gap: 8px; }
   #mini-shuffle, #mini-repeat { display: none; }
   .play-circle { width: 34px; height: 34px; }
