@@ -23,7 +23,7 @@ let html = fs.readFileSync(htmlPath, 'utf8');
 html = html.replace(/<meta name="app-version" content="[^"]+" \/>/, `<meta name="app-version" content="${ver}" />`);
 html = html.replace(/var VER="[^"]+";/, `var VER="${ver}";`);
 html = html.replace(/by Dnialify Project · v[^·<]+ ·/, `by Dnialify Project · v${ver} ·`);
-html = html.replace(/Web v<span id="set-version">[^<]+<\/span>/, `Web v<span id="set-version">${ver}</span>`);
+html = html.replace(/v<span id="set-version">[^<]+<\/span>/, `v<span id="set-version">${ver}</span>`);
 fs.writeFileSync(htmlPath, html);
 
 // public/sw.js
