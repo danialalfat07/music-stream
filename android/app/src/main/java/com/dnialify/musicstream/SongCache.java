@@ -42,7 +42,7 @@ public final class SongCache {
     public static final String LY_PENDING = "PENDING";
     public static final String LY_FAILED = "FAILED";
 
-    private static final int CHUNK = 524288;
+    private static final int CHUNK = 102400;
     static final int TIMEOUT_MS = 20000;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
     private static final String UA =

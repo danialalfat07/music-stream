@@ -58,6 +58,8 @@ public final class NativeAudioEngine {
     private String lastUrl = "";      // stream url (refill restarts writer with it)
     private String lastCache = "";    // HIT | MISS (surfaced to WebView badge)
     private String playFile = "";     // snapshot/final path currently opened
+    private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
+    private int windowChunk = -1;     // playback chunk the window was built for
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -76,7 +78,9 @@ public final class NativeAudioEngine {
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
         final int gen;
+        final String prevVid;
         synchronized (lock) {
+            prevVid = videoId;
             stopLocked("replay");
             playGen++;
             gen = playGen;
@@ -91,6 +95,12 @@ public final class NativeAudioEngine {
             failReason = null;
             failMessage = null;
             setStateLocked(State.RESOLVING);
+            windowChunk = -1;
+            windowEnd = -1;
+        }
+        // track change: cancel old window, never stack fills
+        if (prevVid != null && !prevVid.isEmpty() && !prevVid.equals(vid)) {
+            SongCache.pauseDownload(prevVid);
         }
         nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen);
         pushEvent("sourceChanged", null);
@@ -241,13 +251,22 @@ public final class NativeAudioEngine {
         }
         nlog("[CACHE] refill ready videoId=" + vid + " bytes=" + snap.length()
                 + " at=" + targetMs);
+        synchronized (lock) {
+            if (gen != playGen) return;
+            setWindow(vid, url, total, targetMs, dur, fac);
+        }
         startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, fac, gen, targetMs);
     }
 
     public void stop(String why) {
+        final String vid;
         synchronized (lock) {
+            vid = videoId;
             stopLocked(why != null ? why : "stop");
+            windowChunk = -1;
+            windowEnd = -1;
         }
+        if (vid != null && !vid.isEmpty()) SongCache.pauseDownload(vid);
         pushAll();
     }
 
@@ -359,7 +378,7 @@ public final class NativeAudioEngine {
                 }
             } catch (Exception ignored) {}
         }).start();
-        long need = Math.min(total, 524288L);
+        long need = SongCache.chunkEndFor(0, (int) r.durationMs, total);
         if (!waitForBytes(ac, vid, need, gen, total)) return;
         synchronized (lock) {
             if (gen != playGen) return;
@@ -389,6 +408,10 @@ public final class NativeAudioEngine {
             playFile = snap.getAbsolutePath();
         }
         nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + snap.length());
+        synchronized (lock) {
+            if (gen != playGen) return;
+            setWindow(vid, url, total, 0, (int) r.durationMs, ac);
+        }
         startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
     }
 
@@ -439,8 +462,47 @@ public final class NativeAudioEngine {
             }
         }
     }
-    private void startPath(String path, Source src, Context c) {
-        synchronized (lock) {
+    /**
+     * Sliding window-5: chunk containing curMs, prefetch 5 ahead, hard stop.
+     * Chunk size derived from SongCache (follows the 100KB const, no dup).
+     * Enforced from the 4 triggers only: play start, chunk cross (tick),
+     * seek-refill, track change. No timer, no polling thread.
+     */
+    private int chunkIdxForPos(int curMs, int durMs, long total) {
+        long one = SongCache.chunkEndFor(0, durMs, total);
+        if (one <= 0 || total <= 0 || durMs <= 0 || curMs <= 0) return 0;
+        long need = total * (long) curMs / durMs;
+        long idx = need / one;
+        return idx > 1000000L ? 1000000 : (int) idx;
+    }
+
+    private long windowEndForPos(int curMs, int durMs, long total) {
+        long one = SongCache.chunkEndFor(0, durMs, total);
+        if (one <= 0) return total;
+        long edge = SongCache.chunkEndFor(curMs, durMs, total);
+        if (edge <= 0) return total;
+        return Math.min(total, edge + 5 * one);
+    }
+
+    /** Set window for a position; (re)starts resume-aware writer when behind. */
+    private void setWindow(String vid, String url, long total, int curMs,
+            int durMs, Context ac) {
+        windowChunk = chunkIdxForPos(curMs, durMs, total);
+        windowEnd = windowEndForPos(curMs, durMs, total);
+        if (ac == null || total <= 0) return;
+        if (SongCache.hasBytes(ac, vid, Math.min(windowEnd, total))) {
+            if (SongCache.isDownloading(vid)) SongCache.pauseDownload(vid);
+            return;
+        }
+        if (!SongCache.isDownloading(vid) && url != null && !url.isEmpty()) {
+            final Context fc = ac;
+            nlog("[CACHE] window fetch videoId=" + vid + " chunk=" + windowChunk
+                    + " end=" + windowEnd);
+            new Thread(() -> SongCache.download(fc, vid, url, total)).start();
+        }
+    }
+
+    private void startPath(String path, Source src, Context c) {        synchronized (lock) {
             prepareLocked();
             source = src;
             setStateLocked(State.BUFFERING);
@@ -659,6 +721,30 @@ public final class NativeAudioEngine {
                 if (durationMs <= 0) durationMs = mp.getDuration();
             } catch (Exception ignored) {}
             pushEvent("timeUpdate", null);
+            // sliding window-5 enforcement on the existing 500ms clock
+            // (chunk-cross trigger; I/O only on cross, memory math otherwise).
+            // Cap: bytes at window end + writer running -> pause (quota).
+            // Extend: crossed a chunk + behind window + writer idle -> resume.
+            try {
+                int ci = chunkIdxForPos(currentMs, durationMs, lastTotal);
+                if (lastTotal > 0 && durationMs > 0 && appCtx != null) {
+                    if (ci != windowChunk) {
+                        setWindow(videoId, lastUrl, lastTotal, currentMs,
+                                durationMs, appCtx);
+                    } else if (windowEnd > 0 && SongCache.isDownloading(videoId)) {
+                        long have = 0;
+                        try {
+                            java.io.File pf = SongCache.partFile(appCtx, videoId);
+                            if (pf.isFile()) have = pf.length();
+                        } catch (Exception ignored) {}
+                        if (have >= Math.min(windowEnd, lastTotal)) {
+                            SongCache.pauseDownload(videoId);
+                            nlog("[CACHE] window cap hit videoId=" + videoId
+                                    + " end=" + windowEnd);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
             // notification progress (throttled: service updates cheap)
             try {
                 if (appCtx != null) {

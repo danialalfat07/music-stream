@@ -18,7 +18,7 @@ import java.net.URL;
  */
 public final class VisionOsCache {
     static final String TAG = "DnialifyVisionOS";
-    private static final int CHUNK = 524288;
+    private static final int CHUNK = 102400;
     private static final int TIMEOUT_MS = 20000;
     private static final String UA =
             "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
