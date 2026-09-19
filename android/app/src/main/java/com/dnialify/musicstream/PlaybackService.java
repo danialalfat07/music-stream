@@ -43,7 +43,10 @@ public class PlaybackService extends Service {
 
     public static void arm(Context context) {
         if (instance != null) {
-            if (instance.isStopped) return;
+            // Resume path: clear swipe/stop flags before the guard so a
+            // dismissed notification can be re-posted on next play.
+            instance.isStopped = false;
+            instance.dismissedPaused = false;
             instance.publishNotification(); return;
         }
         start(context, ACTION_ARM);
@@ -155,6 +158,13 @@ public class PlaybackService extends Service {
 
     // Kept for existing JS bridge callers. Playback itself remains WebView-owned.
     public static void play(Context context, String url, String title, String artist, String artwork) {
+        if (instance != null) {
+            // Resume path (Path B): clear swipe/stop flags and mark playing
+            // before publish, mirroring handleState(), so heal can run.
+            instance.dismissedPaused = false;
+            instance.isStopped = false;
+            instance.playing = true;
+        }
         updateNotificationStatic(context, title, artist);
     }
 
@@ -378,6 +388,8 @@ public class PlaybackService extends Service {
     }
 
     private void publishNotification() {
+        android.util.Log.d("PlaybackService", "publishNotification playing=" + playing
+                + " isStopped=" + isStopped + " dismissedPaused=" + dismissedPaused);
         if (isStopped) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (playing) healPlayingNotification(manager);
@@ -391,16 +403,33 @@ public class PlaybackService extends Service {
     // resume from pause), rebuild and re-post it immediately.
     private void healPlayingNotification(NotificationManager manager) {
         if (android.os.Build.VERSION.SDK_INT < 23) return;
+        boolean present = false;
         try {
             for (android.service.notification.StatusBarNotification sbn
                     : manager.getActiveNotifications()) {
-                if (sbn.getId() == NOTIFICATION_ID) return;
+                if (sbn.getId() == NOTIFICATION_ID) { present = true; break; }
             }
-        } catch (Exception ignored) { return; }
-        Notification rebuilt = buildNotification();
-        try { startForeground(NOTIFICATION_ID, rebuilt); }
-        catch (Exception e) {
-            try { manager.notify(NOTIFICATION_ID, rebuilt); } catch (Exception ignored) {}
+        } catch (Exception e) {
+            android.util.Log.w("PlaybackService", "heal active-check failed: " + e);
+            return;
+        }
+        if (present) return;
+        android.util.Log.d("PlaybackService", "heal missing while PLAYING, re-posting");
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification());
+            android.util.Log.d("PlaybackService", "heal re-posted via startForeground");
+        } catch (Exception e) {
+            android.util.Log.w("PlaybackService",
+                    "heal startForeground failed, retry via startForegroundService: " + e);
+            try {
+                android.content.Intent i = new android.content.Intent(
+                        this, PlaybackService.class).setAction(ACTION_ARM);
+                androidx.core.content.ContextCompat.startForegroundService(this, i);
+                startForeground(NOTIFICATION_ID, buildNotification());
+                android.util.Log.d("PlaybackService", "heal re-posted after restart");
+            } catch (Exception e2) {
+                android.util.Log.e("PlaybackService", "heal FAILED: " + e2);
+            }
         }
     }
 

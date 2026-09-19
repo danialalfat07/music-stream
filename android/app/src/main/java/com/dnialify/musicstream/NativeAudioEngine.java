@@ -209,16 +209,22 @@ public final class NativeAudioEngine {
     private void applyVolumeLocked() {
         if (mp == null) return;
         float appFraction = appVolumePercent / 100f;
+        int gainMb = 0;
         try {
             if (appFraction <= 1.0f) {
                 mp.setVolume(appFraction, appFraction);
-                if (boostEnhancer != null) boostEnhancer.setTargetGain(0);
+                if (boostEnhancer != null) {
+                    try { boostEnhancer.setTargetGain(0); } catch (Exception ignored) {}
+                    try { boostEnhancer.setEnabled(false); } catch (Exception ignored) {}
+                }
             } else {
                 mp.setVolume(1.0f, 1.0f);
-                int gainMb = (int) (2000 * Math.log10(appFraction));
+                gainMb = (int) (2000 * Math.log10(appFraction));
                 if (boostEnhancer == null) {
                     boostEnhancer = new LoudnessEnhancer(mp.getAudioSessionId());
                     boostEnhancer.setEnabled(true);
+                } else {
+                    try { boostEnhancer.setEnabled(true); } catch (Exception ignored) {}
                 }
                 boostEnhancer.setTargetGain(gainMb);
             }
@@ -226,7 +232,7 @@ public final class NativeAudioEngine {
             nlog("[NATIVE_CMD] volume FAIL " + e);
             return;
         }
-        nlog("[NATIVE_CMD] volumePercent=" + appVolumePercent);
+        nlog("[NATIVE_CMD] volumePercent=" + appVolumePercent + " gainMb=" + gainMb);
     }
 
     public JSONObject getState() {
