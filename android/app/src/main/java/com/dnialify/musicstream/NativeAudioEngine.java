@@ -217,7 +217,7 @@ public final class NativeAudioEngine {
             } catch (Exception ignored) {}
             seeking = true;
             wasPlayingBeforeSeek = true;
-            setStateLocked(State.SEEKING);
+            setStateLocked(State.BUFFERING);
             pendingStartMs = Math.max(0, targetMs);
             nlog("[CACHE] refill targetMs=" + targetMs + " videoId=" + vid + " gen=" + gen);
         }
@@ -232,7 +232,19 @@ public final class NativeAudioEngine {
         }
         final Context fac = ac;
         new Thread(() -> SongCache.download(fac, vid, url, total)).start();
-        long needEnd = SongCache.chunkEndFor(targetMs, dur, total);
+        // refill headroom: target chunk + 2 extra, so the resumed snapshot
+        // survives past the seek point instead of EOF-looping instantly.
+        // Growing floor: each resume must cover MORE than the snapshot that
+        // just EOFed, or the loop replays the same bytes forever.
+        long oneChunk = SongCache.chunkEndFor(0, dur, total);
+        long prevLen = 0;
+        try {
+            java.io.File pf = new java.io.File(playFile);
+            if (pf.isFile()) prevLen = pf.length();
+        } catch (Exception ignored) {}
+        long needEnd = Math.min(total, Math.max(
+                SongCache.chunkEndFor(targetMs, dur, total) + 2 * oneChunk,
+                prevLen + 2 * oneChunk));
         if (!waitForBytes(fac, vid, needEnd, gen, total)) return;
         synchronized (lock) {
             if (gen != playGen) return;
@@ -378,7 +390,10 @@ public final class NativeAudioEngine {
                 }
             } catch (Exception ignored) {}
         }).start();
-        long need = SongCache.chunkEndFor(0, (int) r.durationMs, total);
+        // initial need = first TWO chunks (a lone 100KB prefix often yields
+        // ~0ms audio -> instant EOF loop; 200KB carries real clusters)
+        long oneChunk = SongCache.chunkEndFor(0, (int) r.durationMs, total);
+        long need = Math.min(total, 2 * oneChunk);
         if (!waitForBytes(ac, vid, need, gen, total)) return;
         synchronized (lock) {
             if (gen != playGen) return;
@@ -603,35 +618,57 @@ public final class NativeAudioEngine {
             pushAll();
         });
         mp.setOnCompletionListener(p -> {
-            boolean extend = false;
-            int resumeMs = 0;
+            int playedMs = 0;
+            boolean incomplete = false;
             synchronized (lock) {
+                // truthful position: getDuration() lies (full) on truncated files
                 try {
-                    currentMs = p.getDuration();
+                    playedMs = Math.max(0, p.getCurrentPosition());
+                    if (durationMs > 0) playedMs = Math.min(playedMs, durationMs);
                 } catch (Exception ignored) {}
-                // snapshot EOF while writer still filling -> extend with fresh
-                // snapshot, don't end. True end only when download complete.
+                currentMs = playedMs;
+                // premature EOF (snapshot ended, download still filling) -> resume,
+                // never ENDED. True end only when every chunk is on disk.
+                // Fuse: snapshot yielding ~0ms audio repeatedly = unplayable ->
+                // fail over to iFrame instead of busy-looping prepare().
                 try {
                     JSONObject rec = appCtx != null
                             ? SongCache.getRecord(appCtx, videoId) : null;
-                    boolean complete = rec != null && SongCache.ST_COMPLETE.equals(
-                            rec.optString("cacheStatus", ""));
-                    if (!complete && durationMs > 0 && currentMs < durationMs - 3000
-                            && state != State.STOPPED && state != State.IDLE) {
-                        extend = true;
-                        resumeMs = currentMs;
-                    }
-                } catch (Exception ignored) {}
-                if (extend) {
-                    nlog("[CACHE] snapshot EOF, extend videoId=" + videoId
-                            + " at=" + resumeMs);
+                    incomplete = !(rec != null && SongCache.ST_COMPLETE.equals(
+                            rec.optString("cacheStatus", "")));
+                } catch (Exception ignored) {
+                    incomplete = true;
+                }
+                // fuse: premature EOFs arriving faster than playback advances
+                // (any position) = stuck loop, ticker starves -> fail over.
+                long nowMs = System.currentTimeMillis();
+                if (incomplete && nowMs - lastPrematureMs < 1500) {
+                    fastResumeStreak++;
+                } else if (incomplete) {
+                    fastResumeStreak = 1;
                 } else {
-                    setStateLocked(State.ENDED);
-                    nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                    fastResumeStreak = 0;
+                }
+                lastPrematureMs = nowMs;
+                if (incomplete && fastResumeStreak > 10) {
+                    failLocked(VisionOsResolver.R_MEDIA_ERROR,
+                            "resume loop too fast, fallback");
+                    nlog("[CACHE] resume loop too fast, fallback videoId=" + videoId);
+                    incomplete = false;
+                } else if (incomplete && state != State.STOPPED
+                        && state != State.IDLE && state != State.ERROR) {
+                    nlog("[CACHE] premature EOF, resume at=" + playedMs
+                            + " videoId=" + videoId);
+                } else {
+                    incomplete = false;
+                    if (state != State.ERROR) {
+                        setStateLocked(State.ENDED);
+                        nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                    }
                 }
             }
-            if (extend) {
-                refillAndPlayAt(resumeMs);
+            if (incomplete) {
+                refillAndPlayAt(playedMs);
             } else {
                 pushAll();
             }
@@ -665,6 +702,10 @@ public final class NativeAudioEngine {
     }
 
     private boolean wasPlayingBeforeSeek;
+    // fuse: premature EOFs arriving faster than playback can advance = stuck
+    // loop (ticker starves, writer stalls) -> fail over instead of spinning.
+    private long lastPrematureMs = 0;
+    private int fastResumeStreak = 0;
 
     private void stopLocked(String why) {
         timer.removeCallbacks(ticker);
@@ -716,6 +757,9 @@ public final class NativeAudioEngine {
     private void tick() {
         synchronized (lock) {
             if (state != State.PLAYING || mp == null) return;
+            // sustained playback proof: snapshots are playable, loops are dead
+            fastResumeStreak = 0;
+            lastPrematureMs = 0;
             try {
                 currentMs = mp.getCurrentPosition();
                 if (durationMs <= 0) durationMs = mp.getDuration();
