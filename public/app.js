@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.9";
+const APP_VERSION = "2.3.10";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -919,6 +919,9 @@ function initAudio(){
           }
         } catch {}
         try { if (!isPreviewing()) updateLyricHighlight(cur); } catch {}
+        // PiP canvas has no other refresh path in native mode (progressLoop
+        // early-returns) — redraw here on every native event (~2Hz timeUpdate).
+        try { if (Player.floatOn || document.pictureInPictureElement) drawPipFrame(); } catch {}
         try {
           if ('mediaSession' in navigator && dur)
             navigator.mediaSession.setPositionState({ duration: dur, playbackRate: 1, position: Math.min(cur, dur) });
@@ -6226,8 +6229,10 @@ function loadPipArt(url) {
     pipArtImg = img;
     drawPipFrame();
   };
-  img.onerror = () => {
-    pipArtImg = null;
+  img.onerror = (e) => {
+    // keep previous frame: never blank the canvas on a failed load
+    try { console.warn('[PIP] art load fail host=' + window.__vosHost(url)); } catch {}
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PIP] art load fail'); } catch {}
   };
   img.src = '/api/thumb?url=' + encodeURIComponent(url);
 }
@@ -6244,12 +6249,7 @@ function currentLyricText() {
   const L = Player.lyrics;
   if (!L) return '';
   if (L.lines && L.lines.length) {
-    let cur = 0;
-    try {
-      cur =
-        (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) ||
-        0;
-    } catch {}
+    const cur = playbackCur();
     let idx = -1;
     for (let i = 0; i < L.lines.length; i++) {
       if (cur >= L.lines[i].t - 0.2) idx = i;
@@ -6281,15 +6281,26 @@ function wrapCanvasText(ctx, text, maxWidth) {
   if (line) out.push(line);
   return out.slice(0, 4);
 }
+function playbackCur() {
+  // Single source of playback position: native mirror when Engine B owns it,
+  // YT clock otherwise. (PiP/lyrics used YT-only clock -> stuck at 0 in native.)
+  if (Player.nativeActive && Player.native) return Number(Player.native.cur || 0);
+  try {
+    if (Player.yt && Player.yt.getCurrentTime) return Player.yt.getCurrentTime() || 0;
+  } catch {}
+  return 0;
+}
+function playbackDur() {
+  if (Player.nativeActive && Player.native) return Number(Player.native.dur || 0);
+  try {
+    if (Player.yt && Player.yt.getDuration) return Player.yt.getDuration() || 0;
+  } catch {}
+  return 0;
+}
 function currentLyricIndex() {
   const L = Player.lyrics;
   if (!L || !L.lines || !L.lines.length) return -1;
-  let cur = 0;
-  try {
-    cur =
-      (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) ||
-      0;
-  } catch {}
+  const cur = playbackCur();
   let idx = -1;
   for (let i = 0; i < L.lines.length; i++) {
     if (cur >= L.lines[i].t - 0.2) idx = i;
@@ -6340,16 +6351,11 @@ function drawPipFrame() {
   }
   let idx = currentLyricIndex();
   if (idx < 0) {
-    try {
-      const dur = Player.yt && Player.yt.getDuration && Player.yt.getDuration();
-      const cur =
-        Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime();
-      idx = dur
-        ? Math.min(lines.length - 1, Math.floor((cur / dur) * lines.length))
-        : 0;
-    } catch {
-      idx = 0;
-    }
+    const dur = playbackDur();
+    const cur = playbackCur();
+    idx = dur
+      ? Math.min(lines.length - 1, Math.floor((cur / dur) * lines.length))
+      : 0;
   }
   const from = Math.max(0, idx - 3);
   const to = Math.min(lines.length - 1, idx + 5);
