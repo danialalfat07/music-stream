@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.2";
+const APP_VERSION = "2.3.3";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1020,15 +1020,25 @@ function setMediaSessionForAudio(song){
     navigator.mediaSession.setActionHandler('nexttrack', ()=>nextTrack(false));
     navigator.mediaSession.setActionHandler('seekto', (d)=>{
       if(d.seekTime == null) return;
+      if(Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek){ try{NativePlayback.nativeSeek(d.seekTime);}catch{} return; }
       if(Player.native) window.NativePlayback.seek(d.seekTime);
       else if(Player.audio) Player.audio.currentTime = d.seekTime;
     });
     navigator.mediaSession.setActionHandler('seekbackward', (d)=>{
+      if(Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek){
+        const cur = (Player.native && Player.native.cur) || 0;
+        try{NativePlayback.nativeSeek(Math.max(0, cur - (d.seekOffset || 10)));}catch{} return;
+      }
       const cur = Player.native ? window.NativePlayback.currentTime() : Player.audio?.currentTime || 0;
       if(Player.native) window.NativePlayback.seek(Math.max(0, cur - (d.seekOffset || 10)));
       else if(Player.audio) Player.audio.currentTime = Math.max(0, cur - (d.seekOffset || 10));
     });
     navigator.mediaSession.setActionHandler('seekforward', (d)=>{
+      if(Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek){
+        const cur = (Player.native && Player.native.cur) || 0;
+        const dur = (Player.native && Player.native.dur) || 1e9;
+        try{NativePlayback.nativeSeek(Math.min(dur || 1e9, cur + (d.seekOffset || 10)));}catch{} return;
+      }
       const cur = Player.native ? window.NativePlayback.currentTime() : Player.audio?.currentTime || 0;
       const dur = Player.native ? window.NativePlayback.duration() : Player.audio?.duration || 1e9;
       if(Player.native) window.NativePlayback.seek(Math.min(dur || 1e9, cur + (d.seekOffset || 10)));
@@ -2049,14 +2059,29 @@ function toggleNowPlayingPlay() {
   togglePlay();
 }
 
+let _nsLast = 0, _nsTimer = 0, _nsPending = 0;
 window.nativeSeek = function(sec){
   sec = Number(sec);
   if(!isFinite(sec)) return false;
   try{ android && android.util && android.util.Log && android.util.Log.d("DnialifyDiag","[JS] nativeSeek sec="+sec); }catch{}
   try{ console.log("[JS] nativeSeek sec="+sec+" useAudio="+Player.useAudio+" hasAudio="+(!!Player.audio)+" ytReady="+(!!Player.yt && !!Player.ready)); }catch{}
   try{ if(window.Diagnostics) window.Diagnostics.logLine("[JS] nativeSeek sec="+sec); }catch{}
+  // notif-bar drags spam seeks with no release event: leading + trailing throttle (<=1 engine seek / 250ms, final pos always lands)
+  const _nsNow = Date.now();
+  if (_nsNow - _nsLast < 250) {
+    _nsPending = sec;
+    if (!_nsTimer) _nsTimer = setTimeout(() => { _nsTimer = 0; try { window.nativeSeek(_nsPending); } catch {} }, 250);
+    return true;
+  }
+  _nsLast = _nsNow;
+  if (_nsTimer) { clearTimeout(_nsTimer); _nsTimer = 0; }
   let done=false;
   try{
+    // Engine B first — single route; never ghost-seek yt/audio underneath it
+    if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+      try{ NativePlayback.nativeSeek(sec); done=true; }catch(e){}
+      return done;
+    }
     if(Player.audio){
       try{ Player.audio.currentTime = sec; done=true; }catch(e){ try{console.warn("nativeSeek audio fail",e)}catch{} }
     }
