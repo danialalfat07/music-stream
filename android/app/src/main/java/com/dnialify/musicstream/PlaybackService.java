@@ -110,6 +110,7 @@ public class PlaybackService extends Service {
                 instance.loadArtwork(artwork);
             }
             instance.dismissedPaused = false;
+            if (playing) instance.isStopped = false;
             instance.playing = playing;
             instance.positionMs = Math.max(0, positionMs);
             if (durationMs > 0) instance.durationMs = durationMs;
@@ -122,6 +123,19 @@ public class PlaybackService extends Service {
                 .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
                 .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
         ContextCompat.startForegroundService(context, intent);
+    }
+
+    /** Track ended with no successor: drop the notification, stay warm for replay. */
+    public static void dismissNotif(Context context) {
+        if (instance == null) return;
+        try { instance.stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE); }
+        catch (Exception ignored) { try { instance.stopForeground(true); } catch (Exception ignored2) {} }
+        try {
+            instance.getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID);
+        } catch (Exception ignored) {}
+        instance.playing = false;
+        instance.dismissedPaused = true;
+        instance.isStopped = true;
     }
 
     /** Native engine released (stop/switch to iFrame): clear native-owned state. */
@@ -196,6 +210,10 @@ public class PlaybackService extends Service {
                 updateMediaSession();
                 publishNotification();
                 double sec = pos / 1000d;
+                // headless-safe: engine seeks itself when active (WebView may be gone)
+                if (NativeAudioEngine.get().isActive()) {
+                    try { NativeAudioEngine.get().seek((int) sec); } catch (Exception ignored) {}
+                }
                 String js = "try{if(window.nativeSeek){window.nativeSeek(" + sec + ");}else{var s=" + sec + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){}}} }catch(e){}";
                 android.util.Log.d("DnialifyDiag", "[Service] onSeekTo dispatch sec=" + sec);
                 sendToWebView(js);
@@ -359,6 +377,7 @@ public class PlaybackService extends Service {
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
+                .setShowWhen(false)
                 .setOngoing(playing)
                 .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.getSessionToken())
@@ -385,6 +404,10 @@ public class PlaybackService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        // FGS contract hardening (seen ForegroundServiceDidNotStartInTime in the
+        // wild): every start path foregrounds FIRST, before any branching work.
+        try { startForeground(NOTIFICATION_ID, buildNotification()); }
+        catch (Exception ignored) {}
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
         if ("webViewState".equals(action)) handleState(intent);
@@ -398,6 +421,7 @@ public class PlaybackService extends Service {
             if (aw != null && !aw.equals(artworkUrl)) { artworkUrl = aw; loadArtwork(aw); }
             dismissedPaused = false;
             playing = intent.getBooleanExtra("isPlaying", false);
+            if (playing) isStopped = false;
             positionMs = Math.max(0, intent.getLongExtra("positionMs", 0));
             long d = intent.getLongExtra("durationMs", 0);
             if (d > 0) durationMs = d;
@@ -469,6 +493,10 @@ public class PlaybackService extends Service {
             updateMediaSession();
             publishNotification();
             String js2 = "try{if(window.nativeSeek){window.nativeSeek(" + seconds + ");}else{var s=" + seconds + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){}}} }catch(e){}";
+            // headless-safe: engine seeks itself when active (WebView may be gone)
+            if (NativeAudioEngine.get().isActive()) {
+                try { NativeAudioEngine.get().seek((int) Math.max(0, seconds)); } catch (Exception ignored) {}
+            }
             sendToWebView(js2);
         }
         return START_STICKY;

@@ -1019,6 +1019,9 @@ public class MainActivity extends BridgeActivity {
         public void nativeStop() { NativeAudioEngine.get().stop("web"); }
 
         @JavascriptInterface
+        public void dismissNotif() { PlaybackService.dismissNotif(MainActivity.this); }
+
+        @JavascriptInterface
         public void nativeVolume(double value) {
             NativeAudioEngine.get().setVolume((float) value);
         }

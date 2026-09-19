@@ -76,7 +76,9 @@ public final class NativeAudioEngine {
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
         final int gen;
+        final String prevVid;
         synchronized (lock) {
+            prevVid = videoId;
             stopLocked("replay");
             playGen++;
             gen = playGen;
@@ -91,6 +93,10 @@ public final class NativeAudioEngine {
             failReason = null;
             failMessage = null;
             setStateLocked(State.RESOLVING);
+        }
+        // quota: switching tracks cancels the old track's filler (resumable)
+        if (prevVid != null && !prevVid.isEmpty() && !prevVid.equals(vid)) {
+            SongCache.pauseDownload(prevVid);
         }
         nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen);
         pushEvent("sourceChanged", null);
@@ -221,9 +227,16 @@ public final class NativeAudioEngine {
             return;
         }
         final Context fac = ac;
-        new Thread(() -> SongCache.download(fac, vid, url, total)).start();
         long needEnd = SongCache.chunkEndFor(targetMs, dur, total);
-        if (!waitForBytes(fac, vid, needEnd, gen, total)) return;
+        // refill window = target chunk + 5 ahead (quota-safe, cancels stale fill)
+        long winEnd = SongCache.windowEndFor(targetMs, dur, total);
+        fillWaitActive = true;
+        try {
+            startFill(fac, vid, url, total, winEnd);
+            if (!waitForBytes(fac, vid, needEnd, gen, total)) return;
+        } finally {
+            fillWaitActive = false;
+        }
         synchronized (lock) {
             if (gen != playGen) return;
         }
@@ -242,12 +255,17 @@ public final class NativeAudioEngine {
         nlog("[CACHE] refill ready videoId=" + vid + " bytes=" + snap.length()
                 + " at=" + targetMs);
         startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, fac, gen, targetMs);
+        startPrefetchDriver(gen);
     }
 
     public void stop(String why) {
+        final String vid;
         synchronized (lock) {
+            vid = videoId;
             stopLocked(why != null ? why : "stop");
         }
+        // quota: stop burning bytes for a track nobody plays (resumable)
+        if (vid != null && !vid.isEmpty()) SongCache.pauseDownload(vid);
         pushAll();
     }
 
@@ -305,11 +323,43 @@ public final class NativeAudioEngine {
             return;
         }
         nlog("[CACHE] MISS videoId=" + vid + " gen=" + gen);
-        // 2. resolve (LOGIN_REQUIRED retry lives inside resolver, max 1x)
-        VisionOsResolver.Result r;
+        // 2. resolve (LOGIN_REQUIRED retry lives inside resolver, max 1x).
+        // Join-timeout: DNS has no socket timeout, so a raw resolve() call can
+        // hang forever (eternal BUFFERING). Reuses existing 20s timeout x2.
+        final VisionOsResolver.Result[] rout = new VisionOsResolver.Result[1];
+        final Exception[] rerr = new Exception[1];
+        Thread rthread = new Thread(() -> {
+            try {
+                rout[0] = VisionOsResolver.resolve(vid);
+            } catch (Exception e) {
+                rerr[0] = e;
+            }
+        });
+        rthread.setDaemon(true);
+        rthread.start();
         try {
-            r = VisionOsResolver.resolve(vid);
-        } catch (VisionOsResolver.ResolverException e) {
+            rthread.join(SongCache.TIMEOUT_MS * 2L);
+        } catch (InterruptedException e) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+            }
+            return;
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        if (rthread.isAlive()) {
+            nlog("[ENGINE] resolve join TIMEOUT videoId=" + vid);
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_TIMEOUT, "resolve join timeout");
+            }
+            pushAll();
+            return;
+        }
+        if (rerr[0] instanceof VisionOsResolver.ResolverException) {
+            VisionOsResolver.ResolverException e =
+                    (VisionOsResolver.ResolverException) rerr[0];
             synchronized (lock) {
                 if (gen != playGen) return;
                 failLocked(e.reason != null ? e.reason
@@ -319,6 +369,16 @@ public final class NativeAudioEngine {
             pushAll();
             return;
         }
+        if (rerr[0] != null || rout[0] == null) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_RESOLVER_FAIL,
+                        "resolve threw " + rerr[0]);
+            }
+            pushAll();
+            return;
+        }
+        VisionOsResolver.Result r = rout[0];
         synchronized (lock) {
             if (gen != playGen) return;
         }
@@ -346,11 +406,13 @@ public final class NativeAudioEngine {
             lastUrl = url;
             lastCache = "MISS";
         }
-        // 3. CACHE-FIRST: writer fills (resume-aware, proven path), waiter plays
-        // local snapshot as soon as the first chunk lands. Never streams.
+        // 3. CACHE-FIRST: windowed fill (first chunk), waiter plays local
+        // snapshot as soon as it lands. Prefetch driver extends to +5 chunks.
+        // Never streams.
         final Context ac = c;
+        startFill(ac, vid, url, total,
+                SongCache.chunkEndFor(0, r.durationMs, total));
         new Thread(() -> {
-            SongCache.download(ac, vid, url, total);
             // best-effort artwork, never fails audio
             try {
                 JSONObject rec = SongCache.getRecord(ac, vid);
@@ -359,8 +421,14 @@ public final class NativeAudioEngine {
                 }
             } catch (Exception ignored) {}
         }).start();
-        long need = Math.min(total, 524288L);
-        if (!waitForBytes(ac, vid, need, gen, total)) return;
+        // initial need = first 100KB chunk only (fast start); driver extends
+        long need = SongCache.chunkEndFor(0, r.durationMs, total);
+        fillWaitActive = true;
+        try {
+            if (!waitForBytes(ac, vid, need, gen, total)) return;
+        } finally {
+            fillWaitActive = false;
+        }
         synchronized (lock) {
             if (gen != playGen) return;
         }
@@ -369,8 +437,14 @@ public final class NativeAudioEngine {
             // corrupt prefix -> drop part, re-fetch once, never silent
             nlog("[CACHE] prefix invalid, re-fetch videoId=" + vid);
             SongCache.dropPart(ac, vid);
-            new Thread(() -> SongCache.download(ac, vid, url, total)).start();
-            if (!waitForBytes(ac, vid, need, gen, total)) return;
+            fillWaitActive = true;
+            try {
+                startFill(ac, vid, url, total,
+                        SongCache.chunkEndFor(0, r.durationMs, total));
+                if (!waitForBytes(ac, vid, need, gen, total)) return;
+            } finally {
+                fillWaitActive = false;
+            }
             synchronized (lock) {
                 if (gen != playGen) return;
             }
@@ -390,6 +464,7 @@ public final class NativeAudioEngine {
         }
         nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + snap.length());
         startPathAt(snap.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
+        startPrefetchDriver(gen);
     }
 
     /**
@@ -438,6 +513,83 @@ public final class NativeAudioEngine {
                 return false;
             }
         }
+    }
+
+    /**
+     * Single-flight windowed fill. Covered need -> return (waiter polls).
+     * Smaller window running -> cancel, wait exit, restart bigger.
+     * Callers are background threads only (resolve/refill/driver).
+     */
+    private void startFill(Context c, String vid, String url, long total, long cap) {
+        Long running = SongCache.runningCap(vid);
+        if (running != null && running >= cap) return;
+        if (running != null) {
+            SongCache.pauseDownload(vid);
+            for (int i = 0; i < 30; i++) {
+                if (!SongCache.isDownloading(vid)) break;
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+        final Context fc = c;
+        new Thread(() -> SongCache.downloadUpTo(fc, vid, url, total, cap)).start();
+    }
+
+    private int driverGen = 0;
+    private volatile boolean fillWaitActive = false;
+
+    /**
+     * Prefetch driver: hard window of 5 chunks ahead of playback position.
+     * At window end fetching stops (quota-safe); skips restart a fresh window.
+     */
+    private void startPrefetchDriver(int gen) {
+        synchronized (lock) {
+            if (driverGen == gen) return;
+            driverGen = gen;
+        }
+        new Thread(() -> {
+            for (;;) {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                String vid;
+                long total;
+                int dur;
+                int cur;
+                Context ac;
+                synchronized (lock) {
+                    if (gen != playGen) return;
+                    if (state == State.STOPPED || state == State.IDLE
+                            || state == State.ERROR) return;
+                    vid = videoId;
+                    total = lastTotal;
+                    dur = durationMs;
+                    cur = currentMs;
+                    ac = appCtx;
+                }
+                // waiter (initial/refill) owns the writer while filling: yield
+                if (fillWaitActive) continue;
+                if (ac == null || total <= 0 || dur <= 0) continue;
+                try {
+                    JSONObject rec = SongCache.getRecord(ac, vid);
+                    if (rec != null && SongCache.ST_COMPLETE.equals(
+                            rec.optString("cacheStatus", ""))) return;
+                } catch (Exception ignored) {}
+                long cap = SongCache.windowEndFor(cur, dur, total);
+                String url;
+                synchronized (lock) {
+                    if (gen != playGen) return;
+                    url = lastUrl;
+                }
+                if (url == null || url.isEmpty()) continue;
+                startFill(ac, vid, url, total, cap);
+            }
+        }).start();
     }
     private void startPath(String path, Source src, Context c) {
         synchronized (lock) {
@@ -504,6 +656,12 @@ public final class NativeAudioEngine {
     private void prepareLocked() {
         releaseLocked();
         mp = new MediaPlayer();
+        // partial wake lock only: CPU stays up for audio, nothing more (battery)
+        try {
+            if (appCtx != null) {
+                mp.setWakeMode(appCtx, android.os.PowerManager.PARTIAL_WAKE_LOCK);
+            }
+        } catch (Exception ignored) {}
         try {
             mp.setAudioAttributes(new AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
