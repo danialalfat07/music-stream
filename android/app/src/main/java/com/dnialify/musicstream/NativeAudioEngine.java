@@ -3,6 +3,7 @@ package com.dnialify.musicstream;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -62,6 +63,8 @@ public final class NativeAudioEngine {
     private LocalStreamServer streamServer; // 127.0.0.1 proxy (no frozen EOF)
     private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
     private int windowChunk = -1;     // playback chunk the window was built for
+    private int appVolumePercent = 100; // app volume 0..300, multiplies hardware volume
+    private LoudnessEnhancer boostEnhancer; // unity-gain boost, attached to mp session
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -191,15 +194,39 @@ public final class NativeAudioEngine {
     }
 
     public void setVolume(float v) {
+        setVolumePercent(Math.round(v * 100));
+    }
+
+    /** App volume in percent (0..300). Multiplies hardware volume linearly.
+     *  <=100: plain MediaPlayer gain. >100: unity gain + LoudnessEnhancer boost. */
+    public void setVolumePercent(int percent) {
         synchronized (lock) {
-            if (mp != null) {
-                float f = Math.max(0f, Math.min(1f, v));
-                try {
-                    mp.setVolume(f, f);
-                } catch (Exception ignored) {}
-                nlog("[NATIVE_CMD] volume=" + f);
-            }
+            appVolumePercent = Math.max(0, percent);
+            applyVolumeLocked();
         }
+    }
+
+    private void applyVolumeLocked() {
+        if (mp == null) return;
+        float appFraction = appVolumePercent / 100f;
+        try {
+            if (appFraction <= 1.0f) {
+                mp.setVolume(appFraction, appFraction);
+                if (boostEnhancer != null) boostEnhancer.setTargetGain(0);
+            } else {
+                mp.setVolume(1.0f, 1.0f);
+                int gainMb = (int) (2000 * Math.log10(appFraction));
+                if (boostEnhancer == null) {
+                    boostEnhancer = new LoudnessEnhancer(mp.getAudioSessionId());
+                    boostEnhancer.setEnabled(true);
+                }
+                boostEnhancer.setTargetGain(gainMb);
+            }
+        } catch (Exception e) {
+            nlog("[NATIVE_CMD] volume FAIL " + e);
+            return;
+        }
+        nlog("[NATIVE_CMD] volumePercent=" + appVolumePercent);
     }
 
     public JSONObject getState() {
@@ -539,6 +566,7 @@ public final class NativeAudioEngine {
                     pendingStartMs = 0;
                 }
                 setStateLocked(State.PLAYING);
+                applyVolumeLocked();
                 nlog("[NATIVE_STATE] state=PLAYING videoId=" + videoId
                         + " duration=" + (durationMs / 1000.0));
             }
@@ -606,6 +634,10 @@ public final class NativeAudioEngine {
     }
 
     private void releaseLocked() {
+        if (boostEnhancer != null) {
+            try { boostEnhancer.release(); } catch (Exception ignored) {}
+            boostEnhancer = null;
+        }
         if (mp != null) {
             try {
                 mp.reset();

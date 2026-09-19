@@ -359,6 +359,7 @@ public class PlaybackService extends Service {
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
+                .setShowWhen(false)
                 .setOngoing(playing)
                 .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.getSessionToken())
@@ -379,9 +380,28 @@ public class PlaybackService extends Service {
     private void publishNotification() {
         if (isStopped) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
+        if (playing) healPlayingNotification(manager);
         Notification notification = buildNotification();
         try { startForeground(NOTIFICATION_ID, notification); }
         catch (Exception ignored) { manager.notify(NOTIFICATION_ID, notification); }
+    }
+
+    // Self-heal: while PLAYING the notification must exist. If it was swiped,
+    // killed, or never posted (cold start, track change, engine switch,
+    // resume from pause), rebuild and re-post it immediately.
+    private void healPlayingNotification(NotificationManager manager) {
+        if (android.os.Build.VERSION.SDK_INT < 23) return;
+        try {
+            for (android.service.notification.StatusBarNotification sbn
+                    : manager.getActiveNotifications()) {
+                if (sbn.getId() == NOTIFICATION_ID) return;
+            }
+        } catch (Exception ignored) { return; }
+        Notification rebuilt = buildNotification();
+        try { startForeground(NOTIFICATION_ID, rebuilt); }
+        catch (Exception e) {
+            try { manager.notify(NOTIFICATION_ID, rebuilt); } catch (Exception ignored) {}
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {

@@ -125,6 +125,18 @@ public class MainActivity extends BridgeActivity {
         setVolumeBoost(enabled ? 200 : 100);
     }
 
+    // Android 13+: re-request POST_NOTIFICATIONS on first play if not granted.
+    private void ensureNotifPermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void setVolumeBoost(double level) {
         runOnUiThread(() -> {
             try {
@@ -921,6 +933,7 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void play(String url, String title, String artist, String artwork) {
+            ensureNotifPermission();
             PlaybackService.play(MainActivity.this, url, title, artist, artwork);
         }
 
@@ -1020,7 +1033,7 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void nativeVolume(double value) {
-            NativeAudioEngine.get().setVolume((float) value);
+            NativeAudioEngine.get().setVolumePercent((int) Math.round(value));
         }
 
         @JavascriptInterface

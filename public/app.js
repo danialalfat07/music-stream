@@ -684,7 +684,7 @@ function setPlaybackVolume(level = Player.volumeLevel) {
       Player.audio.volume = Math.min(1, Math.max(0, gain));
     }
   }
-  if (Player.native && window.NativePlayback) try { window.NativePlayback.volume(lv === 0 ? 0 : 1); } catch {}
+  if (Player.native && window.NativePlayback) try { window.NativePlayback.volume(lv === 0 ? 0 : 1); if (window.NativePlayback.nativeVolume) window.NativePlayback.nativeVolume(lv); } catch {}
   if (Player.yt && Player.ready) try { Player.yt.setVolume(Math.min(100, lv)); } catch {}
 }
 
