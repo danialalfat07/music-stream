@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.27";
+const APP_VERSION = "2.3.28";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -888,6 +888,27 @@ function initAudio(){
         state: ev.state, source: ev.source, cur: Number(ev.currentTime || 0),
         dur: Number(ev.duration || 0),
       };
+      // VisionOS artwork forward: progressLoop is dead under nativeActive, so
+      // pushNativeState never feeds the native overlay. [NATIVE_STATE] already
+      // carries artwork — forward on track/artwork change only, never per tick.
+      try {
+        const artUrl = ev.artwork || '';
+        const vid = ev.videoId || '';
+        if (artUrl && (artUrl !== lastFwdArtUrl || vid !== lastFwdVid)) {
+          lastFwdArtUrl = artUrl;
+          lastFwdVid = vid;
+          try { loadPipArt(artUrl); } catch {}
+          if (window.NativePlayback && NativePlayback.updateWebViewState) {
+            try {
+              NativePlayback.updateWebViewState(
+                ev.title || '', ev.artist || '', artUrl,
+                ev.state === 'PLAYING',
+                Math.round((ev.currentTime || 0) * 1000),
+                Math.round((ev.duration || 0) * 1000));
+            } catch {}
+          }
+        }
+      } catch {}
       // Orphan adoption: page reload (auto-update) wipes JS flags while the engine
       // keeps playing. Without this, progressLoop writes legacy zeros every frame
       // (slider jumps, frozen notif, stuck icon). Active states re-assert ownership.
@@ -1711,7 +1732,7 @@ const OfflineLib = {
     if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
     const song = {
       videoId: e.videoId, title: e.title, artist: e.artist,
-      subtitle: e.artist, thumbnail: e.thumbnail, duration: e.duration,
+      subtitle: e.artist, thumbnail: e.artworkThumb || e.thumbnail || '', duration: e.duration,
     };
     Player.queue = [song];
     Player.index = 0;
@@ -6492,6 +6513,8 @@ async function openPipWidget() {
 
 let pipArtImg = null;
 let pipArtSrc = '';
+let lastFwdArtUrl = '';
+let lastFwdVid = '';
 function loadPipArt(url) {
   if (!url || url === pipArtSrc) return;
   pipArtSrc = url;
@@ -6505,7 +6528,12 @@ function loadPipArt(url) {
     try { console.warn('[PIP] art load fail host=' + window.__vosHost(url)); } catch {}
     try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PIP] art load fail'); } catch {}
   };
-  img.src = '/api/thumb?url=' + encodeURIComponent(url);
+  // Data URL (offline base64): load directly. Remote URL: go through thumb proxy.
+  if (url.startsWith('data:')) {
+    img.src = url;
+  } else {
+    img.src = '/api/thumb?url=' + encodeURIComponent(url);
+  }
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
