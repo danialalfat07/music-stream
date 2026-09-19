@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.22";
+const APP_VERSION = "2.3.23";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3530,7 +3530,7 @@ function renderNav() {
     b.addEventListener('click', (e)=>{
       e.preventDefault();
       if (!$('#nowplaying').classList.contains('hidden')) closeNowPlaying();
-      openSettingsModal('about');
+      openSettingsModal('settings');
     });
   });
   renderSidebarLibrary();
@@ -3644,7 +3644,7 @@ async function route() {
   const runRoute = async () => {
 
   try {
-    if (parts[0] === 'settings') { openSettingsModal('about'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); cacheSet(hash, view.innerHTML); return; }
+    if (parts[0] === 'settings') { openSettingsModal('settings'); history.replaceState(null,'', location.pathname + '#/home'); setActiveNav(''); await viewHome(view); cacheSet(hash, view.innerHTML); return; }
     if (parts[0] === '' || parts[0] === 'home') {
       setActiveNav('home');
       await viewHome(view);
@@ -5393,22 +5393,24 @@ function openSleepTimer() {
 }
 function applySettingsEnvironment() {
   // Section availability follows environment + stream mode.
-  // Disabled sections stay visible at reduced opacity (never hidden).
+  // ENGINE is hidden entirely on web (locked to iFrame); elsewhere sections
+  // stay visible but locked (reduced opacity, no clicks) when irrelevant.
   try {
     const NB = window.NativePlayback;
     const isApk = !!NB;
     let mode = 0;
     try { if (NB) mode = NB.getStreamMode() | 0; } catch {}
-    const dis = (id, off) => {
+    const lock = (id, off) => {
       const el = document.getElementById(id);
-      if (el) el.classList.toggle('settings-section--disabled', !!off);
+      if (el) el.classList.toggle('settings-section--locked', !!off);
     };
-    dis('sec-engine', !isApk); // web locks Stream to iFrame
-    dis('sec-iframe', isApk && mode === 1); // VisionOS active: iframe rows irrelevant
-    dis('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
+    const secEngine = document.getElementById('sec-engine');
+    if (secEngine) secEngine.style.display = isApk ? '' : 'none';
+    lock('sec-iframe', isApk && mode === 1); // VisionOS active: iframe rows irrelevant
+    lock('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
   } catch {}
 }
-function openSettingsModal(tab = 'about') {
+function openSettingsModal(tab = 'settings') {
   const m = $('#settings-modal');
   if (!m) return;
   m.classList.remove('hidden');
@@ -6871,7 +6873,7 @@ try {
 // server-authoritative version check (no-store, 5min cooldown, mandatory before play)
 checkAppVersion({ silent: true }).catch(() => {});
 $('#theme-toggle').addEventListener('click', toggleTheme);
-$('#settings-btn')?.addEventListener('click', () => openSettingsModal('about'));
+$('#settings-btn')?.addEventListener('click', () => openSettingsModal('settings'));
 $('#help-btn')?.addEventListener('click', openHelpModal);
 $('#settings-close')?.addEventListener('click', closeSettingsModal);
 $('#help-close')?.addEventListener('click', closeHelpModal);
