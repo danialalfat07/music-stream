@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.28";
+const APP_VERSION = "2.3.29";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -41,7 +41,7 @@ const api = async (path, opts = {}) => {
 let _searchAbort = null;
 const searchResultsCache = new Map();
 // Bare/Brave spoof: keep YT IFrame fallback playing in background on Android Capacitor
-// Mirrors Bare 0043/0050 + Brave background_video_playback.js — must run before YT iframe loads
+// Mirrors Bare 0043/0050 + Brave background_video_playback.js - must run before YT iframe loads
 (function(){
   try {
     if (!window.NativePlayback) return;
@@ -134,7 +134,7 @@ function closeNowPlaying() {
 function closePlayer() {
   // true clear: no song queued, block autoplay until next explicit play
   try { _lastNativePush = 0; _lastPushPlaying = null; _lastPushPos = -1; _lastCloseMs = Date.now(); _isClosed = true; Player.loadId++; } catch {}
-  // force native notif gone — single stop, no extra updateWebViewState that could resurrect
+  // force native notif gone - single stop, no extra updateWebViewState that could resurrect
   try {
     if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
       try { if (NativePlayback.diagLog) NativePlayback.diagLog('[ENGINE_SWITCH] from=NATIVE to=NONE (close)'); } catch {}
@@ -369,9 +369,9 @@ const Library = {
   },
 };
 
-/* ================= versioning — website vs user data (separated) ================= */
+/* ================= versioning - website vs user data (separated) ================= */
 // Website assets live in CacheStorage: dnialify-assets-vX
-// User data lives in localStorage: smw_* — NEVER cleared on website update
+// User data lives in localStorage: smw_* - NEVER cleared on website update
 const USER_DATA_VERSION = 1;
 const VERSION_CHECK_INTERVAL = 5 * 60 * 1000; // 5min cooldown
 let _lastVersionCheck = 0;
@@ -418,7 +418,7 @@ function hideVersionUpdateModal() {
 }
 
 async function clearWebsiteCacheOnly() {
-  // ONLY website assets — NEVER smw_* (user data)
+  // ONLY website assets - NEVER smw_* (user data)
   if (window.caches && caches.keys) {
     try {
       const keys = await caches.keys();
@@ -433,7 +433,7 @@ async function clearWebsiteCacheOnly() {
 
 async function applyVersionUpdate(latest) {
   if (BUILD_CHANNEL === 'beta') {
-    toast('Versi baru tersedia (beta) — reload manual untuk update');
+    toast('Versi baru tersedia (beta) - reload manual untuk update');
     console.log('[beta] soft notify new version', latest);
     return;
   }
@@ -506,7 +506,7 @@ async function checkAppVersion({ silent = true, force = false } = {}) {
     if (data && data.version && isNewerVersion(data.version, APP_VERSION)) {
       console.log('[beta] newer version available', data.version, 'soft notify only');
       // soft toast, no modal block
-      try { toast('Versi baru tersedia (beta) — reload manual'); } catch {}
+      try { toast('Versi baru tersedia (beta) - reload manual'); } catch {}
     }
     return { ok: true, version: APP_VERSION };
   }
@@ -518,12 +518,12 @@ async function checkAppVersion({ silent = true, force = false } = {}) {
   if (isNewerVersion(data.version, APP_VERSION)) {
     if (!silent) showVersionUpdateModal(data.version);
     else {
-      // silent check but mandatory — show modal so user can't play stale build
+      // silent check but mandatory - show modal so user can't play stale build
       showVersionUpdateModal(data.version);
     }
     return { ok: false, needsUpdate: true, latest: data.version, minVersion: data.minVersion };
   }
-  // local is newer (dev) — just sync stored version
+  // local is newer (dev) - just sync stored version
   try { localStorage.setItem('dnialify_version', APP_VERSION); } catch {}
   return { ok: true, version: APP_VERSION };
 }
@@ -532,7 +532,7 @@ async function ensureAppVersionBeforePlay() {
   if (BUILD_CHANNEL === 'beta') return true;
   const res = await checkAppVersion({ silent: false, force: true });
   if (res && res.needsUpdate) {
-    // mandatory — block play until updated
+    // mandatory - block play until updated
     return false;
   }
   return true;
@@ -544,7 +544,7 @@ function migrateUserDataIfNeeded() {
     const badge = document.getElementById('beta-badge');
     if (badge) badge.classList.toggle('hidden', BUILD_CHANNEL !== 'beta');
   } catch {}
-  // NEVER localStorage.clear() — only migrate schema
+  // NEVER localStorage.clear() - only migrate schema
   try {
     const stored = parseInt(localStorage.getItem('smw_user_data_version') || '0', 10) || 0;
     if (stored < USER_DATA_VERSION) {
@@ -890,7 +890,7 @@ function initAudio(){
       };
       // VisionOS artwork forward: progressLoop is dead under nativeActive, so
       // pushNativeState never feeds the native overlay. [NATIVE_STATE] already
-      // carries artwork — forward on track/artwork change only, never per tick.
+      // carries artwork - forward on track/artwork change only, never per tick.
       try {
         const artUrl = ev.artwork || '';
         const vid = ev.videoId || '';
@@ -929,7 +929,7 @@ function initAudio(){
       // progress UI from native time (source of truth when nativeActive)
       if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {
         const cur = Player.native.cur, dur = Player.native.dur;
-        // position widgets freeze while dragging (mirror/icon/lyrics still update) — no fight, no blink
+        // position widgets freeze while dragging (mirror/icon/lyrics still update) - no fight, no blink
         try {
           if (!(seekDragging || miniSeekDragging)) {
             $('#np-cur').textContent = fmtTime(cur);
@@ -945,7 +945,7 @@ function initAudio(){
         } catch {}
         try { if (!isPreviewing()) updateLyricHighlight(cur); } catch {}
         // PiP canvas has no other refresh path in native mode (progressLoop
-        // early-returns) — redraw here on every native event (~2Hz timeUpdate).
+        // early-returns) - redraw here on every native event (~2Hz timeUpdate).
         try { if (Player.floatOn || document.pictureInPictureElement) drawPipFrame(); } catch {}
         try {
           if ('mediaSession' in navigator && dur)
@@ -1173,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', ()=>{ initAudio(); });
 
 /* Playback uses the official YouTube IFrame.
    Default: YouTube Music audio version (official audio / ATV) at hd720.
-   Quality ON: YouTube max (1080p–4K) for the highest audio bitrate. */
+   Quality ON: YouTube max (1080p-4K) for the highest audio bitrate. */
 const QUALITY_RANK = [
   'highres',
   'hd2160',
@@ -1333,7 +1333,7 @@ window.onYouTubeIframeAPIReady = () => {
 
 async function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
-  // mandatory version check before any play — uses cache/no-store fetch with 5min cooldown
+  // mandatory version check before any play - uses cache/no-store fetch with 5min cooldown
   try {
     const ok = await ensureAppVersionBeforePlay();
     if (!ok) return;
@@ -1634,7 +1634,7 @@ const OfflineLib = {
           updatedAt: Date.now(),
         };
       });
-      // BUGFIX 2.2.7: native records are source of truth — prune mirror ghosts
+      // BUGFIX 2.2.7: native records are source of truth - prune mirror ghosts
       // (deleted on native side) so every row is playable, none dead.
       Object.keys(m).forEach((k) => { if (!seen[k]) delete m[k]; });
       this.save(m);
@@ -1728,6 +1728,19 @@ const OfflineLib = {
     }
     if ((location.hash || '').startsWith('#/library/offline')) route();
   },
+  // Play-all-downloaded queue: COMPLETE records shaped exactly like play().
+  offlineQueueList() {
+    try {
+      const m = this.map() || {};
+      return Object.values(m)
+        .filter((e) => e && e.videoId && e.cacheStatus === 'COMPLETE')
+        .map((e) => ({
+          videoId: e.videoId, title: e.title, artist: e.artist,
+          subtitle: e.artist, thumbnail: e.artworkThumb || e.thumbnail || '',
+          duration: e.duration || 0,
+        }));
+    } catch { return []; }
+  },
   play(videoId) {    const e = this.get(videoId);
     if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
     const song = {
@@ -1802,7 +1815,7 @@ function startNativeTrack(s, loadId) {
   try {
     NativePlayback.nativePlay(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '');
   } catch (e) {
-    // BUGFIX 2.2.7: never fail silently — log the real reason before retry.
+    // BUGFIX 2.2.7: never fail silently - log the real reason before retry.
     try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[NATIVE_START] FAIL videoId=' + s.videoId + ' err=' + (e && e.message || e)); } catch {}
     try { toast('Native start failed: ' + (e && e.message || e)); } catch {}
     Player.nativeActive = false;
@@ -1915,7 +1928,7 @@ function startCurrent() {
   }
   // Single-engine invariant: entering the WebView path (audio/YT) always stops
   // Engine B first and clears its flags. Required since orphan adoption keeps
-  // nativeActive true across reloads — without this a web tap would double-play.
+  // nativeActive true across reloads - without this a web tap would double-play.
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeStop) {
     try { NativePlayback.nativeStop(); } catch {}
   }
@@ -2204,7 +2217,7 @@ window.nativeSeek = function(sec){
   if (_nsTimer) { clearTimeout(_nsTimer); _nsTimer = 0; }
   let done=false;
   try{
-    // Engine B first — single route; never ghost-seek yt/audio underneath it
+    // Engine B first - single route; never ghost-seek yt/audio underneath it
     if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
       try{ NativePlayback.nativeSeek(sec); done=true; }catch(e){}
       return done;
@@ -2328,7 +2341,7 @@ function pushNativeLyricWindow() {
 }
 
 
-/* progress loop — rAF throttled 220ms for 60fps */
+/* progress loop - rAF throttled 220ms for 60fps */
 let _lastTick = null;
 let _lastNativePush = 0;
 let _lastPushPlaying = null;
@@ -2409,7 +2422,7 @@ function progressLoop(ts){
     }
     dur = Player.yt.getDuration() || 0;
   }
-  // auto fallback when stuck at 00:00 (no duration, not playing) — never in native mode
+  // auto fallback when stuck at 00:00 (no duration, not playing) - never in native mode
   if (!Player.nativeActive && Player.current && Player.loadStartedAt && dur === 0 && cur === 0 && Date.now() - Player.loadStartedAt > 4500) {
     if (Player.useAudio && Player._fallbackTried !== Player.current.videoId) {
       Player._fallbackTried = Player.current.videoId;
@@ -3660,6 +3673,7 @@ async function route() {
     view.innerHTML = _cached;
   bindItems(view);
   bindEmptyCtas(view);
+  try { updateOfflineBanner(); } catch {}
     view.classList.add('view-enter');
   }
   const runRoute = async () => {
@@ -3770,6 +3784,7 @@ async function viewHome(view) {
     month: 'long',
   });
   let html = `<div class="hello-row"><div><div class="greeting">${esc(dateLine)}</div><h1 class="page-title">${greet}</h1></div></div>`;
+  html += `<div id="offline-banner" class="offline-banner" hidden><div class="offline-banner-text"><div class="offline-banner-title">You're offline</div><div class="offline-banner-sub">Play your downloaded music</div></div><button type="button" id="offline-play-btn" class="offline-banner-btn">${icon('i-play')}<span>Play Offline Queue</span></button></div>`;
   if (hist.length) {
     html += `<div class="shelf-title">Recently played</div><div class="quick-grid">${hist
       .slice(0, 8)
@@ -3809,6 +3824,15 @@ async function viewHome(view) {
   html += d.sections.map(shelfHTML).join('');
   view.innerHTML = html;
   bindItems(view);
+  try { bindOfflineNet(); } catch {}
+  try { updateOfflineBanner(); } catch {}
+  try {
+    const ob = document.getElementById('offline-play-btn');
+    if (ob && !ob._offQBound) {
+      ob._offQBound = true;
+      ob.addEventListener('click', () => { try { playOfflineQueue(); } catch {} });
+    }
+  } catch {}
   $$('[data-pl]', view).forEach((el) =>
     el.addEventListener('click', () => go(`#/localpl/${el.dataset.pl}`)),
   );
@@ -4460,9 +4484,47 @@ function repaintOffline() {
     try { bindEmptyCtas(host); } catch {}
   } catch {}
 }
+function getOfflineQueueList() {
+  // Shared helper: fully-downloaded tracks shaped like OfflineLib.play() items.
+  try {
+    if (typeof OfflineLib !== 'undefined' && OfflineLib.offlineQueueList)
+      return OfflineLib.offlineQueueList();
+  } catch {}
+  return [];
+}
+function playOfflineQueue() {
+  // One action for both entry points: queue all COMPLETE tracks, play at 0.
+  // Reuses playSong/startCurrent, no new playback path.
+  const list = getOfflineQueueList();
+  if (!list || !list.length) {
+    try { toast('No downloaded songs'); } catch {}
+    return;
+  }
+  try {
+    Player._playCached = list[0].videoId;
+    playSong(list[0], list, 0);
+  } catch {}
+}
+let _offlineNetBound = false;
+function updateOfflineBanner() {
+  try {
+    const banner = document.getElementById('offline-banner');
+    if (!banner) return;
+    banner.hidden = !!navigator.onLine;
+  } catch {}
+}
+function bindOfflineNet() {
+  if (_offlineNetBound) return;
+  _offlineNetBound = true;
+  try {
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+  } catch {}
+}
 function offlineBodyHTML() {
   // Sync, guarded: returns list HTML or empty state. NEVER throws, NEVER ''.
   const empty = emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
+  const playAllBtn = `<button type="button" id="offline-play-queue-btn-lib" class="btn-play-all">${icon('i-play')}<span>Play All Downloaded</span></button>`;
   try {
     const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
     const pins = offPinnedMap();
@@ -4477,7 +4539,7 @@ function offlineBodyHTML() {
     };
     full.sort(byPlay);
     partial.sort(byPlay);
-    if (!all.length) return empty;
+    if (!all.length) return playAllBtn + empty;
     const sel = OffUI.select;
     const nChecked = Object.keys(OffUI.checked).length;
     const toolbar = sel
@@ -4505,7 +4567,7 @@ function offlineBodyHTML() {
       }
     };
     const shown = Math.min(OffUI.shown, full.length);
-    let html = toolbar + `<div class="track-list">` + full.slice(0, shown).map((e) => rowHTML(e, false)).join('') + `</div>`;
+    let html = playAllBtn + toolbar + `<div class="track-list">` + full.slice(0, shown).map((e) => rowHTML(e, false)).join('') + `</div>`;
     if (full.length > shown)
       html += `<button type="button" class="pill-btn off-wide" id="off-morebtn"><span>Muat lebih banyak (${full.length - shown})</span></button>`;
     if (partial.length) {
@@ -4520,10 +4582,18 @@ function offlineBodyHTML() {
       html += `<div class="off-selectbar"><button type="button" class="pill-btn primary" id="off-dl"><span>Download</span></button><button type="button" class="pill-btn" id="off-del"><span>Delete</span></button></div>`;
     return html;
   } catch {
-    return empty;
+    return playAllBtn + empty;
   }
 }
 function bindOfflineRows(root) {
+  // Play-all-downloaded entry (Library tab, always visible).
+  try {
+    const b = root.querySelector('#offline-play-queue-btn-lib');
+    if (b && !b._offQBound) {
+      b._offQBound = true;
+      b.addEventListener('click', () => { try { playOfflineQueue(); } catch {} });
+    }
+  } catch {}
   // Phase 8 offline rows: COMPLETE -> native CACHED_AUDIO, never iFrame
   $$('[data-offplay]', root).forEach((b) =>
     b.addEventListener('click', () => {
@@ -4638,7 +4708,7 @@ function viewLibrary(view, tab) {
         );
   } else if (tab === 'offline') {
     // Two-phase paint: header+pills+body painted ONCE by generic paint below.
-    // Async native sync only swaps #lib-body content — header/pills never re-rendered,
+    // Async native sync only swaps #lib-body content - header/pills never re-rendered,
     // and no second route() means no nested view transition (the mobile black-screen cause).
     body = `<div id="lib-body">${offlineBodyHTML()}</div>`;
     if (typeof OfflineLib !== 'undefined' && OfflineLib.hasBridge()) {
@@ -5377,7 +5447,7 @@ function openSleepTimer() {
     $('#np-sleep') && $('#np-sleep').classList.remove('on');
     if (m > 0) {
       Player.sleepTimer = setTimeout(() => {
-        // pause whatever engine is audible (was: yt only — native kept playing)
+        // pause whatever engine is audible (was: yt only - native kept playing)
         try {
           if (Player.nativeActive && window.NativePlayback && NativePlayback.nativePause) NativePlayback.nativePause();
           else if (Player.useAudio && Player.audio) Player.audio.pause();
@@ -5591,12 +5661,12 @@ function openSettingsModal(tab = 'settings') {
         if (res && res.needsUpdate) {
           pendingWebUpdate = res.latest;
           if (updLabel) updLabel.textContent = 'Update to v' + res.latest;
-          toast('Web update tersedia v' + res.latest + ' — tap lagi untuk update web');
+          toast('Web update tersedia v' + res.latest + ' - tap lagi untuk update web');
           updBtn.disabled = false;
           // also modal already shown via checkAppVersion → user can tap Update there
         } else if (res && res.offline) {
           if (updLabel) updLabel.textContent = 'Offline';
-          toast('Offline — tidak bisa cek update web');
+          toast('Offline - tidak bisa cek update web');
           setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
           updBtn.disabled = false;
         } else {
@@ -5912,7 +5982,7 @@ function doMiniSeekFrac(frac) {
   if (Player.cued || isPreviewing()) return;
   try { paintDlLayer(); } catch {}
   frac = Math.min(1, Math.max(0, frac));
-  // Engine B first (was: legacy seek only) — same order as npDoSeek
+  // Engine B first (was: legacy seek only) - same order as npDoSeek
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
     const dur = (Player.native && Player.native.dur) || 0;
     if (dur) NativePlayback.nativeSeek(frac * dur);
@@ -5941,7 +6011,7 @@ let miniSeekDragging = false;
 const onMiniSeekMove = (e) => {
   if (!miniSeekDragging || e.pointerId !== miniSeekPointerId) return;
   if (e.cancelable) e.preventDefault();
-  miniSeekPreview(e.clientX); // UI only — engine seek fires once on release
+  miniSeekPreview(e.clientX); // UI only - engine seek fires once on release
 };
 let miniSeekPointerId = null;
 const stopMiniSeek = (e) => {
@@ -6156,7 +6226,7 @@ range.addEventListener('change', () => {
   const frac = range.value / 1000;
   npDoSeek(frac);
 });
-// direct drag on track (click or drag anywhere on seek row) — bar now back under Artist above Play
+// direct drag on track (click or drag anywhere on seek row) - bar now back under Artist above Play
 const npSeekRow = document.querySelector('#np-player .np-seek');
 if (npSeekRow) {
   let npRowDragging = false;
@@ -6167,7 +6237,7 @@ if (npSeekRow) {
     range.value = Math.round(frac * 1000);
     try { paintNpPlayed(); } catch {}
     $('#np-cur').textContent = fmtTime(frac * npSeekDuration());
-    // Opsi A: UI only while dragging — single engine seek on release (onNpRowUp).
+    // Opsi A: UI only while dragging - single engine seek on release (onNpRowUp).
   };
   const onNpRowDown = (e) => {
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -6271,7 +6341,7 @@ $('#miniplayer').addEventListener('click', (e) => {
   updateLikeButtons();
   openNowPlaying();
 });
-/* swipe-down to minimize disabled — only #np-close and back button close Now Playing */
+/* swipe-down to minimize disabled - only #np-close and back button close Now Playing */
 
 /* ================= floating widget / Picture-in-Picture ================= */
 Player.pipWin = null;
@@ -6373,7 +6443,7 @@ function bindFloatWidget(rootDoc) {
     const r = e.currentTarget.getBoundingClientRect();
     if (!r.width) return;
     const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    // Engine B first — same order as npDoSeek
+    // Engine B first - same order as npDoSeek
     if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
       const dur = (Player.native && Player.native.dur) || 0;
       if (dur) { try { NativePlayback.nativeSeek(frac * dur); } catch {} }
@@ -6735,7 +6805,7 @@ async function openFloatWidget() {
     try { console.log('[JS] openFloatWidget abort no current'); } catch {}
     return;
   }
-  // 1. Android native System PiP via bridge — primary for WebView (Activity.enterPictureInPictureMode)
+  // 1. Android native System PiP via bridge - primary for WebView (Activity.enterPictureInPictureMode)
   // enterPip is async; UI state (pip-system, widget visible, Player.floatOn) is delivered via onPictureInPictureModeChanged
   try { console.log('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
   try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback exists=' + !!window.NativePlayback); } catch {}
@@ -6865,7 +6935,7 @@ setInterval(() => {
 renderNav();
 renderSideQueue();
 updateThemeIcon();
-// versioning — website vs user data separated, mandatory update checks
+// versioning - website vs user data separated, mandatory update checks
 migrateUserDataIfNeeded();
 setupVersionChecks();
 try {
@@ -6926,7 +6996,7 @@ $('#vu-update')?.addEventListener('click', () => {
   applyVersionUpdate(v);
 });
 $('#version-update-modal')?.addEventListener('click', (e) => {
-  // mandatory — only close via Update button, ignore backdrop click
+  // mandatory - only close via Update button, ignore backdrop click
   if (e.target.id === 'version-update-modal') {
     e.stopPropagation();
   }

@@ -16,7 +16,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 /**
- * Phase 8 — native-only stream settings (diagnostic entry, NOT a feature UI).
+ * Phase 8 - native-only stream settings (diagnostic entry, NOT a feature UI).
  *
  * Stream: iFrame (default, existing flow untouched) | VisionOS (proven pipeline).
  * Audio Cache ON/OFF + Max Cached Songs are configuration/state only for Phase 9

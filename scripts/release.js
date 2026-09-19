@@ -1,6 +1,6 @@
 const { execFileSync } = require('node:child_process');
 
-// npm run release — bump, show changes, commit, push to main. No force, no amend, no reset.
+// npm run release - bump, show changes, commit, push to main. No force, no amend, no reset.
 // Aborts if the tree contains changes outside the version-file set.
 const VERSION_FILES = new Set([
   'package.json',

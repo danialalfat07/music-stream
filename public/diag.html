@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Diag Player — Dnialify</title>
+<title>Diag Player - Dnialify</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#111;color:#eee;max-width:720px;margin:0 auto;padding:16px}
 input{width:100%;font-size:16px;padding:10px;margin:6px 0;box-sizing:border-box;background:#222;color:#eee;border:1px solid #444}
@@ -57,19 +57,19 @@ async function api(p){
   return r.json();
 }
 $('bCheck').onclick = async function(){
-  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  var id = idFromInput(); if(!id) return setMethod('● Error - bad id','#f33');
   hideIframe();
   try {
     var j = await api('/api/cache-audio?videoId='+encodeURIComponent(id));
     // NOTE: /api/cache-audio downloads on MISS. Use only to observe; prefer Ensure+Play flow.
     showMeta(j);
-    if(j.cached){ setMethod('● Cached Audio — HIT ('+(j.bytes||'?')+'B)','#4c4'); }
-    else { setMethod('● Cached Audio — MISS, just downloaded ('+(j.bytes||'?')+'B)','#cc4'); }
+    if(j.cached){ setMethod('● Cached Audio - HIT ('+(j.bytes||'?')+'B)','#4c4'); }
+    else { setMethod('● Cached Audio - MISS, just downloaded ('+(j.bytes||'?')+'B)','#cc4'); }
     elog('check cached='+j.cached+' bytes='+j.bytes);
-  } catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('check err '+e.message); }
+  } catch(e){ setMethod('● Error - '+e.message,'#f33'); elog('check err '+e.message); }
 };
 $('bPlay').onclick = async function(){
-  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  var id = idFromInput(); if(!id) return setMethod('● Error - bad id','#f33');
   hideIframe();
   setMethod('● resolving/ensuring cache…','#888');
   try {
@@ -77,16 +77,16 @@ $('bPlay').onclick = async function(){
     showMeta(j);
     var m = j.meta||{};
     var hit = j.cached ? 'HIT' : 'MISS→downloaded';
-    setMethod('● Cached Audio — '+hit+' — WebM/Opus'+(m.itag?' itag '+m.itag:'')+' ('+(j.bytes||'?')+'B)','#4c4');
+    setMethod('● Cached Audio - '+hit+' - WebM/Opus'+(m.itag?' itag '+m.itag:'')+' ('+(j.bytes||'?')+'B)','#4c4');
     elog('ensure cached='+j.cached+' bytes='+j.bytes);
     a.src = '/api/local-audio?videoId='+encodeURIComponent(id);
     await a.play();
-  } catch(e){ setMethod('● Error — '+e.message,'#f33'); elog('play err '+e.message); }
+  } catch(e){ setMethod('● Error - '+e.message,'#f33'); elog('play err '+e.message); }
 };
 $('bDirect').onclick = async function(){
-  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  var id = idFromInput(); if(!id) return setMethod('● Error - bad id','#f33');
   hideIframe();
-  function FL(stage, extra){ setMethod('● FAIL — '+stage+(extra?' — '+extra:''),'#f33'); elog('[FAIL] '+stage+(extra?' | '+extra:'')); }
+  function FL(stage, extra){ setMethod('● FAIL - '+stage+(extra?' - '+extra:''),'#f33'); elog('[FAIL] '+stage+(extra?' | '+extra:'')); }
   elog('[1] PLAY_DIRECT START id='+id);
   // [2] staged backend diagnosis (VisionOS resolve + 1KB upstream probe)
   var d;
@@ -116,21 +116,21 @@ $('bDirect').onclick = async function(){
     if(ct && ct.indexOf('audio/')!==0 && ct.indexOf('video/')!==0){ FL('MEDIA_INVALID content-type='+ct, 'source='+src); return; }
   } catch(e){ FL('MEDIA_REQUEST_FAIL', e.message); return; }
   // [8-9] HTML5 playback
-  setMethod('● VisionOS Audio — resolver+media PASS, starting HTML5…','#48c');
+  setMethod('● VisionOS Audio - resolver+media PASS, starting HTML5…','#48c');
   elog('[8] AUDIO SRC SET, calling play()');
   try {
     a.src = '/api/stream?videoId='+encodeURIComponent(id)+'&client=visionos';
     await a.play();
-    elog('[9] play() accepted — waiting playing/timeupdate events');
+    elog('[9] play() accepted - waiting playing/timeupdate events');
   } catch(e){ FL('HTML5_PLAYBACK_FAIL', e.message||e.name); return; }
 };
 $('bIframe').onclick = function(){
-  var id = idFromInput(); if(!id) return setMethod('● Error — bad id','#f33');
+  var id = idFromInput(); if(!id) return setMethod('● Error - bad id','#f33');
   try{ a.pause(); }catch(e){}
   a.removeAttribute('src'); a.load();
   f.style.display='block';
   f.src = 'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0';
-  setMethod('● iFrame — fallback (youtube-nocookie embed)','#c84');
+  setMethod('● iFrame - fallback (youtube-nocookie embed)','#c84');
   showMeta({videoId:id, path:'youtube-nocookie embed'});
   elog('iframe fallback set');
 };

@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// npm run bump [version] — bump frontend version without changing APK version.
+// npm run bump [version] - bump frontend version without changing APK version.
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const current = pkg.webVersion || pkg.version;

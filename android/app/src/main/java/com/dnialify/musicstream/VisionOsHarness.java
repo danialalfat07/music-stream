@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 
 /**
- * Phase 8 — ADB-controlled VisionOS diagnostic harness.
+ * Phase 8 - ADB-controlled VisionOS diagnostic harness.
  *
  * Primary test interface (no coordinate taps):
  *   adb shell am start -n com.dnialify.musicstream/.VisionOsDiagActivity \

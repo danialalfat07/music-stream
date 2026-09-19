@@ -712,7 +712,7 @@ app.get('/api/browse', async (req, res) => {
 /* ---------------- music download via third-party converter (loader.to) ----------------
    Highest quality MP3 (320kbps). Our server orchestrates the conversion job:
    start -> poll progress -> hand the final direct file URL to the browser.
-   The user never sees or visits the third-party site — the file just downloads. */
+   The user never sees or visits the third-party site - the file just downloads. */
 const LOADER_API = 'https://loader.to/ajax/download.php';
 const DL_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -1060,7 +1060,7 @@ app.get('/api/lyrics', async (req, res) => {
     const pa = primaryArtist(artist);
     let tUse = ct || title;
     let aUse = pa || artist;
-    const dash = String(tUse).match(/^(.{2,48}?)\s*[-–—]\s+(.+)$/);
+    const dash = String(tUse).match(/^(.{2,48}?)\s*[-\u2013\u2014]\s+(.+)$/);
     if (dash && (!aUse || simScore(dash[1], aUse) >= 0.45)) {
       aUse = aUse || dash[1];
       tUse = dash[2];
@@ -1097,7 +1097,7 @@ app.get('/api/lyrics', async (req, res) => {
       } catch {}
     }
 
-    // 2) LRCLIB exact (synced preferred) — parallel
+    // 2) LRCLIB exact (synced preferred) - parallel
     const exactHits = await Promise.all([
       lrclibGet(tUse, aUse, duration),
       lrclibGet(tUse, aUse, 0),
@@ -1327,7 +1327,7 @@ async function getAudioUrl(videoId, clientOverride) {
     return null;
   }
 
-  // legacy: Vercel IP diblok untuk ANDROID/IOS di www.youtube.com — coba music.youtube.com + WEB_REMIX juga
+  // legacy: Vercel IP diblok untuk ANDROID/IOS di www.youtube.com - coba music.youtube.com + WEB_REMIX juga
   const tryClients = [
     { host: 'https://www.youtube.com', context: ANDROID_CONTEXT, headers: ANDROID_HEADERS },
     { host: 'https://www.youtube.com', context: IOS_CONTEXT, headers: IOS_HEADERS },
@@ -1712,7 +1712,7 @@ app.get('/api/stream-diag', async (req, res) => {
 app.get('/api/stream', async (req, res) => {
   const id = String(req.query.videoId || '').trim();
   if (!/^[\w-]{6,20}$/.test(id)) return res.status(400).end();
-  // Phase 7B: cache-first — cached ids are served from local disk, zero YouTube calls
+  // Phase 7B: cache-first - cached ids are served from local disk, zero YouTube calls
   if (readFinalCache(id)) {
     console.log(`stream cache-hit ${id} range=${req.headers.range || 'full'}`);
     res.setHeader('X-Diag-Source', 'cache');

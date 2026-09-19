@@ -1,4 +1,4 @@
-# KEYSTORE — cara update tanpa bentrok
+# KEYSTORE - cara update tanpa bentrok
 
 ## Kenapa bentrok
 - Android identifikasi update via `applicationId` + `SHA signing` + `versionCode` harus naik.
@@ -15,7 +15,7 @@
 ## Fix yang sudah dilakukan
 1. `android/app/debug.keystore` (2618 bytes, SHA `F3:A2...`) sekarang **di-commit** ke repo `android/app/debug.keystore`. Baik GH maupun build lokal pakai file ini.
 2. `.gitignore` diubah: `*.keystore` tetap ignore tapi `!android/app/debug.keystore` whitelist, jadi debug keystore ter-track.
-3. `android/app/build.gradle` sudah pakai `if (debugStore.exists()) signingConfigs.debug` → otomatis pakai file ini lokal maupun GH. Workflow `android-build.yml` tetap restore dari secret (overwrite file sama, SHA tetap sama) — tidak bentrok.
+3. `android/app/build.gradle` sudah pakai `if (debugStore.exists()) signingConfigs.debug` → otomatis pakai file ini lokal maupun GH. Workflow `android-build.yml` tetap restore dari secret (overwrite file sama, SHA tetap sama) - tidak bentrok.
 
 ## Cara verifikasi SHA
 ```bash
@@ -48,6 +48,6 @@ Jika kamu masih pakai APK lama SHA beda (sebelum commit debug.keystore):
 Setelah migrasi ini, semua update berikutnya (GH atau lokal dengan file committed) akan SHA sama dan tidak bentrok lagi.
 
 ## Catatan
-- Jangan commit `release.keystore` / `*.jks` — hanya debug.
+- Jangan commit `release.keystore` / `*.jks` - hanya debug.
 - Jika mau ganti debug keystore lagi, harus commit baru + update `DEBUG_KEYSTORE_BASE64` secret (`base64 -w0 android/app/debug.keystore`) dan semua user harus uninstall sekali.
-- `versionCode` GH monotik, lokal default `2` — untuk hindari downgrade, prefer GH artifact untuk distribusi.
+- `versionCode` GH monotik, lokal default `2` - untuk hindari downgrade, prefer GH artifact untuk distribusi.

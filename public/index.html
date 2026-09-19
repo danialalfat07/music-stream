@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.28" />
+<meta name="app-version" content="2.3.29" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -161,8 +161,8 @@ try {
     <div class="pb-left">
       <img id="mini-art" alt="" />
       <div class="mini-meta">
-        <div id="mini-title">—</div>
-        <div id="mini-artist">—</div>
+        <div id="mini-title">-</div>
+        <div id="mini-artist">-</div>
       </div>
       <button id="mini-like" class="icon-btn" title="Favorite"><svg class="ic"><use href="#i-heart-o"/></svg></button>
       <button id="mini-float" class="icon-btn" title="Floating widget"><svg class="ic"><use href="#i-pip"/></svg></button>
@@ -213,8 +213,8 @@ try {
         <section id="np-player" class="np-pane active">
           <div class="np-art-wrap"><img id="np-art" alt="" /></div>
           <div class="np-meta">
-            <div id="np-title">—</div>
-            <div id="np-artist">—</div>
+            <div id="np-title">-</div>
+            <div id="np-artist">-</div>
             <div id="np-method" class="method-badge" style="display:none"></div>
           </div>
           <div class="np-seek">
@@ -245,7 +245,7 @@ try {
             <button id="np-share" class="pill-btn np-extra" title="Share"><svg class="ic"><use href="#i-share"/></svg><span>Share</span></button>
             <button id="np-speed" class="pill-btn np-extra" title="Playback speed"><svg class="ic"><use href="#i-clock"/></svg><span>1×</span></button>
             <button id="np-float" class="pill-btn np-extra" title="Floating widget"><svg class="ic"><use href="#i-pip"/></svg><span>Widget</span></button>
-            <button id="np-quality" class="pill-btn np-extra" title="YouTube Music audio — tap for YouTube max quality"><span>Quality</span></button>
+            <button id="np-quality" class="pill-btn np-extra" title="YouTube Music audio - tap for YouTube max quality"><span>Quality</span></button>
             <button id="np-sb" class="pill-btn np-extra" title="SponsorBlock auto-skip"><svg class="ic"><use href="#i-next"/></svg><span>SB</span></button>
           </div>
           <div id="np-lyric-preview" title="Open lyrics"></div>
@@ -278,7 +278,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.28 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.3.29 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -347,7 +347,7 @@ try {
           </div>
           <div class="settings-section" id="sec-appinfo">
             <div class="settings-section-title">App Info</div>
-            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.28</span></span></div>
+            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.29</span></span></div>
             <div class="settings-row"><span class="s-label">Download APK</span><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Android Build</a></div>
           </div>
           <div class="settings-section" id="sec-contact">
@@ -379,7 +379,7 @@ try {
       </div>
     </div>
   </div>
-  <!-- Version Update Modal — mandatory (website cache vs user data separated) -->
+  <!-- Version Update Modal - mandatory (website cache vs user data separated) -->
   <div id="version-update-modal" class="hidden">
     <div class="modal-card">
       <h3 style="margin:0 0 8px">Pembaruan Tersedia</h3>
@@ -396,8 +396,8 @@ try {
   <div id="float-widget" class="hidden" aria-label="Floating player">
     <img id="fw-art" alt="" />
     <div class="fw-meta">
-      <div id="fw-title">—</div>
-      <div id="fw-artist">—</div>
+      <div id="fw-title">-</div>
+      <div id="fw-artist">-</div>
       <div id="fw-lyric" title="Open lyrics"></div>
       <div class="fw-bar" id="fw-bar"><div id="fw-fill"></div></div>
     </div>
@@ -420,7 +420,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.28";
+    var VER="2.3.29";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);

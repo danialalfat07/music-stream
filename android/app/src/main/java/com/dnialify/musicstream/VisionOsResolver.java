@@ -11,7 +11,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Phase 8 — native VisionOS resolver.
+ * Phase 8 - native VisionOS resolver.
  *
  * Direct adaptation of the proven pipeline (same endpoint, body, UA, selection
  * as the validated server/visionostest flow). No new approach:

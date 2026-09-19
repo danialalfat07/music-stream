@@ -6,7 +6,7 @@ import android.service.quicksettings.TileService;
 import android.util.Log;
 
 /**
- * Phase 8 — diagnostic entry point (Quick Settings tile).
+ * Phase 8 - diagnostic entry point (Quick Settings tile).
  * Tap opens the native stream settings dialog. No playback logic here.
  * Requires API 24+; tile simply does nothing on older platforms.
  */

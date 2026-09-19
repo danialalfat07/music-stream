@@ -5,7 +5,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Phase 8 — network accounting for the VisionOS pipeline (diagnostic aid).
+ * Phase 8 - network accounting for the VisionOS pipeline (diagnostic aid).
  * Counts every googlevideo request and can hard-refuse YouTube/googlevideo
  * hosts during cache-playback tests ("no YouTube" proof). No retries here.
  */

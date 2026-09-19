@@ -4,11 +4,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * Phase 8 — native-only stream configuration (never touches web UI or production web).
+ * Phase 8 - native-only stream configuration (never touches web UI or production web).
  *
  * Stream:
- *   MODE_IFRAME   (default) — existing YouTube iFrame flow, byte-for-byte behavior.
- *   MODE_VISIONOS           — proven VisionOS pipeline (visitorData + direct googlevideo URL).
+ *   MODE_IFRAME   (default) - existing YouTube iFrame flow, byte-for-byte behavior.
+ *   MODE_VISIONOS           - proven VisionOS pipeline (visitorData + direct googlevideo URL).
  * Audio Cache / Max Cached Songs are configuration/state only for Phase 9
  * (no files, no LRU, no eviction, no download manager here).
  */

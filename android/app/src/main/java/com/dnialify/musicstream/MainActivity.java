@@ -30,8 +30,8 @@ public class MainActivity extends BridgeActivity {
     private static final String TAG_DIAG = "DnialifyDiag";
     // DiagnosticsBridge receives batched JSON logs from diag-bg.html during background
     private final DiagnosticsBridge diagnosticsBridge = new DiagnosticsBridge();
-    // Phase 11 — native PiP renderer (mirrors WebView state, no second playback engine)
-    // Phase 12 — Full-Bleed Synced Lyrics (Karaoke) — blurred art + dark overlay + 10-line centered + dynamic scaling
+    // Phase 11 - native PiP renderer (mirrors WebView state, no second playback engine)
+    // Phase 12 - Full-Bleed Synced Lyrics (Karaoke) - blurred art + dark overlay + 10-line centered + dynamic scaling
     private ViewGroup pipNativeView;
     private ImageView pipArtView;
     private TextView pipTitleView;
@@ -88,7 +88,7 @@ public class MainActivity extends BridgeActivity {
         super.onStart();
         current = this;
         logLifecycle("onStart");
-        // Bridge ready here — add interface + settings (fixes patah jembatan: addJavascriptInterface sebelum WebView ready)
+        // Bridge ready here - add interface + settings (fixes patah jembatan: addJavascriptInterface sebelum WebView ready)
         try {
             android.webkit.WebView wv = getBridge().getWebView();
             wv.getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -116,7 +116,7 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "onStart inject error " + e);
         }
-        // Phase 11 — native PiP view (GONE until PiP, mirrors WebView state)
+        // Phase 11 - native PiP view (GONE until PiP, mirrors WebView state)
         ensurePipNativeView();
         logPipNative("onStart");
     }
@@ -191,7 +191,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onTopResumedActivityChanged(boolean isTopResumed) {
-        // API29+ — top resumed indicates true foreground
+        // API29+ - top resumed indicates true foreground
         super.onTopResumedActivityChanged(isTopResumed);
         android.util.Log.d(TAG_DIAG, "Activity onTopResumedActivityChanged isTopResumed=" + isTopResumed + " " + lifecycleSnapshot());
         logPipNative("onTopResumed:" + isTopResumed);
@@ -379,7 +379,7 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // Phase 12 — Full-Bleed Karaoke: blurred art + 70% dark overlay + header gradient + 10-line scroll centered + dynamic scaling
+    // Phase 12 - Full-Bleed Karaoke: blurred art + 70% dark overlay + header gradient + 10-line scroll centered + dynamic scaling
     private void ensurePipNativeView() {
         try {
             if (pipNativeView != null) return;
@@ -443,7 +443,7 @@ public class MainActivity extends BridgeActivity {
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             aLp.topMargin = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 2, getResources().getDisplayMetrics());
             header.addView(artistTv, aLp);
-            // Scrollable lyrics container flex 1 — active centered
+            // Scrollable lyrics container flex 1 - active centered
             android.widget.ScrollView scroll = new android.widget.ScrollView(this);
             scroll.setVerticalScrollBarEnabled(false);
             scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -520,7 +520,7 @@ public class MainActivity extends BridgeActivity {
                 try {
                     pipTitleView.setText(pipTitle == null || pipTitle.isEmpty() ? "Dnialify Music Stream" : pipTitle);
                     pipArtistView.setText(pipArtist == null || pipArtist.isEmpty() ? "MusicStream" : pipArtist);
-                    // artwork as background — keep visible, fallback black only if missing (spec: jangan hitam polos)
+                    // artwork as background - keep visible, fallback black only if missing (spec: jangan hitam polos)
                     try {
                         String url = pipArtworkUrl;
                         boolean hasArt = url != null && !url.isEmpty();
@@ -533,7 +533,7 @@ public class MainActivity extends BridgeActivity {
                             pipNativeView.setBackgroundColor(Color.BLACK);
                         }
                     } catch (Exception ignored) {}
-                    // 10-line window — active centered
+                    // 10-line window - active centered
                     java.util.List<String> lines = pipLyricLines;
                     int active = pipLyricActiveIdx;
                     int size = lines == null ? 0 : lines.size();
@@ -578,7 +578,7 @@ public class MainActivity extends BridgeActivity {
                     if (start < 0) start = 0;
                     // ensure window size at most 10, fill
                     int winSize = Math.min(10, size);
-                    // if size <10, center active as best possible — keep active near middle index 5 but clamp
+                    // if size <10, center active as best possible - keep active near middle index 5 but clamp
                     // adjust start to keep size winSize
                     if (size >= 10) {
                         // already 10
@@ -738,7 +738,7 @@ public class MainActivity extends BridgeActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
         android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
-        // Phase 11 — native PiP view visible only in PiP
+        // Phase 11 - native PiP view visible only in PiP
         try {
             ensurePipNativeView();
             if (pipNativeView != null) {
@@ -887,7 +887,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, double positionMs, double durationMs) {
             android.util.Log.d("DnialifyDiag", "Bridge updateWebViewState title=" + title + " artist=" + artist + " playing=" + isPlaying + " pos=" + positionMs + " dur=" + durationMs);
-            // Phase 11 — mirror to native PiP (WebView is source of truth, no second playback system)
+            // Phase 11 - mirror to native PiP (WebView is source of truth, no second playback system)
             try {
                 if (title != null) pipTitle = title;
                 if (artist != null) pipArtist = artist;
@@ -904,7 +904,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void updateLyrics(String prev, String current, String next) {
             android.util.Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
-            // Phase 11 — lyric mirror (single fallback, 10-line window via updateLyricWindow)
+            // Phase 11 - lyric mirror (single fallback, 10-line window via updateLyricWindow)
             try {
                 pipCurrentLyric = current == null ? "" : current;
                 android.util.Log.d(TAG_DIAG, "[PipNative] lyricUpdate current=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " title=" + pipTitle);
@@ -1196,7 +1196,7 @@ public class MainActivity extends BridgeActivity {
                             android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
                             return;
                         }
-                        // Phase 11 — show native PiP (artwork+title+artist+lyric) immediately before PiP entry
+                        // Phase 11 - show native PiP (artwork+title+artist+lyric) immediately before PiP entry
                         try {
                             ensurePipNativeView();
                             updatePipNativeView();

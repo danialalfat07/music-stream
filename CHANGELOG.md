@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0-beta.1 — 2026-09-15
+## 2.1.0-beta.1 - 2026-09-15
 - **Audit source Phase 0.5 live capture**: googlevideo direct `audio/webm opus` `expire ~6h`, Range `206` verified `server.js:1252-1266`, thumb `image/jpeg` cacheable, lyrics `{synced,plain,source}` consistent.
 - **Chunk strategy lock**: 1MB virtual `ceil(len/1M)` → 4-7 seg for 3-6MB tracks (not 100). Single file fallback for <1MB.
 - **Same-domain beta isolation** (main branch, no subdomain):
@@ -18,11 +18,11 @@
 ### Rollback plan
 - `git revert` + redeploy stable version, beta caches auto-cleaned via SW activate handler.
 
-## 2.0.4 — 2026-09-15
+## 2.0.4 - 2026-09-15
 - Fix: minimize now playing on navigation (#beta isolation prep).
 
-## 2.0.3 — 2026-09-14
+## 2.0.3 - 2026-09-14
 - Volume boost 100/200/300, native loudness.
 
-## 2.0.1 — ...
+## 2.0.1 - ...
 - Prior releases.

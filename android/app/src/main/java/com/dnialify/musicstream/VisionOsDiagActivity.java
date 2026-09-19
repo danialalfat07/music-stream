@@ -24,7 +24,7 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Phase 8 — native VisionOS diagnostic screen (diagnostic tool, NOT a feature).
+ * Phase 8 - native VisionOS diagnostic screen (diagnostic tool, NOT a feature).
  * Runs the 16 staged checks with timestamped PASS/FAIL lines to logcat TAG
  * "DnialifyVisionOS" and to the on-screen log. Auto-runs on launch unless the
  * launching intent carries autorun=false. Bounded waits only, no retry loops.

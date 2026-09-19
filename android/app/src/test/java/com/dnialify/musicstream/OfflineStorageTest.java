@@ -9,7 +9,7 @@ import java.io.File;
 import java.util.Arrays;
 
 /**
- * Phase 1: saveChunk / readChunk / getStorageUsage — pure Java, no Android Context.
+ * Phase 1: saveChunk / readChunk / getStorageUsage - pure Java, no Android Context.
  */
 public class OfflineStorageTest {
 

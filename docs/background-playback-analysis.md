@@ -1,6 +1,6 @@
-# Background Playback Analysis — MusicStream
+# Background Playback Analysis - MusicStream
 
-> Branch: `feature/apk-chromium-shell` — base `88b4603` (main Vercel tidak disentuh)
+> Branch: `feature/apk-chromium-shell` - base `88b4603` (main Vercel tidak disentuh)
 
 ## 1. Current Behavior (PWA + WebView)
 - Foreground: `<video>` play normal (video+audio)
@@ -15,9 +15,9 @@
 - + Permission `allow_background_video_playback_` dicabut saat `OnPageHidden()` (patch 0051)
 
 ## 3. Bare Patches Relevant
-- **0043** `Let supported sites keep playing media in the background` — ubah `ShouldPausePlaybackWhenHidden()` untuk site yang didukung
-- **0050** `Keep sites told the page is visible in the background` — suppress `visibilityState = hidden`
-- **0051** `Keep background playback permission when hidden` — jangan cabut `allow_background_video_playback_`
+- **0043** `Let supported sites keep playing media in the background` - ubah `ShouldPausePlaybackWhenHidden()` untuk site yang didukung
+- **0050** `Keep sites told the page is visible in the background` - suppress `visibilityState = hidden`
+- **0051** `Keep background playback permission when hidden` - jangan cabut `allow_background_video_playback_`
 
 > Detail diff akan diisi di `docs/bare-patch-analysis.md` setelah clone Bare.
 

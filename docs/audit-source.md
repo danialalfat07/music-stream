@@ -1,4 +1,4 @@
-# Audit Source — Dnialify Music Stream
+# Audit Source - Dnialify Music Stream
 
 > Generated: 2026-09-15 Phase 0.5 live capture. Read-only, grounded in code + live curl.
 
@@ -62,7 +62,7 @@
 - Native app: Capacitor 6.2.1 `package.json`, `MainActivity.java:28 BridgeActivity` + `PlaybackBridge` `MainActivity.java:863`, private storage `files/offline-beta/` SQLite `dnialify-offline-beta` (planned), cap 500MB enforced native `MainActivity.java:953 volumeBoost` pattern.
 - Build: vanilla JS + Express, target desktop + mobile web + WebView Android (native-first offline).
 
-## 7. Chunk Strategy (Lock Q1) — native-first
+## 7. Chunk Strategy (Lock Q1) - native-first
 
 - **1MB virtual chunk** `chunk_size=1048576`, `total=ceil(content_length/1M)`. For 3-7 MB tracks → 4-7 segments, not 100. For 255KB short track → 1 segment.
 - Need `Range 0-0` to get `Content-Range` total before chunking (`206` verified).

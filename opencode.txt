@@ -1,9 +1,9 @@
-# Debug Report: Lyrics Empty & PiP Black — Fix 2026-09-09
+# Debug Report: Lyrics Empty & PiP Black - Fix 2026-09-09
 
 Branch: feature/apk-chromium-shell -> main (Vercel server.url kept)
 APK: android/app/build/outputs/apk/debug/app-debug.apk (local Vercel remote)
 
-## Root Cause 1 — Lyrics empty `Bridge updateLyrics prev= cur= next=`
+## Root Cause 1 - Lyrics empty `Bridge updateLyrics prev= cur= next=`
 
 - `pushNativeLyrics()` read `lastLyricIdx=-1` before `updateLyricHighlight` had index. If `Player.lyrics.lines` empty or idx -1, prev/cur/next => "".
 - Log `21:55:24.023` empty right after song start before `loadLyrics` async finished. No subsequent push because `renderLyrics` for synced with idx -1 still gave cur="" and plain case never pushed.
@@ -27,7 +27,7 @@ onStartCommand webViewLyrics: currentLyric=cur -> updateMediaSession -> publish
 
 Preserved: `Player.lyrics` parser `parseLRC`, 400ms `updateLyricHighlight`, `pushNativeState` 1s throttle, `server.url` Vercel, Brave patch.
 
-## Root Cause 2 — PiP black empty
+## Root Cause 2 - PiP black empty
 
 - `onPictureInPictureModeChanged` only toggled `pip-system` + `float-mode` + `Player.floatOn=true`, but did NOT `remove hidden` from `#float-widget` with correct timing. Widget stayed `display:none` (hidden class) → WebView `#app` black #000 → PiP window black.
 - `openFloatWidget` native branch was async `enterPip()` void, but previous optimistic `add pip-system` before callback hid UI even if PiP failed.

@@ -1,7 +1,7 @@
-# Dnialify Music Stream — Dnialify Project
+# Dnialify Music Stream - Dnialify Project
 
 **Pemutar musik web gratis** bergaya Spotify, katalog [YouTube Music](https://music.youtube.com). Tanpa akun.
-By **Dnialify Project** — danial.alfat7
+By **Dnialify Project** - danial.alfat7
 
 - **Creator:** Dnialify Project
 - **WA:** 089648528585
@@ -16,7 +16,7 @@ Project ini **gratis** dan **bebas dipakai**.
 
 ## Tentang
 
-Dnialify Music Stream adalah pemutar musik di browser. Cari lagu, buka album dan artis, buat playlist, lihat lirik, atur antrian — semuanya tanpa daftar akun.
+Dnialify Music Stream adalah pemutar musik di browser. Cari lagu, buka album dan artis, buat playlist, lihat lirik, atur antrian - semuanya tanpa daftar akun.
 
 Library (favorit, playlist, riwayat, statistik) tersimpan di perangkatmu. Audio diputar lewat pemutar resmi YouTube.
 
@@ -40,19 +40,19 @@ Hubungi untuk request fitur, bug, atau collab:
 
 1. Buka website Dnialify Music Stream kamu
 2. Cari lagu, atau pilih dari Home / Charts / Browse all
-3. Lagu pertama langsung play. Kalau klik lagu lain, Now Playing menampilkan lagu baru — tekan **Play** untuk mengganti putaran
+3. Lagu pertama langsung play. Kalau klik lagu lain, Now Playing menampilkan lagu baru - tekan **Play** untuk mengganti putaran
 4. Ikon hati = favorit. **Playlist** = simpan ke folder. Di halaman album/artis, **Save** masuk tab Saved
 5. Pindah HP? Library → **Backup**, di perangkat baru **Restore**
 
 ### Desktop / PC
 
-Di laptop atau komputer, Dnialify Music Stream langsung siap. Buka situsnya, pilih lagu, dan putar — tidak perlu pengaturan tambahan.
+Di laptop atau komputer, Dnialify Music Stream langsung siap. Buka situsnya, pilih lagu, dan putar - tidak perlu pengaturan tambahan.
 
 ### Putar di latar belakang (Android)
 
 Musik tetap jalan saat layar terkunci atau pindah aplikasi, **tanpa mode desktop**.
 
-Buka site di **[Brave Browser](https://play.google.com/store/apps/details?id=com.brave.browser)** — putar lagu, lalu keluar dari tab atau kunci HP. Audio tetap berlanjut.
+Buka site di **[Brave Browser](https://play.google.com/store/apps/details?id=com.brave.browser)** - putar lagu, lalu keluar dari tab atau kunci HP. Audio tetap berlanjut.
 
 Di Chrome, aktifkan **⋮ → Situs desktop** jika ingin hasil serupa.
 
@@ -63,7 +63,7 @@ Di Chrome, aktifkan **⋮ → Situs desktop** jika ingin hasil serupa.
 ### Home
 - Sapaan sesuai waktu dan tanggal
 - Recently played
-- Mix for you — rekomendasi dari favorit & riwayat
+- Mix for you - rekomendasi dari favorit & riwayat
 - Liked songs, playlist lokal, item Saved
 - Rak YouTube Music
 - Carousel geser; di desktop ada panah
@@ -74,7 +74,7 @@ Di Chrome, aktifkan **⋮ → Situs desktop** jika ingin hasil serupa.
 - Top result sebagai kartu besar
 - Hasil dikelompokkan (lagu, album, artis, playlist)
 - Riwayat pencarian
-- Browse all — mood & genre
+- Browse all - mood & genre
 
 ### Charts
 - Tangga lagu, playlist genre, artis teratas
@@ -97,17 +97,17 @@ Tanpa login, tersimpan di perangkat ini.
 
 ### Player
 - Streaming YouTube IFrame (audio YouTube Music)
-- Quality di menu ⋮ — bisa dinaikkan ke YouTube max
+- Quality di menu ⋮ - bisa dinaikkan ke YouTube max
 - Preview lagu lain tanpa memutus yang sedang play
 - Shuffle & Repeat (mati / semua / satu)
-- Kecepatan 0.5×–2×
+- Kecepatan 0.5×-2×
 - Antrian: Your queue dulu, lalu radio. Tersimpan saat refresh
 - Play next / Add to queue
 - Related: lagu, album, playlist, artis
-- Lirik sinkron — tap baris untuk loncat
+- Lirik sinkron - tap baris untuk loncat
 - Share (menu HP atau salin tautan)
 - Download MP3
-- SponsorBlock — skip intro/sponsor (bisa dimatikan)
+- SponsorBlock - skip intro/sponsor (bisa dimatikan)
 - Sleep timer
 - Widget mengambang + Picture-in-Picture
 - Mode gelap / terang
@@ -170,7 +170,7 @@ music-stream/
 
 ## Lisensi
 
-**© 2026 Dnialify Project — Gratis. Bebas dipakai.**
+**© 2026 Dnialify Project - Gratis. Bebas dipakai.**
 
 Jalankan, bagikan, ubah, dan deploy ulang sesukamu.
 

@@ -1,4 +1,4 @@
-# Background Test Plan — MusicStream Shell
+# Background Test Plan - MusicStream Shell
 
 Load `test/background-test.html` di shell (atau Chrome/Bare untuk baseline).
 
@@ -13,7 +13,7 @@ Load `test/background-test.html` di shell (atau Chrome/Bare untuk baseline).
 5. Pause → Home → Return → tetap pause.
 6. AudioFocus: play musik lain / call → duck/pause, balik focus → resume jika fokus transient.
 7. Seek via MediaSession (notif) saat background → `currentTime` jump ok.
-8. Bandingkan `<audio opus>` control — harus selalu lanjut (baseline Chromium audio).
+8. Bandingkan `<audio opus>` control - harus selalu lanjut (baseline Chromium audio).
 
 ## Log Checklist
 - [ ] `visibilityState` spoof `visible` saat hidden

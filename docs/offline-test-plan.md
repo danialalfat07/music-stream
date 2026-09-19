@@ -1,4 +1,4 @@
-# Offline Test Plan — Regression + Platform
+# Offline Test Plan - Regression + Platform
 
 ## Regression (must pass after WebViewClient added, Flag false)
 

@@ -1,6 +1,6 @@
-# Bare Patch Analysis — 0043 / 0050 / 0051 (Chromium 153.0.7999.0)
+# Bare Patch Analysis - 0043 / 0050 / 0051 (Chromium 153.0.7999.0)
 
-## 0043 — Keep media playing in background on supported sites
+## 0043 - Keep media playing in background on supported sites
 **Patch:** `0043-Keep-media-playing-in-the-background-on-supported-si.patch` (240 ins, 20 files)
 **Purpose:** Izinkan situs video yang didukung tetap play audio saat browser di-background/lock. Chromium sudah jaga audio pipeline (scheduler tidak freeze page yang play audio, notification, audio focus, foreground service), yang bikin YouTube stop adalah JS-nya sendiri yang `pause()` saat lihat `visibilityState=hidden`. Patch ini ubah apa yang dilihat page, bukan cara playback.
 **Files:** `chrome_content_browser_client.cc`, `web_preferences.*`, `document.cc/h`, `web_settings*`, `web_view_impl.cc`, `settings.json5`, `MediaSettingsFragment.java`, `media_preferences.xml`
@@ -10,9 +10,9 @@
 **Why:** YouTube pause karena JS lihat hidden. Dengan tetap visible, JS tidak pause.
 **Dependencies:** Pref `bare.background_media_playback` (default false), allowlist host, WebPreferences mojom.
 **Isolasi:** Bisa, cukup port `web_preferences` + `Document` + `ChromeContentBrowserClient` (allowlist bisa diganti `*` untuk MusicStream).
-**Side effect:** `document.hidden` masih truthful (sengaja dibiarkan), jadi site yang cek `hidden` tetap pause — diperbaiki di 0050.
+**Side effect:** `document.hidden` masih truthful (sengaja dibiarkan), jadi site yang cek `hidden` tetap pause - diperbaiki di 0050.
 
-## 0050 — Report page as visible while background media plays
+## 0050 - Report page as visible while background media plays
 **Patch:** `0050-Report-the-page-as-visible-while-background-media-pl.patch` (28 ins)
 **Purpose:** Lengkapi 0043: `hidden` juga harus bohong ke JS, karena YouTube cek `document.hidden` (bukan cuma `visibilityState`), pause 3 detik setelah background.
 **Files:** `document.cc`, `document.h`, `document.idl`
@@ -21,7 +21,7 @@
 **Why:** Tanpa ini, YouTube tetap pause meski 0043 aktif.
 **Isolasi:** Wajib bareng 0043, 1 fungsi + 2 IDL binding.
 
-## 0051 — Keep background playback permission when hidden
+## 0051 - Keep background playback permission when hidden
 **Patch:** `0051-Keep-background-playback-permission-when-the-page-is.patch` (32 ins, 4 files)
 **Purpose:** Jaga `allow_background_video_playback_ = true` tidak dicabut saat `OnPageHidden()`/`OnFrameHidden()`. Normal Chromium: background video butuh user gesture untuk resume, jadi saat hidden permission dicabut → pause.
 **Files:** `web_media_player.h`, `html_media_element.cc`, `web_media_player_impl.cc/h`

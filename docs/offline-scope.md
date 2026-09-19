@@ -1,6 +1,6 @@
-# Offline Scope — Apa Bisa Offline vs Tidak
+# Offline Scope - Apa Bisa Offline vs Tidak
 
-## 1. Bisa Offline (audioStream via googlevideo) — native-first
+## 1. Bisa Offline (audioStream via googlevideo) - native-first
 
 - Source `getAudioUrl` return `url` (`server.js:1177`) → `mime audio/webm|audio/mp4`, `content_length` via `Range 0-0` total.
 - Chunk `1MB` `ceil(len/1M)` (3-7 seg untuk 3-6MB track), native Capacitor Filesystem `files/offline-beta/{songId}/{sourceId}/seg_*.bin` (500MB cap native), SQLite `dnialify-offline-beta`.
@@ -33,16 +33,16 @@
 
 ## 6. Platform Support
 
-- **Android app (Capacitor WebView + Brave):** online ✅ + offline ✅ — `shouldInterceptRequest` Android-only, native Filesystem `files/offline-beta/`, SQLite `dnialify-offline-beta`, cap 500MB.
-- **Desktop browser:** online ✅, offline ❌ — no `shouldInterceptRequest`, no native Filesystem. Tombol `Save Offline` hidden/disabled, filter `Offline` hidden.
-- **Mobile browser:** online ✅, offline ❌ — same as desktop.
+- **Android app (Capacitor WebView + Brave):** online ✅ + offline ✅ - `shouldInterceptRequest` Android-only, native Filesystem `files/offline-beta/`, SQLite `dnialify-offline-beta`, cap 500MB.
+- **Desktop browser:** online ✅, offline ❌ - no `shouldInterceptRequest`, no native Filesystem. Tombol `Save Offline` hidden/disabled, filter `Offline` hidden.
+- **Mobile browser:** online ✅, offline ❌ - same as desktop.
 - Alasan: intercept Android-only. Desktop offline (SW + OPFS) adalah **Phase 6**, jangan campur Phase 1.
 
 ## 7. UI Platform Detection
 
 - Detect: `window.Capacitor?.isNativePlatform?.()` atau `!!window.NativePlayback` (`MainActivity.java:92`). Helper `public/app.js` `isAndroidNative()`.
 - Tombol `Save Offline` di titik tiga: `hidden` atau `disabled + label "Hanya di app Android"` jika bukan Android native.
-- Filter `Offline` di library: same — cuma muncul di Android.
+- Filter `Offline` di library: same - cuma muncul di Android.
 
 ## 8. Test Matrix Reference
 

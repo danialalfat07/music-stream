@@ -578,6 +578,16 @@ html[data-theme="light"] .detail-head {
 .pill-btn.primary:hover { background: #3be477; transform: scale(1.05); }
 .pill-btn:disabled, .pill-btn.primary:disabled { opacity: 0.5; pointer-events: none; transform: none; }
 
+/* offline queue: library play-all button + home offline banner */
+.btn-play-all{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;background:var(--accent-bright);border:none;border-radius:12px;color:#000;font-size:14px;font-weight:700;margin-bottom:12px;cursor:pointer}
+.btn-play-all .ic{width:16px;height:16px}
+.offline-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:14px 16px;margin-bottom:12px;background:var(--elevated);border:1px solid color-mix(in srgb,var(--text) 10%,transparent);border-radius:14px}
+.offline-banner[hidden]{display:none}
+.offline-banner-title{font-size:15px;font-weight:700}
+.offline-banner-sub{font-size:13px;color:var(--muted);margin-top:2px}
+.offline-banner-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;background:var(--accent-bright);border:none;border-radius:999px;color:#000;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer}
+.offline-banner-btn .ic{width:15px;height:15px}
+
 /* search */
 .search-bar {
   display: flex; align-items: center; gap: 12px; background: var(--elevated);
@@ -1634,7 +1644,7 @@ html[data-theme="light"] .settings-head{background:#fff;border-bottom-color:rgba
 .empty-title{font-size:18px;font-weight:800;margin-bottom:6px}
 .empty-s{font-size:13.5px;color:var(--muted);margin-bottom:16px;line-height:1.5}
 
-/* Phase 11 refinement: MINI LYRIC PLAYER PiP — 10 lines, no card/box, dark bg, title tiny */
+/* Phase 11 refinement: MINI LYRIC PLAYER PiP - 10 lines, no card/box, dark bg, title tiny */
 body.pip-system #float-widget {
   background: #000 !important;
   backdrop-filter: none !important;
@@ -1657,7 +1667,7 @@ body.pip-system #fw-lyric {
   border: none !important;
   border-radius: 0 !important;
 }
-/* PiP lyric window (created via JS) — 10 lines, active centered green */
+/* PiP lyric window (created via JS) - 10 lines, active centered green */
 body.pip-system #fw-lyrics-window { display: flex; flex-direction: column; gap: 2px; width: 100%; align-items: center; margin-top: 6px; }
 body.pip-system .fw-lyric-line { font-size: 12px; color: #8A8A8A !important; opacity: 1 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.35; background: transparent !important; border: none !important; padding: 1px 0 !important; }
 body.pip-system .fw-lyric-line.active { color: #1ED760 !important; font-size: 16px !important; font-weight: 700 !important; opacity: 1 !important; }

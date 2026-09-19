@@ -14,7 +14,7 @@ import java.util.Map;
 import org.json.JSONObject;
 
 /**
- * Phase 8 — ENGINE B (NATIVE playback). Single source of truth for native audio.
+ * Phase 8 - ENGINE B (NATIVE playback). Single source of truth for native audio.
  *
  * engine=NATIVE, source=VISIONOS (direct googlevideo) | CACHED_AUDIO (local file).
  * ENGINE A (WebView iFrame) untouched; this class never touches WebView audio.
@@ -816,7 +816,7 @@ public final class NativeAudioEngine {
     }
 
     private void pushAll() {
-        // NOTE: pass the event NAME, not a prebuilt snapshot — pushEvent(null, snapshot)
+        // NOTE: pass the event NAME, not a prebuilt snapshot - pushEvent(null, snapshot)
         // silently drops the event field, so JS never refreshes the play/pause icon.
         pushEvent("playbackStateChanged", null);
         // notification follows native while active or just ended/errored

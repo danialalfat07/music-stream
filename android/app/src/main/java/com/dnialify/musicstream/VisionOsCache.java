@@ -11,7 +11,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * Phase 8 — proof-of-concept local cache (NO LRU, NO eviction, NO manager).
+ * Phase 8 - proof-of-concept local cache (NO LRU, NO eviction, NO manager).
  * Sequential 512KB Range chunks of ONE url, atomic .part -> final rename,
  * validated by exact size + EBML/WebM magic. Any failure deletes .part and
  * the file is never treated as valid cache. Phase 9 owns real management.

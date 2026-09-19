@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 /**
  * Phase 1: SQLite helper for offline.db
- * Additive, no logic yet — just schema ready.
+ * Additive, no logic yet - just schema ready.
  * DB name isolated per channel: offline-beta.db for beta, offline.db for stable (but Phase 1 always beta).
  */
 public class OfflineDatabase extends SQLiteOpenHelper {
@@ -63,7 +63,7 @@ public class OfflineDatabase extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // NEVER drop & recreate — user cache would be lost.
+        // NEVER drop & recreate - user cache would be lost.
         // Incremental migrations only, e.g.:
         // if (oldVersion < 2) db.execSQL("ALTER TABLE sources ADD COLUMN new_col TEXT");
         // if (oldVersion < 3) { ... }

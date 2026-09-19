@@ -1,4 +1,4 @@
-# MusicStream Chromium Shell — Architecture
+# MusicStream Chromium Shell - Architecture
 
 Branch: `feature/apk-chromium-shell` (base `88b4603` = main Vercel tidak disentuh)
 
@@ -38,7 +38,7 @@ Home/lock
 | Site allowlist | `music/youtube.com/watch` opt-in | sama | **`*` atau `dnialify-music-stream.vercel.app` always-on untuk com.dnialify.musicstream** | custom | tidak ada |
 | Setting UI | Settings>Media switch | hapus | **Hapus, always true** | custom | - |
 
-Rekomendasi: **Fork Chromium + port minimal 0043/0050/0051** — paling maintainable, tidak bawa patch Bare lain (adblock, UI, dll). Alternatif jika mau cepat verifikasi: Fork Bare lalu strip non-media patches, tapi merge conflict lebih banyak.
+Rekomendasi: **Fork Chromium + port minimal 0043/0050/0051** - paling maintainable, tidak bawa patch Bare lain (adblock, UI, dll). Alternatif jika mau cepat verifikasi: Fork Bare lalu strip non-media patches, tapi merge conflict lebih banyak.
 
 ## Minimal Patch Set
 
@@ -53,7 +53,7 @@ Asal: `0043` (20 files)
 Untuk MusicStream (always-on):
 - Hapus `MediaSettingsFragment.java` + `media_preferences.xml` + string `IDS_*`
 - Ganti `ShouldReportVisibleForBackgroundMedia()` jadi `return true` untuk origin MusicStream, atau `return url.host() == "dnialify-music-stream.vercel.app"` atau unconditional `true` karena paket ini dedicated (`com.dnialify.musicstream` tidak buka situs lain). Paling simpel: `return true` di `OverrideWebPreferences` (dalam `BUILDFLAG(IS_ANDROID)`).
-- Atau pertahankan allowlist Bare tapi tambah `{"dnialify-music-stream.vercel.app", nullptr}` dan selalu true — lebih aman jika nanti buka YouTube juga.
+- Atau pertahankan allowlist Bare tapi tambah `{"dnialify-music-stream.vercel.app", nullptr}` dan selalu true - lebih aman jika nanti buka YouTube juga.
 
 ### 2. Blink visibility spoof (JS)
 Asal: `0043` + `0050` (3 files)
@@ -71,8 +71,8 @@ Asal: `0051` (4 files)
 Total minimal: ~10 file inti jika strip UI (`chrome_content_browser_client.cc`, `web_preferences.*` 5 file, `web_settings.*` 2 file, `settings.json5`, `document.*` 3 file, `web_media_player.*` 3 file, `html_media_element.cc`). Tanpa UI pref, bisa <30KB patch.
 
 ### Yang TIDAK dibawa
-- Patch Bare lain: adblock, search, toolbar, dll — skip untuk MusicStream.
-- Injeksi JS (ala Brave) — tidak perlu karena build Blink sendiri.
+- Patch Bare lain: adblock, search, toolbar, dll - skip untuk MusicStream.
+- Injeksi JS (ala Brave) - tidak perlu karena build Blink sendiri.
 
 ## Android Lifecycle Detail
 - `MainActivity` extends `ChromeActivity` atau `ContentShellActivity` minimal (tanpa tab, tanpa omnibox). `onCreate` → `WebContents` load `https://dnialify-music-stream.vercel.app` (atau `https://music-stream-production.up.railway.app` untuk test `VIDEO_URL` langsung).
@@ -81,7 +81,7 @@ Total minimal: ~10 file inti jika strip UI (`chrome_content_browser_client.cc`, 
 - `AndroidManifest.xml` perlu `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `POST_NOTIFICATIONS`.
 
 ## Build
-- Base Chromium: `153.0.7999.0` (Bare `945b5115`) — pin sampai patch port sukses, lalu ikut stable berikutnya.
+- Base Chromium: `153.0.7999.0` (Bare `945b5115`) - pin sampai patch port sukses, lalu ikut stable berikutnya.
 - GN args minimal:
   ```
   target_os="android"
