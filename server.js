@@ -1410,7 +1410,7 @@ app.get('/api/audio', async (req, res) => {
 
 // ---- persistent audio cache (Phase 5): <videoId>.webm, atomic .part -> final ----
 const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || path.join(__dirname, 'cache', 'audio');
-const AUDIO_CHUNK = 102400;
+const AUDIO_CHUNK = 524288;
 function cacheFilePath(id) {
   return path.join(AUDIO_CACHE_DIR, `${id}.webm`);
 }

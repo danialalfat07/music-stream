@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.11";
+const APP_VERSION = "2.3.12";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2001,10 +2001,7 @@ function nextTrack(auto) {
     Player.yt.playVideo();
     return;
   }
-  if (!Player.queue.length) {
-    try { if (window.NativePlayback && NativePlayback.dismissNotif) NativePlayback.dismissNotif(); } catch {}
-    return;
-  }
+  if (!Player.queue.length) return;
   let ni;
   if (Player.shuffle) {
     const userNext = Player.queue.findIndex(
@@ -2017,19 +2014,13 @@ function nextTrack(auto) {
         .filter((i) => i !== Player.index);
       if (!others.length) {
         if (Player.repeat === 1) ni = Player.index;
-        else {
-          try { if (window.NativePlayback && NativePlayback.dismissNotif) NativePlayback.dismissNotif(); } catch {}
-          return;
-        }
+        else return;
       } else ni = others[Math.floor(Math.random() * others.length)];
     }
   } else ni = Player.index + 1;
   if (ni >= Player.queue.length) {
     if (Player.repeat === 1) ni = 0;
-    else {
-      try { if (window.NativePlayback && NativePlayback.dismissNotif) NativePlayback.dismissNotif(); } catch {}
-      return;
-    }
+    else return;
   }
   Player.index = ni;
   startCurrent();

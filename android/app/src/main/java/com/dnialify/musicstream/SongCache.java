@@ -42,7 +42,7 @@ public final class SongCache {
     public static final String LY_PENDING = "PENDING";
     public static final String LY_FAILED = "FAILED";
 
-    static final int CHUNK = 102400;
+    private static final int CHUNK = 524288;
     static final int TIMEOUT_MS = 20000;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
     private static final String UA =
@@ -230,10 +230,10 @@ public final class SongCache {
     }
 
     /**
-     * Download audio (FULL song) with persistent progress + resume.
-     * Sparse writer: 100KB chunks at exact offsets, present-bitmap persisted
-     * in the record, COMPLETE only after exact size + EBML magic.
-     * Re-entrant safe: second caller while RUNNING gets skipped.
+     * Download audio with persistent progress + resume from .part.
+     * RESUME_SUPPORTED: part kept, Range continues when server 206s.
+     * Sets COMPLETE only after exact size + EBML magic. Emits cache events.
+     * Re-entrant safe: second caller while RUNNING gets the current record.
      */
     public static void download(Context c, String videoId, String url, long total) {
         if (!RUNNING.add(videoId)) {
@@ -241,216 +241,13 @@ public final class SongCache {
             return;
         }
         try {
-            RUNNING_CAPS.put(videoId, Long.MAX_VALUE);
-            fillUpTo(c, videoId, url, total, total);
+            downloadInner(c, videoId, url, total);
         } finally {
             RUNNING.remove(videoId);
-            RUNNING_CAPS.remove(videoId);
         }
     }
 
-    /**
-     * Windowed fill: fetch missing chunks with start < limitBytes only.
-     * Never renames to final unless the whole song landed (finishIfComplete).
-     * Powers cache-first playback + 5-ahead prefetch without quota waste.
-     */
-    public static void downloadUpTo(Context c, String videoId, String url,
-            long total, long limitBytes) {
-        if (!RUNNING.add(videoId)) {
-            Log.d(TAG, "[SONG] downloadUpTo SKIP already running videoId=" + videoId);
-            return;
-        }
-        try {
-            RUNNING_CAPS.put(videoId, limitBytes);
-            fillUpTo(c, videoId, url, total, limitBytes);
-        } finally {
-            RUNNING.remove(videoId);
-            RUNNING_CAPS.remove(videoId);
-        }
-    }
-
-    /** Fill-cap currently owned by the running writer (null when idle). */
-    static Long runningCap(String videoId) {
-        return RUNNING_CAPS.get(videoId);
-    }
-
-    private static final java.util.Map<String, Long> RUNNING_CAPS =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Window end covering targetMs + 5 chunks ahead. Reuses 100KB CHUNK. */
-    public static long windowEndFor(long targetMs, long durationMs, long total) {
-        if (total <= 0) return total;
-        long idx = 0;
-        if (durationMs > 0 && targetMs > 0) {
-            idx = (total * Math.max(0, targetMs) / durationMs) / CHUNK;
-        }
-        return Math.min(total, (idx + 6) * (long) CHUNK);
-    }
-
-    static int chunkCount(long total) {
-        if (total <= 0) return 0;
-        return (int) ((total + CHUNK - 1) / CHUNK);
-    }
-
-    // ---------- sparse present-bitmap (memory mirror + record persist) ----------
-
-    private static final java.util.Map<String, boolean[]> CHUNKMAP =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    static synchronized boolean[] chunkMap(Context c, String videoId, long total) {
-        int n = chunkCount(total);
-        boolean[] m = CHUNKMAP.get(videoId);
-        if (m != null && m.length == n) return m;
-        m = new boolean[n];
-        boolean rebuilt = false;
-        try {
-            File part = partFile(c, videoId);
-            boolean gone = !part.isFile();
-            if (!gone && total > 0) {
-                JSONObject r = getRecord(c, videoId);
-                String s = r != null ? r.optString("chunkMap", null) : null;
-                if (s != null && s.length() == n) {
-                    for (int i = 0; i < n; i++) m[i] = s.charAt(i) == '1';
-                    rebuilt = true;
-                }
-            }
-            if (!rebuilt) {
-                // legacy sequential part (or nothing): present == contiguous length
-                long len = 0;
-                try {
-                    File p = partFile(c, videoId);
-                    if (p.isFile()) len = p.length();
-                    if (isComplete(c, videoId)) len = total;
-                } catch (Exception ignored) {}
-                for (int i = 0; i < n; i++) {
-                    m[i] = ((long) (i + 1) * CHUNK) <= len;
-                }
-            }
-        } catch (Exception ignored) {}
-        CHUNKMAP.put(videoId, m);
-        return m;
-    }
-
-    static synchronized void markChunk(Context c, String videoId, long total, int idx) {
-        try {
-            boolean[] m = chunkMap(c, videoId, total);
-            if (idx < 0 || idx >= m.length || m[idx]) return;
-            m[idx] = true;
-            StringBuilder sb = new StringBuilder(m.length);
-            for (boolean b : m) sb.append(b ? '1' : '0');
-            JSONObject r = getRecord(c, videoId);
-            if (r == null) r = new JSONObject();
-            r.put("chunkMap", sb.toString());
-            putRecord(c, videoId, r);
-        } catch (Exception ignored) {}
-    }
-
-    static synchronized void clearChunkMap(String videoId) {
-        try {
-            CHUNKMAP.remove(videoId);
-        } catch (Exception ignored) {}
-    }
-
-    static boolean isChunkPresent(Context c, String videoId, long total, int idx) {
-        try {
-            boolean[] m = chunkMap(c, videoId, total);
-            return idx >= 0 && idx < m.length && m[idx];
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    static long contiguousBytes(Context c, String videoId, long total) {
-        try {
-            boolean[] m = chunkMap(c, videoId, total);
-            long cont = 0;
-            for (int i = 0; i < m.length; i++) {
-                if (!m[i]) break;
-                cont += Math.min((long) CHUNK, total - (long) i * CHUNK);
-            }
-            return cont;
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    static boolean allPresent(Context c, String videoId, long total) {
-        try {
-            if (total <= 0) return false;
-            boolean[] m = chunkMap(c, videoId, total);
-            for (boolean b : m) if (!b) return false;
-            return m.length > 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** Drop unaligned/oversize .part (legacy 512KB-era) so bitmap stays exact. */
-    static void sanitizePart(Context c, String videoId, long total) {
-        try {
-            File part = partFile(c, videoId);
-            if (!part.isFile()) {
-                clearChunkMap(videoId);
-                return;
-            }
-            if (total > 0 && (part.length() > total || part.length() % CHUNK != 0)) {
-                Log.d(TAG, "[SONG] sanitize drop part videoId=" + videoId
-                        + " len=" + part.length());
-                part.delete();
-                clearChunkMap(videoId);
-            }
-        } catch (Exception ignored) {}
-    }
-
-    private static void fetchChunk(Context c, String videoId, String url,
-            long total, int idx) throws Exception {
-        long start = (long) idx * CHUNK;
-        long end = Math.min(start + CHUNK - 1, total - 1);
-        if (start >= total) return;
-        if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
-            throw new PausedException(contiguousBytes(c, videoId, total));
-        }
-        VisionOsNet.noteRequest(new URL(url).getHost());
-        HttpURLConnection h = null;
-        try {
-            h = (HttpURLConnection) new URL(url).openConnection();
-            h.setRequestMethod("GET");
-            h.setConnectTimeout(TIMEOUT_MS);
-            h.setReadTimeout(TIMEOUT_MS);
-            h.setRequestProperty("Range", "bytes=" + start + "-" + end);
-            h.setRequestProperty("User-Agent", UA);
-            int status = h.getResponseCode();
-            Log.d(TAG, "chunk " + idx + " range=" + start + "-" + end + " status=" + status);
-            if (status != 206) {
-                throw new Exception("chunk HTTP " + status + " at " + start);
-            }
-            InputStream in = h.getInputStream();
-            java.io.RandomAccessFile raf =
-                    new java.io.RandomAccessFile(partFile(c, videoId), "rw");
-            try {
-                raf.seek(start);
-                byte[] buf = new byte[65536];
-                long want = end - start + 1;
-                long got = 0;
-                int n;
-                while (got < want
-                        && (n = in.read(buf, 0, (int) Math.min(buf.length, want - got))) != -1) {
-                    raf.write(buf, 0, n);
-                    got += n;
-                }
-                if (got != want) throw new Exception("short chunk at " + start);
-            } finally {
-                try { in.close(); } catch (Exception ignored) {}
-                try { raf.close(); } catch (Exception ignored) {}
-            }
-            markChunk(c, videoId, total, idx);
-        } finally {
-            if (h != null) h.disconnect();
-        }
-    }
-
-    private static void fillUpTo(Context c, String videoId, String url,
-            long total, long limit) {
+    private static void downloadInner(Context c, String videoId, String url, long total) {
         CANCEL.remove(videoId);
         JSONObject r = getRecord(c, videoId);
         if (r == null) {
@@ -470,27 +267,86 @@ public final class SongCache {
             putRecord(c, videoId, r);
         } catch (Exception ignored) {}
         CacheEvents.emit(c, "cacheState", videoId, r);
-        sanitizePart(c, videoId, total);
-        long lastRecordAt = contiguousBytes(c, videoId, total);
-        int n = chunkCount(total);
+        File part = partFile(c, videoId);
+        File fin = audioFile(c, videoId);
+        long received = (part.isFile() && total > 0 && part.length() < total)
+                ? part.length() : 0;
+        if (received > 0) {
+            Log.d(TAG, "[SONG] resume videoId=" + videoId + " from=" + received);
+        } else if (part.isFile()) {
+            part.delete();
+        }
+        FileOutputStream out = null;
         try {
-            for (int i = 0; i < n; i++) {
-                long start = (long) i * CHUNK;
-                if (start >= limit) break;
-                if (isChunkPresent(c, videoId, total, i)) continue;
+            out = new FileOutputStream(part, received > 0);
+            long lastRecordAt = received;
+            int chunks = 0;
+            while (received < total) {
                 if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
-                    throw new PausedException(contiguousBytes(c, videoId, total));
+                    throw new PausedException(received);
                 }
-                fetchChunk(c, videoId, url, total, i);
-                long cont = contiguousBytes(c, videoId, total);
-                if (cont - lastRecordAt >= RECORD_EVERY_BYTES) {
-                    lastRecordAt = cont;
-                    progress(c, videoId, r, cont, total);
+                long end = Math.min(received + CHUNK - 1, total - 1);
+                HttpURLConnection h = null;
+                try {
+                    VisionOsNet.noteRequest(new URL(url).getHost());
+                    h = (HttpURLConnection) new URL(url).openConnection();
+                    h.setRequestMethod("GET");
+                    h.setConnectTimeout(TIMEOUT_MS);
+                    h.setReadTimeout(TIMEOUT_MS);
+                    h.setRequestProperty("Range", "bytes=" + received + "-" + end);
+                    h.setRequestProperty("User-Agent", UA);
+                    int status = h.getResponseCode();
+                    if (status != 206) {
+                        throw new Exception("chunk HTTP " + status + " at " + received);
+                    }
+                    InputStream in = h.getInputStream();
+                    byte[] buf = new byte[65536];
+                    int n;
+                    long want = end - received + 1;
+                    long got = 0;
+                    while (got < want
+                            && (n = in.read(buf, 0,
+                                    (int) Math.min(buf.length, want - got))) != -1) {
+                        out.write(buf, 0, n);
+                        got += n;
+                    }
+                    in.close();
+                    if (got != want) throw new Exception("short chunk at " + received);
+                    received += got;
+                    chunks++;
+                } finally {
+                    if (h != null) h.disconnect();
+                }
+                if (received - lastRecordAt >= RECORD_EVERY_BYTES) {
+                    lastRecordAt = received;
+                    progress(c, videoId, r, received, total);
                 }
             }
-            progress(c, videoId, r, contiguousBytes(c, videoId, total), total);
-            finishIfComplete(c, videoId, total);
+            out.close();
+            out = null;
+            progress(c, videoId, r, received, total);
+            if (part.length() != total || !VisionOsCache.ebmlMagic(part)) {
+                throw new Exception("validation failed size=" + part.length()
+                        + " want=" + total);
+            }
+            if (fin.exists()) fin.delete();
+            if (!part.renameTo(fin)) {
+                throw new Exception("atomic rename failed");
+            }
+            try {
+                r.put("cacheStatus", ST_COMPLETE);
+                r.put("downloadedBytes", total);
+                r.put("downloadPercent", 100);
+                r.put("audioFile", fin.getAbsolutePath());
+                putRecord(c, videoId, r);
+            } catch (Exception ignored) {}
+            Log.d(TAG, "[SONG] COMPLETE videoId=" + videoId + " bytes=" + total
+                    + " chunks=" + chunks);
+            CacheEvents.emit(c, "cacheComplete", videoId, r);
         } catch (PausedException p) {
+            try {
+                out.close();
+            } catch (Exception ignored) {}
             try {
                 r.put("cacheStatus", ST_PAUSED);
                 r.put("downloadedBytes", p.received);
@@ -500,7 +356,9 @@ public final class SongCache {
             Log.d(TAG, "[SONG] PAUSED videoId=" + videoId + " at=" + p.received);
             CacheEvents.emit(c, "cacheState", videoId, r);
         } catch (Exception e) {
-            long received = contiguousBytes(c, videoId, total);
+            try {
+                if (out != null) out.close();
+            } catch (Exception ignored) {}
             String reason = VisionOsResolver.reasonFromMessage(String.valueOf(e.getMessage()));
             try {
                 r.put("cacheStatus", ST_FAILED);
@@ -515,33 +373,6 @@ public final class SongCache {
         } finally {
             CANCEL.remove(videoId);
         }
-    }
-
-    /** Validate + atomic rename + COMPLETE, but ONLY when every chunk landed. */
-    private static void finishIfComplete(Context c, String videoId, long total) throws Exception {
-        if (!allPresent(c, videoId, total)) return;
-        File part = partFile(c, videoId);
-        File fin = audioFile(c, videoId);
-        if (part.length() != total || !VisionOsCache.ebmlMagic(part)) {
-            throw new Exception("validation failed size=" + part.length()
-                    + " want=" + total);
-        }
-        if (fin.exists()) fin.delete();
-        if (!part.renameTo(fin)) {
-            throw new Exception("atomic rename failed");
-        }
-        JSONObject r = getRecord(c, videoId);
-        if (r == null) r = new JSONObject();
-        try {
-            r.put("cacheStatus", ST_COMPLETE);
-            r.put("downloadedBytes", total);
-            r.put("downloadPercent", 100);
-            r.put("audioFile", fin.getAbsolutePath());
-            putRecord(c, videoId, r);
-        } catch (Exception ignored) {}
-        Log.d(TAG, "[SONG] COMPLETE videoId=" + videoId + " bytes=" + total
-                + " chunks=" + chunkCount(total));
-        CacheEvents.emit(c, "cacheComplete", videoId, r);
     }
 
     static double pct(long got, long total) {
@@ -628,9 +459,8 @@ public final class SongCache {
 
     /**
      * CACHE-FIRST helpers (engine playback never reads network).
-     * Contiguous present bytes from offset 0 WITHOUT any network call:
-     * final size when COMPLETE+valid, else bitmap-contiguous prefix length.
-     * (File length alone lies for sparse parts — holes read as zeros.)
+     * Bytes available locally WITHOUT any network call:
+     * final file when COMPLETE+valid, else current .part length (0 when absent).
      */
     public static long localBytes(Context c, String videoId) {
         try {
@@ -638,9 +468,6 @@ public final class SongCache {
                 File a = audioFile(c, videoId);
                 return a.isFile() ? a.length() : 0;
             }
-            JSONObject r = getRecord(c, videoId);
-            long total = r != null ? r.optLong("audioSize", 0) : 0;
-            if (total > 0) return contiguousBytes(c, videoId, total);
             File p = partFile(c, videoId);
             return p.isFile() ? p.length() : 0;
         } catch (Exception e) {
@@ -649,7 +476,7 @@ public final class SongCache {
     }
 
     /** Chunk end (exclusive byte count) covering targetMs. Reuses 512KB CHUNK. */
-    public static long chunkEndFor(long targetMs, long durationMs, long total) {
+    public static long chunkEndFor(long targetMs, int durationMs, long total) {
         if (total <= 0) return total;
         if (durationMs <= 0 || targetMs <= 0) return Math.min(total, (long) CHUNK);
         long need = total * Math.max(0, targetMs) / durationMs;
@@ -670,8 +497,6 @@ public final class SongCache {
      */
     public static File snapshotPrefix(Context c, String videoId, long needEnd) {
         try {
-            // hard gate: never copy a range with sparse holes (zeros = corruption)
-            if (needEnd > 0 && localBytes(c, videoId) < needEnd) return null;
             File src = null;
             if (isComplete(c, videoId)) {
                 File a = audioFile(c, videoId);
@@ -716,7 +541,6 @@ public final class SongCache {
             File p = partFile(c, videoId);
             if (p.isFile()) p.delete();
         } catch (Exception ignored) {}
-        clearChunkMap(videoId);
     }
 
     /** Delete owned files only (audio/part/record/art). History/playlists untouched. */
@@ -736,7 +560,6 @@ public final class SongCache {
             out.put("removed", n);
             out.put("bytes", bytes);
         } catch (Exception ignored) {}
-        clearChunkMap(videoId);
         Log.d(TAG, "[SONG] delete videoId=" + videoId + " files=" + n);
         return out;
     }
