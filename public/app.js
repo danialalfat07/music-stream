@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.23";
+const APP_VERSION = "2.3.24";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -5512,10 +5512,12 @@ function openSettingsModal(tab = 'settings') {
       cBtn.classList.toggle('primary', !!cache);
     }
     if (mBtn) mBtn.querySelector('span').textContent = String(max);
-    // iFrame -> hide cache rows; VisionOS -> show cache; VisionOS+cache -> show max + quality
-    if (cRow) cRow.style.display = mode === 1 ? '' : 'none';
-    if (mRow) mRow.style.display = mode === 1 && cache ? '' : 'none';
-    if (aqRow) aqRow.style.display = mode === 1 && cache ? '' : 'none';
+    // Lock state (not display) conveys relevance: the Audio Cache row is
+    // always visible so a locked section never looks empty. Max + Quality
+    // keep their own conditional rule (cache On only), independent of lock.
+    if (cRow) cRow.style.display = '';
+    if (mRow) mRow.style.display = cache ? '' : 'none';
+    if (aqRow) aqRow.style.display = cache ? '' : 'none';
     applySettingsEnvironment();
   };
   try {
