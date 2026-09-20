@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.35";
+const APP_VERSION = "2.3.36";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -6302,7 +6302,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyL') toggleTheme();
   if (e.code === 'KeyP') {
     e.preventDefault();
-    toggleFloatWidget();
+    showPipOnce();
   }
   if (e.key === '?' || (e.shiftKey && e.key === '/')) {
     e.preventDefault();
@@ -6404,9 +6404,6 @@ function syncFloatWidget() {
     if (artist) artist.textContent = s ? s.artist || s.subtitle || '' : '-';
     if (play) play.innerHTML = ic;
   }
-  $('#mini-float')?.classList.remove('on');
-  $('#np-float')?.classList.remove('on');
-  syncNpMore();
   if (s && s.thumbnail) loadPipArt(s.thumbnail);
 }
 function syncFloatLyric(text) {
@@ -6434,7 +6431,12 @@ function bindFloatWidget(rootDoc) {
     if (act === 'play') togglePlay();
     else if (act === 'prev') prevTrack();
     else if (act === 'next') nextTrack(false);
-    else if (act === 'close') closeFloatWidget();
+    else if (act === 'close') {
+      // PiP window internal close button only: close the Doc PiP window
+      // directly. No shared close helper, no state.
+      try { if (Player.pipWin && !Player.pipWin.closed) Player.pipWin.close(); } catch {}
+      Player.pipWin = null;
+    }
   });
   root.querySelector('#fw-bar')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -6857,7 +6859,7 @@ async function openFloatWidget() {
   pipDiag('openFloatWidget branch = mobile sysOk=' + sysOk + ' docOk=' + docOk);
   if (sysOk) {
     el.classList.add('hidden');
-    toast('Widget di recent apps - buka aplikasi lain, musik tetap jalan');
+    toast('Widget in recent apps - open another app, music keeps playing');
   } else if (docOk) {
     el.classList.add('hidden');
     toast('Widget floating - stays on top');
@@ -6865,41 +6867,13 @@ async function openFloatWidget() {
     // mobile no in-page fallback: keep mini player visible
     document.body.classList.remove('float-mode');
     el.classList.add('hidden');
-    toast('PiP tidak tersedia di perangkat ini');
+    toast('PiP not available on this device');
   }
   syncFloatWidget();
 }
-function closeFloatWidget() {
-  pipDiag('closeFloatWidget entered');
-  document.body.classList.remove('float-mode');
-  document.body.classList.remove('pip-system');
-  $('#float-widget').classList.add('hidden');
-  if (Player.pipWin && !Player.pipWin.closed) {
-    try {
-      Player.pipWin.close();
-    } catch {}
-  }
-  Player.pipWin = null;
-  if (document.pictureInPictureElement) {
-    document.exitPictureInPicture().catch(() => {});
-  }
-  const video = $('#pip-video');
-  if (
-    video &&
-    video.webkitSetPresentationMode &&
-    video.webkitPresentationMode === 'picture-in-picture'
-  ) {
-    try {
-      video.webkitSetPresentationMode('inline');
-    } catch {}
-  }
-  syncFloatWidget();
-}
-function toggleFloatWidget() {
-  // Action-style toggle kept for keyboard shortcut and native back-press hook.
-  // No flag: live surface check decides.
-  if (isPipVisible()) closeFloatWidget();
-  else openFloatWidget();
+function showPipOnce() {
+  try { openFloatWidget(); } catch (e) { try { console.log('[PIP] open failed', e); } catch {} }
+  return true;
 }
 // Diag pipe: console.log never reaches logcat in this WebView, the
 // Diagnostics bridge does (tag DnialifyDiag). Logic-neutral.
@@ -6935,16 +6909,6 @@ function isPipVisible() {
 function isHomePipOn() {
   // Settings > Widget: when on, Home nav shows PiP instead of navigating.
   try { return !!store.get('widget_home_pip', false); } catch { return false; }
-}
-function showPipOnce() {
-  // Action button: only guard is preventing a duplicate PiP.
-  pipDiag('showPipOnce entered');
-  const vis = isPipVisible();
-  pipDiag('isPipVisible() = ' + vis);
-  if (vis) { pipDiag('early return, PiP already showing'); return true; }
-  pipDiag('calling openFloatWidget()');
-  try { openFloatWidget(); } catch (e) { pipDiag('openFloatWidget threw ' + e); }
-  return true;
 }
 
 document.addEventListener('visibilitychange', () => {
