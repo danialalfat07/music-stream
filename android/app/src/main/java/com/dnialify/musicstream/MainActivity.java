@@ -30,6 +30,8 @@ public class MainActivity extends BridgeActivity {
     private static final String TAG_DIAG = "DnialifyDiag";
     // DiagnosticsBridge receives batched JSON logs from diag-bg.html during background
     private final DiagnosticsBridge diagnosticsBridge = new DiagnosticsBridge();
+    // Widget-on-Home state pushed JS->native (sync read for onBackPressed/onUserLeaveHint)
+    private final NativeStateBridge stateBridge = new NativeStateBridge();
     // Phase 11 - native PiP renderer (mirrors WebView state, no second playback engine)
     // Phase 12 - Full-Bleed Synced Lyrics (Karaoke) - blurred art + dark overlay + 10-line centered + dynamic scaling
     private ViewGroup pipNativeView;
@@ -97,6 +99,8 @@ public class MainActivity extends BridgeActivity {
             wv.addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
             wv.removeJavascriptInterface("Diagnostics");
             wv.addJavascriptInterface(diagnosticsBridge, "Diagnostics");
+            wv.removeJavascriptInterface("NativeState");
+            wv.addJavascriptInterface(stateBridge, "NativeState");
             // Stage1: Brave JS inject document-start (primary addDocumentStartJavaScript, fallback delegate)
             String bgJs = loadAssetText("brave-video-bg-play.js");
             String pageviewJs = loadAssetText("brave-disable-pageview-api.js");
@@ -226,7 +230,39 @@ public class MainActivity extends BridgeActivity {
         }
     }
     @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        try {
+            if (stateBridge != null && stateBridge.homePipEnabled) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Rational ratio = new Rational(9, 16);
+                    PictureInPictureParams params = new PictureInPictureParams.Builder()
+                            .setAspectRatio(ratio)
+                            .build();
+                    boolean result = enterPictureInPictureMode(params);
+                    android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint PiP result=" + result + " " + lifecycleSnapshot());
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.d(TAG_DIAG, "[Native] onUserLeaveHint PiP failed " + e);
+        }
+    }
+
+    @Override
     public void onBackPressed() {
+        try {
+            // Widget-on-Home fast path: state pushed sync from JS, no async wait.
+            if (stateBridge != null && stateBridge.backShouldPip) {
+                try {
+                    android.webkit.WebView wv0 = getBridge() != null ? getBridge().getWebView() : null;
+                    if (wv0 != null) {
+                        android.util.Log.d(TAG_DIAG, "Back: widget fast path showPipOnce");
+                        wv0.evaluateJavascript("try{showPipOnce();}catch(e){}", null);
+                        return;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
         try {
             android.webkit.WebView wv = null;
             if (getBridge() != null) {
@@ -337,7 +373,7 @@ public class MainActivity extends BridgeActivity {
                         if (isHome) {
                             if (hasCurrent) {
                                 android.util.Log.d(TAG_DIAG, "Back: widget on home hasCurrent=true hash=" + hash);
-                                finalWv.evaluateJavascript("try{if(window.NativePlayback&&window.NativePlayback.enterPip) window.NativePlayback.enterPip(); else if(window.toggleFloatWidget) toggleFloatWidget();}catch(e){}", null);
+                                finalWv.evaluateJavascript("try{if(window.NativePlayback&&window.NativePlayback.enterPip) window.NativePlayback.enterPip(); else if(window.showPipOnce) showPipOnce();}catch(e){}", null);
                                 return;
                             }
                             android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true no song hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
@@ -850,6 +886,17 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             android.util.Log.d(TAG_DIAG, "PiP changed notify err " + e);
         }
+    }
+
+    private final class NativeStateBridge {
+        public volatile boolean homePipEnabled = false;
+        public volatile boolean backShouldPip = false;
+
+        @JavascriptInterface
+        public void setHomePipEnabled(boolean v) { homePipEnabled = v; }
+
+        @JavascriptInterface
+        public void setBackShouldPip(boolean v) { backShouldPip = v; }
     }
 
     private final class DiagnosticsBridge {

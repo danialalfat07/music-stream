@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.37";
+const APP_VERSION = "2.3.38";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1883,6 +1883,7 @@ function onTrackChanged(s) {
 }
 function startCurrent() {
   if (_isClosed) return;
+  try { syncNativeState(); } catch {}
   Player.cued = false;
   Player.pending = null;
   const s = Player.current;
@@ -3758,6 +3759,7 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => { try { syncNativeState(); } catch {} });
 
 const skeletonHTML =
   `<div class="page-title">&nbsp;</div>` +
@@ -5572,6 +5574,7 @@ function openSettingsModal(tab = 'settings') {
     fl.onclick = () => {
       try { store.set('widget_home_pip', !isHomePipOn()); } catch {}
       paintFl();
+      try { syncNativeState(); } catch {}
     };
   }
   const verEl = $('#set-version');
@@ -6922,6 +6925,20 @@ function isHomePipOn() {
   // Settings > Widget: when on, Home nav shows PiP instead of navigating.
   try { return !!store.get('widget_home_pip', false); } catch { return false; }
 }
+// Push widget-on-home state to native (NativeState bridge). Native
+// onBackPressed/onUserLeaveHint cannot await JS, so state is pushed
+// event-driven: track start, route change, setting toggle, boot.
+function syncNativeState() {
+  try {
+    if (!window.NativeState) return;
+    const hasTrack = !!(window.Player && Player.current);
+    const homePip = isHomePipOn() && hasTrack;
+    const h = location.hash || '#/home';
+    const onHome = (h === '#/home' || h === '#/' || h === '' || h === '#');
+    NativeState.setHomePipEnabled(homePip);
+    NativeState.setBackShouldPip(onHome && homePip);
+  } catch {}
+}
 
 document.addEventListener('visibilitychange', () => {
   if (Player.nativeActive) return; // native engine owns background playback; never wake yt ghost
@@ -7029,6 +7046,7 @@ $('#np-sb').classList.toggle('on', Player.sbEnabled);
 updateQualityButton();
 syncNpMore();
 bindFloatWidget(document);
+try { syncNativeState(); } catch {}
 if (!window.matchMedia('(max-width: 860px)').matches) enableDrag($('#float-widget'));
 initVolumeSlider(); updateVolumeControls(Player.volumeLevel);
 document.addEventListener(
