@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.30";
+const APP_VERSION = "2.3.31";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3556,6 +3556,11 @@ function renderNav() {
       if (!h) return;
       e.preventDefault();
       if (!$('#nowplaying').classList.contains('hidden')) closeNowPlaying();
+      // Settings > Widget on: Home nav shows PiP instead of navigating.
+      if ((h === '#/home' || h === '#/' || h === '') && isHomePipOn() && window.Player && Player.current) {
+        showPipOnce();
+        return;
+      }
       go(h);
     });
   });
@@ -3626,12 +3631,12 @@ function renderSidebarLibrary() {
   );
 }
 const go = (hash) => {
-  // nav home double-tap → widget if song playing (mobile/desktop)
+  // Settings > Widget on: Home nav shows PiP instead of navigating.
   try {
     const curHash = location.hash || '#/home';
     const isHomeNav = hash === '#/home' && (curHash === '#/home' || curHash === '#/' || curHash === '' || curHash === '#');
-    if (isHomeNav && window.Player && window.Player.current) {
-      if (typeof toggleFloatWidget === 'function') { toggleFloatWidget(); return; }
+    if (isHomeNav && isHomePipOn() && window.Player && window.Player.current) {
+      showPipOnce(); return;
     }
   } catch {}
   location.hash = hash;
@@ -5331,7 +5336,7 @@ function openNowPlayingMore() {
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
-    ${row('float', 'i-pip', Player.floatOn ? 'Widget on' : 'Widget')}`;
+    ${row('float', 'i-pip', 'Widget')}`;
   $$('[data-npact]', body).forEach((b) =>
     b.addEventListener('click', () => {
       const a = b.dataset.npact;
@@ -5340,7 +5345,7 @@ function openNowPlayingMore() {
       else if (a === 'share') shareSong(song);
       else if (a === 'artist') goToArtist(song);
       else if (a === 'speed') cycleSpeed();
-      else if (a === 'float') toggleFloatWidget();
+      else if (a === 'float') showPipOnce();
       closeModal();
     }),
   );
@@ -5560,14 +5565,17 @@ function openSettingsModal(tab = 'settings') {
   if (extraVol) extraVol.onclick = toggleExtraVolume;
   const fl = $('#set-float');
   if (fl) {
-    fl.textContent = Player.floatOn ? 'On' : 'Off';
-    fl.classList.toggle('primary', !!Player.floatOn);
+    // Settings > Widget is a Home-nav preference, not an instant toggle.
+    const paintFl = () => {
+      try {
+        fl.textContent = isHomePipOn() ? 'On' : 'Off';
+        fl.classList.toggle('primary', isHomePipOn());
+      } catch {}
+    };
+    paintFl();
     fl.onclick = () => {
-      toggleFloatWidget();
-      setTimeout(() => {
-        fl.textContent = Player.floatOn ? 'On' : 'Off';
-        fl.classList.toggle('primary', !!Player.floatOn);
-      }, 300);
+      try { store.set('widget_home_pip', !isHomePipOn()); } catch {}
+      paintFl();
     };
   }
   const verEl = $('#set-version');
@@ -6160,10 +6168,10 @@ $('#np-repeat').addEventListener('click', function () {
   toast(['Repeat off', 'Repeat all', 'Repeat one'][Player.repeat]);
 });
 $('#np-speed').addEventListener('click', cycleSpeed);
-$('#np-float').addEventListener('click', toggleFloatWidget);
+$('#np-float').addEventListener('click', () => showPipOnce());
 $('#mini-float').addEventListener('click', (e) => {
   e.stopPropagation();
-  toggleFloatWidget();
+  showPipOnce();
 });
 $('#np-quality').addEventListener('click', toggleQuality);
 $('#np-sb').addEventListener('click', toggleSB);
@@ -6896,6 +6904,19 @@ function closeFloatWidget() {
 function toggleFloatWidget() {
   if (Player.floatOn) closeFloatWidget();
   else openFloatWidget();
+}
+function isHomePipOn() {
+  // Settings > Widget: when on, Home nav shows PiP instead of navigating.
+  try { return !!store.get('widget_home_pip', false); } catch { return false; }
+}
+function showPipOnce() {
+  // One-shot PiP: "..." menu and mini overlay only SHOW PiP, never toggle,
+  // never touch the Settings flag.
+  try {
+    if (Player.floatOn || document.pictureInPictureElement) return true;
+  } catch {}
+  try { openFloatWidget(); } catch {}
+  return true;
 }
 
 document.addEventListener('visibilitychange', () => {
