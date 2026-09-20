@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.33";
+const APP_VERSION = "2.3.34";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -6795,6 +6795,7 @@ async function startSystemPip() {
 }
 
 async function openFloatWidget() {
+  try { console.log('[PIP_DIAG] openFloatWidget entered, hasCurrent=' + !!Player.current); } catch {}
   try { console.log('[JS] openFloatWidget'); } catch {}
   try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] openFloatWidget'); } catch {}
   if (!Player.current) {
@@ -6815,6 +6816,7 @@ async function openFloatWidget() {
       try { console.log('[JS] calling NativePlayback.enterPip'); } catch {}
       try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] calling NativePlayback.enterPip'); } catch {}
       window.NativePlayback.enterPip();
+      try { console.log('[PIP_DIAG] openFloatWidget branch = native enterPip, called OK'); } catch {}
       try { console.log('[JS] NativePlayback.enterPip called'); } catch {}
       try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback.enterPip called'); } catch {}
       toast('Entering PiP...');
@@ -6829,6 +6831,7 @@ async function openFloatWidget() {
   const isMobile = window.matchMedia('(max-width: 860px)').matches;
   // desktop = in-page widget only, mobile = PiP only
   if (!isMobile) {
+    try { console.log('[PIP_DIAG] openFloatWidget branch = desktop in-page, done'); } catch {}
     closeNowPlaying();
     document.body.classList.add('float-mode');
     drawPipFrame();
@@ -6851,6 +6854,7 @@ async function openFloatWidget() {
     if (!sysOk) docOk = await openPipWidget();
   }
   const el = $('#float-widget');
+  try { console.log('[PIP_DIAG] openFloatWidget branch = mobile sysOk=' + sysOk + ' docOk=' + docOk); } catch {}
   if (sysOk) {
     el.classList.add('hidden');
     toast('Widget di recent apps - buka aplikasi lain, musik tetap jalan');
@@ -6866,6 +6870,7 @@ async function openFloatWidget() {
   syncFloatWidget();
 }
 function closeFloatWidget() {
+  try { console.log('[PIP_DIAG] closeFloatWidget entered'); } catch {}
   document.body.classList.remove('float-mode');
   document.body.classList.remove('pip-system');
   $('#float-widget').classList.add('hidden');
@@ -6899,15 +6904,26 @@ function toggleFloatWidget() {
 function isPipVisible() {
   // Best-effort check across all PiP surfaces. No cached flag.
   try {
-    if (document.pictureInPictureElement) return true;
-    if (Player.pipWin && !Player.pipWin.closed) return true;
+    const c1 = !!document.pictureInPictureElement;
+    try { console.log('[PIP_DIAG] check1 doc.pipElement = ' + c1); } catch {}
+    if (c1) { try { console.log('[PIP_DIAG] isPipVisible result = true (check1)'); } catch {} return true; }
+    const c2 = !!(Player.pipWin && !Player.pipWin.closed);
+    try { console.log('[PIP_DIAG] check2 pipWin = ' + (c2 ? 'open' : 'none/closed')); } catch {}
+    if (c2) { try { console.log('[PIP_DIAG] isPipVisible result = true (check2)'); } catch {} return true; }
     const w = document.getElementById('float-widget');
-    if (w && !w.classList.contains('hidden')
-        && document.body.classList.contains('float-mode')) return true;
+    const c3 = !!(w && !w.classList.contains('hidden')
+        && document.body.classList.contains('float-mode'));
+    try { console.log('[PIP_DIAG] check3 widget visible = ' + c3); } catch {}
+    if (c3) { try { console.log('[PIP_DIAG] isPipVisible result = true (check3)'); } catch {} return true; }
     // Android native PiP: bridge flag if it exists. Otherwise false, the
     // button always allows re-open and native rejects duplicates.
-    if (window.NativePip && NativePip.isActive) return NativePip.isActive();
-  } catch {}
+    if (window.NativePip && NativePip.isActive) {
+      const c4 = NativePip.isActive();
+      try { console.log('[PIP_DIAG] check4 NativePip.isActive = ' + c4); } catch {}
+      if (c4) return true;
+    }
+  } catch (e) { try { console.log('[PIP_DIAG] isPipVisible threw ' + e); } catch {} }
+  try { console.log('[PIP_DIAG] isPipVisible result = false'); } catch {}
   return false;
 }
 function isHomePipOn() {
@@ -6916,8 +6932,12 @@ function isHomePipOn() {
 }
 function showPipOnce() {
   // Action button: only guard is preventing a duplicate PiP.
-  if (isPipVisible()) return true;
-  try { openFloatWidget(); } catch {}
+  try { console.log('[PIP_DIAG] showPipOnce entered'); } catch {}
+  const vis = isPipVisible();
+  try { console.log('[PIP_DIAG] isPipVisible() = ' + vis); } catch {}
+  if (vis) { try { console.log('[PIP_DIAG] early return, PiP already showing'); } catch {} return true; }
+  try { console.log('[PIP_DIAG] calling openFloatWidget()'); } catch {}
+  try { openFloatWidget(); } catch (e) { try { console.log('[PIP_DIAG] openFloatWidget threw ' + e); } catch {} }
   return true;
 }
 
