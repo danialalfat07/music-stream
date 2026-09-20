@@ -4,7 +4,7 @@ def computedVersionCode = {
     // Monotonic versionCode: sync with package.json + CI run number
     // Local build must be > last installed 130 so adb install -r works
     def runNum = System.getenv("GITHUB_RUN_NUMBER")?.toInteger() ?: 0
-    def base = 138 // floor: last device had 137, next must be 138
+    def base = 139 // floor: last device had 138, next must be 139
     def code = base + runNum
     return code
 }()

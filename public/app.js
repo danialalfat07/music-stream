@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.29";
+const APP_VERSION = "2.3.30";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -5331,9 +5331,7 @@ function openNowPlayingMore() {
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
-    ${row('float', 'i-pip', Player.floatOn ? 'Widget on' : 'Widget')}
-    ${row('quality', 'i-expand', Player.hq ? 'Quality · Max' : 'Quality · YouTube Music')}
-    ${row('sb', 'i-next', Player.sbEnabled ? 'SponsorBlock on' : 'SponsorBlock')}`;
+    ${row('float', 'i-pip', Player.floatOn ? 'Widget on' : 'Widget')}`;
   $$('[data-npact]', body).forEach((b) =>
     b.addEventListener('click', () => {
       const a = b.dataset.npact;
@@ -5343,8 +5341,6 @@ function openNowPlayingMore() {
       else if (a === 'artist') goToArtist(song);
       else if (a === 'speed') cycleSpeed();
       else if (a === 'float') toggleFloatWidget();
-      else if (a === 'quality') toggleQuality();
-      else if (a === 'sb') toggleSB();
       closeModal();
     }),
   );
@@ -5584,7 +5580,7 @@ function openSettingsModal(tab = 'settings') {
       if (NB) {
         try { mode = NB.getStreamMode() | 0; } catch {}
         try { cache = !!NB.isAudioCacheOn(); } catch {}
-        try { max = NB.getMaxCachedSongs() | 0 || 50; } catch {}
+        try { max = NB.getMaxCachedSongs() | 0 || 100; } catch {}
       }
     } catch {}
     const sBtn = $('#set-stream');
@@ -5631,7 +5627,7 @@ function openSettingsModal(tab = 'settings') {
     if (mBtn) mBtn.onclick = () => {
       try {
         if (!NB) return;
-        const cur = NB.getMaxCachedSongs() | 0 || 50;
+        const cur = NB.getMaxCachedSongs() | 0 || 100;
         NB.setMaxCachedSongs(cur >= 200 ? 5 : cur + 5);
       } catch {}
       syncNative();
