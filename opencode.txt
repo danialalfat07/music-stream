@@ -1,92 +1,101 @@
-# Debug Report: Lyrics Empty & PiP Black - Fix 2026-09-09
+## Task
 
-Branch: feature/apk-chromium-shell -> main (Vercel server.url kept)
-APK: android/app/build/outputs/apk/debug/app-debug.apk (local Vercel remote)
+Removed native Home and native Back to PiP logic.
 
-## Root Cause 1 - Lyrics empty `Bridge updateLyrics prev= cur= next=`
+Widget PiP opening remains available through existing widget button paths and navbar Home intercept. Navbar Back remains normal history navigation.
 
-- `pushNativeLyrics()` read `lastLyricIdx=-1` before `updateLyricHighlight` had index. If `Player.lyrics.lines` empty or idx -1, prev/cur/next => "".
-- Log `21:55:24.023` empty right after song start before `loadLyrics` async finished. No subsequent push because `renderLyrics` for synced with idx -1 still gave cur="" and plain case never pushed.
-- `PlaybackService.updateLyricsStatic` was no-op in basic notification, so even if JS pushed, native ignored.
+## Removed from native
 
-Fix (public/app.js, PlaybackService.java):
+- Removed `NativeStateBridge` class from `MainActivity.java`.
+- Removed `stateBridge` Activity field.
+- Removed WebView registration for `NativeState`.
+- Removed `onUserLeaveHint()` override. Native Home now minimizes normally.
+- Removed native Back fast path that read `backShouldPip` and called `showPipOnce()`.
+- Removed Home-page native Back branch that opened PiP when a current track existed.
+- Removed obsolete `hasCurrent` state from native Back JavaScript payload and parser.
+- Removed obsolete `showPipOnce()` fallback from native Back handling.
+- Kept existing `onBackPressed()` override because it handles pre-existing modal, Now Playing, settings, help, WebView history, and task-back behavior. It no longer opens PiP.
+- Kept existing `onPictureInPictureModeChanged()` because it drives pre-existing PiP rendering, native PiP view visibility, WebView sync, artwork, lyrics, and diagnostics. No feature-specific NativeState or PIPNATIVE logic remains there.
+
+## Removed from JS
+
+- Deleted `syncNativeState()` completely.
+- Deleted all `syncNativeState()` call sites:
+  - Track start.
+  - Hash change.
+  - Settings Widget toggle.
+  - App initialization.
+- Deleted all `window.NativeState` and `NativeState.set*` usage.
+- Restored navbar Back to original behavior:
 
 ```js
-// pushNativeLyrics fallback
-if (!L.lines.length) { cur = plain? firstLine : ""; updateLyrics("",cur,""); return; }
-if (idx<0) { cur = currentLyricText() || lines[0].text; prev="" next=lines[1].text; }
+$('#nav-back').addEventListener('click', () => history.back());
 ```
 
-```java
-// PlaybackService.java
-String currentLyric="";
-updateLyricsStatic: store cur -> updateMediaSession() -> publishNotification()
-updateMediaSession: putString(DISPLAY_DESCRIPTION, currentLyric) + putLong(DURATION,durationMs)
-onStartCommand webViewLyrics: currentLyric=cur -> updateMediaSession -> publish
+- Kept navbar Home Widget-on-Home intercept unchanged.
+- Kept `showPipOnce()`, `openFloatWidget()`, widget button handlers, PiP rendering, canvas, and keep-alive logic unchanged.
+- Kept `isPipVisible()`. It remains required by progress rendering and WebView PiP keep-alive paths.
+
+## Removed from manifest
+
+- Removed `android:enableOnBackInvokedCallback="false"`. It was added only to force the feature-specific native Back path.
+
+## Pre-existing items left alone
+
+- `MainActivity.onBackPressed()` overall override. It existed before this feature for overlay and WebView navigation handling.
+- `MainActivity.onPictureInPictureModeChanged()` and its PiP rendering logic.
+- `NativePlayback` bridge and its `enterPip()` method. Widget button path still uses this bridge.
+- `VisionOsHarness` entries `native-state` and `aNativeState()`. These are diagnostic harness actions, not `NativeState` bridge references and were pre-existing.
+- Existing `pushNativeState()` function and `[NATIVE_STATE]` comment. These refer to playback notification state, not removed Home/Back state bridge.
+
+## Grep verification
+
+Command pattern:
+
+```text
+NativeState|syncNativeState|onUserLeaveHint|PIPNATIVE|backShouldPip|homePipEnabled
 ```
 
-Preserved: `Player.lyrics` parser `parseLRC`, 400ms `updateLyricHighlight`, `pushNativeState` 1s throttle, `server.url` Vercel, Brave patch.
+Results under `android/app/src/main`:
 
-## Root Cause 2 - PiP black empty
-
-- `onPictureInPictureModeChanged` only toggled `pip-system` + `float-mode` + `Player.floatOn=true`, but did NOT `remove hidden` from `#float-widget` with correct timing. Widget stayed `display:none` (hidden class) → WebView `#app` black #000 → PiP window black.
-- `openFloatWidget` native branch was async `enterPip()` void, but previous optimistic `add pip-system` before callback hid UI even if PiP failed.
-
-Fix (MainActivity.java, public/app.js, styles.css already):
-
-- `onPictureInPictureModeChanged pip=true`:
-  ```js
-  w.classList.remove('hidden'); enableDrag(w); bindFloatWidget(document);
-  Player.floatOn=true; syncFloatWidget(); syncFloatLyric(currentLyricText());
-  ```
-  + postDelayed 400ms diag:
-  ```js
-  {bodyClass, pipSystem, floatMode, floatOn, hidden, display, width, height, lyric}
-  ```
-  Log as `[PiP] diag pip=true ...`
-- `openFloatWidget` native branch: only `NativePlayback.enterPip(); toast('Entering PiP...'); return;` no optimistic pip-system, wait callback.
-- Aspect already portrait `Rational(9,16)` (was 16:9 landscape) → PiP portrait.
-
-## Files Changed (uncommitted before this commit)
-
-```
-android/app/src/main/java/com/dnialify/musicstream/MainActivity.java | 40 +++ (PiP diag + widget show)
-android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java | 26 +++ (currentLyric DISPLAY_DESCRIPTION)
-public/app.js | 41 +++ (pushNativeLyrics fallback + loadLyrics logs)
-capacitor.config.json | 0 (server.url kept https://dnialify-music-stream.vercel.app)
-public/styles.css | 29 already (pip-system center)
+```text
+VisionOsHarness.java:123: case "native-state": return aNativeState();
+VisionOsHarness.java:1135: static boolean aNativeState() {
 ```
 
-Frozen untouched: `server.url`, HTML `<video>`, Brave `brave-*.js`, `dispatchWindowVisibilityChanged`, Back hierarchy, `applicationId`, signing, workflow, lyrics engine.
+These are unrelated diagnostic harness names. Zero hits remain for `NativeState`, `syncNativeState`, `onUserLeaveHint`, `PIPNATIVE`, `backShouldPip`, and `homePipEnabled` in production `MainActivity.java`, `public/app.js`, and manifest.
 
-## Build Validation
+## Build + install
 
-```
-node --check public/app.js → OK
-./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 8s (62 tasks)
-git diff --check → empty
-```
+- APK version: 2.2.21.
+- APK versionCode: 139.
+- Build: `gradlew assembleDebug` SUCCESS.
+- Install: SUCCESS on connected device `100.71.211.98:43763`.
+- Force-stop: SUCCESS.
+- Prompt device port `38187` was unavailable. Current ADB device exposed port `43763`.
 
-## Test Commands
+## Files touched
 
-```bash
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-adb shell pm grant com.dnialify.musicstream android.permission.POST_NOTIFICATIONS
-adb logcat -c
-adb logcat -s DnialifyDiag:V -v color | findstr /i "PiP LYRICS"
-# play Uptown Funk → expect:
-# [LYRICS] fetched parsed=... source=...
-# [LYRICS] push idx=0 cur="..." 
-# Bridge updateLyrics cur="..."
-# [JS] calling NativePlayback.enterPip → [Native] enterPip() CALLED → onPictureInPictureModeChanged pip=true
-# [PiP] diag pip=true hidden=false display=flex width=~350 height=~80 lyric="..."
-# PiP window portrait should show artwork/title/lyric (not black)
-adb shell dumpsys notification | findstr -A2 Dnialify
-adb shell dumpsys media_session | findstr DISPLAY_DESCRIPTION
-```
+- `android/app/src/main/java/com/dnialify/musicstream/MainActivity.java`
+- `android/app/src/main/AndroidManifest.xml`
+- `public/app.js`
+- `package.json`
+- `public/index.html`
+- `public/manifest.json`
+- `public/sw.js`
+- `opencode.txt`
 
-## Artifacts
+## Version after bump
 
-After push to `feature/apk-chromium-shell` GitHub Actions `Android Build (Debug APK)` will publish `app-debug` artifact (3.7 MB) for manual phone download.
+- Web: 2.3.39.
+- APK: 2.2.21.
 
-No commit/push of PiP UI redesign, no ExoPlayer, no RemoteViews re-add.
+## Code verification
+
+- `node --check public/app.js` -> `NODECHECK_OK`.
+- `gradlew assembleDebug` -> `BUILD SUCCESSFUL`.
+- Installed package reports `versionName=2.2.21`, `versionCode=139`.
+- Native Home -> no feature-specific PiP hook remains.
+- Native Back -> no feature-specific PiP hook remains.
+- Navbar Home Widget-on-Home intercept -> retained.
+- Navbar Back -> restored to `history.back()`.
