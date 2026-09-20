@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.31";
+const APP_VERSION = "2.3.32";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -6794,6 +6794,9 @@ async function startSystemPip() {
         $('#float-widget').classList.remove('hidden');
         document.body.classList.add('float-mode');
       }
+      // System PiP gone: if the in-page fallback is not actually visible either,
+      // the flag is stale - reset so the Widget button works again.
+      try { if (!isPipSurfaceLive()) setPipState(false); } catch {}
     };
     return true;
   } catch {
@@ -6822,6 +6825,7 @@ async function openFloatWidget() {
       try { console.log('[JS] calling NativePlayback.enterPip'); } catch {}
       try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] calling NativePlayback.enterPip'); } catch {}
       window.NativePlayback.enterPip();
+      setPipState(true);
       try { console.log('[JS] NativePlayback.enterPip called, waiting onPictureInPictureModeChanged'); } catch {}
       try { if (window.Diagnostics && window.Diagnostics.logLine) window.Diagnostics.logLine('[JS] NativePlayback.enterPip called'); } catch {}
       toast('Entering PiP...');
@@ -6836,7 +6840,7 @@ async function openFloatWidget() {
   const isMobile = window.matchMedia('(max-width: 860px)').matches;
   // desktop = in-page widget only, mobile = PiP only
   if (!isMobile) {
-    Player.floatOn = true;
+    setPipState(true);
     closeNowPlaying();
     document.body.classList.add('float-mode');
     drawPipFrame();
@@ -6849,7 +6853,7 @@ async function openFloatWidget() {
     return;
   }
   // mobile: try native PiP, then browser PiP, no in-page fallback
-  Player.floatOn = true;
+  setPipState(true);
   closeNowPlaying();
   document.body.classList.add('float-mode');
   drawPipFrame();
@@ -6868,7 +6872,7 @@ async function openFloatWidget() {
     toast('Widget floating - stays on top');
   } else {
     // mobile no in-page fallback: keep mini player visible
-    Player.floatOn = false;
+    setPipState(false);
     document.body.classList.remove('float-mode');
     el.classList.add('hidden');
     toast('PiP tidak tersedia di perangkat ini');
@@ -6876,7 +6880,7 @@ async function openFloatWidget() {
   syncFloatWidget();
 }
 function closeFloatWidget() {
-  Player.floatOn = false;
+  setPipState(false);
   document.body.classList.remove('float-mode');
   document.body.classList.remove('pip-system');
   $('#float-widget').classList.add('hidden');
@@ -6905,19 +6909,48 @@ function toggleFloatWidget() {
   if (Player.floatOn) closeFloatWidget();
   else openFloatWidget();
 }
+// Central PiP state: every open/close path goes through here so the flag,
+// the button dots and the widget UI can never disagree.
+function setPipState(active) {
+  Player.floatOn = !!active;
+  try { syncFloatWidget(); } catch {}
+}
+// True only if a PiP surface is actually on screen right now.
+function isPipSurfaceLive() {
+  try {
+    if (document.pictureInPictureElement) return true;
+    if (Player.pipWin && !Player.pipWin.closed) return true;
+    const w = document.getElementById('float-widget');
+    if (w && !w.classList.contains('hidden')
+        && document.body.classList.contains('float-mode')) return true;
+  } catch {}
+  return false;
+}
 function isHomePipOn() {
   // Settings > Widget: when on, Home nav shows PiP instead of navigating.
   try { return !!store.get('widget_home_pip', false); } catch { return false; }
 }
 function showPipOnce() {
   // One-shot PiP: "..." menu and mini overlay only SHOW PiP, never toggle,
-  // never touch the Settings flag.
+  // never touch the Settings flag. Verifies the real surface, not just the flag:
+  // a stale true (system closed PiP behind our back) resets first, then opens fresh.
   try {
-    if (Player.floatOn || document.pictureInPictureElement) return true;
+    if (Player.floatOn && !isPipSurfaceLive()) setPipState(false);
+    if (isPipSurfaceLive() || document.pictureInPictureElement) return true;
   } catch {}
   try { openFloatWidget(); } catch {}
   return true;
 }
+// System closed PiP behind our back (reopen app, swipe away): resync on return.
+function resyncPipOnReturn() {
+  try {
+    if (Player.floatOn && !isPipSurfaceLive()) setPipState(false);
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resyncPipOnReturn();
+});
+window.addEventListener('pageshow', () => resyncPipOnReturn());
 
 document.addEventListener('visibilitychange', () => {
   if (Player.nativeActive) return; // native engine owns background playback; never wake yt ghost
