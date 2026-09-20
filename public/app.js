@@ -1,4 +1,4 @@
-const APP_VERSION = "2.3.36";
+const APP_VERSION = "2.3.37";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -6317,7 +6317,19 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* topbar back / forward (Spotify chrome) */
-$('#nav-back').addEventListener('click', () => history.back());
+$('#nav-back').addEventListener('click', (e) => {
+  // Settings > Widget on: Back on Home page shows PiP instead of going back.
+  try {
+    const h = location.hash || '#/home';
+    const onHome = (h === '#/home' || h === '#/' || h === '' || h === '#');
+    if (onHome && isHomePipOn() && window.Player && Player.current) {
+      e.preventDefault();
+      showPipOnce();
+      return;
+    }
+  } catch {}
+  history.back();
+});
 $('#nav-fwd').addEventListener('click', () => history.forward());
 $('#lib-new').addEventListener('click', () => go('#/library'));
 $('#lib-title-btn').addEventListener('click', () => go('#/library'));
