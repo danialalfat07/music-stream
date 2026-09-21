@@ -1,4 +1,291 @@
-const APP_VERSION = "2.3.39";
+/* ========== In-app Log Buffer ========== */
+const LogBuffer = (function () {
+  const MAX_ENTRIES = 20000;
+  const STORAGE_TAIL = 5000;
+  const STORAGE_KEY = 'app_log_buffer_v1';
+
+  const JS_TAG_WHITELIST = new Set([
+    // Playback
+    'NATIVE_STATE', 'NATIVE_CMD', 'ENGINE', 'SONG',
+    'AUTONEXT_DIAG', 'PIP', 'DIAG_PLAY',
+    // Caching
+    'CACHE', 'LSS',
+    // Web
+    'WEBVIEW_JS',
+    // Native tags (as parsed from native ring)
+    'DnialifyVisionOS', 'NativeAudioEngine', 'NAE', 'PlaybackService',
+    'SongCache', 'VisionOsCache', 'CacheEvents',
+    'LocalStreamServer', 'VisionOsResolver',
+    'VisionOsNet', 'VisionOsLoopback', 'OfflineInterceptClient',
+    'VisionOsHarness', 'DnialifyDiag',
+    // Always
+    'ERROR', 'WARN'
+  ]);
+
+  let entries = [];
+  let persistQueued = false;
+
+  function shouldPush(tag, msg) {
+    if (JS_TAG_WHITELIST.has(tag)) return true;
+    if (/ERROR|WARN|FAILED|EXCEPTION/i.test(msg)) return true;
+    return false;
+  }
+
+  function persist() {
+    persistQueued = false;
+    try {
+      const tail = entries.slice(-STORAGE_TAIL);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tail));
+    } catch (e) { /* ignore quota errors */ }
+  }
+
+  function schedulePersist() {
+    if (persistQueued) return;
+    persistQueued = true;
+    setTimeout(persist, 1500);
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) entries = parsed;
+      }
+    } catch (e) { entries = []; }
+  }
+
+  function push(tag, msg) {
+    const t = String(tag || 'APP');
+    const m = String(msg == null ? '' : msg);
+    if (!shouldPush(t, m)) return;
+    entries.push({ ts: Date.now(), tag: t, msg: m });
+    if (entries.length > MAX_ENTRIES) {
+      entries.splice(0, entries.length - MAX_ENTRIES);
+    }
+    schedulePersist();
+  }
+
+  function pushRaw(tsString, tag, msg) {
+    const t = String(tag || 'NATIVE');
+    const m = String(msg == null ? '' : msg);
+    if (!shouldPush(t, m)) return;
+    let ts = Date.now();
+    if (tsString) {
+      const parsed = Date.parse(String(tsString).replace(' ', 'T'));
+      if (!isNaN(parsed)) ts = parsed;
+    }
+    entries.push({ ts: ts, tag: t, msg: m });
+    if (entries.length > MAX_ENTRIES) {
+      entries.splice(0, entries.length - MAX_ENTRIES);
+    }
+    schedulePersist();
+  }
+
+  function all() { return entries.slice(); }
+
+  function clear() {
+    entries = [];
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  }
+
+  function filter(opts) {
+    opts = opts || {};
+    const fromTs = opts.fromTs || 0;
+    const toTs = opts.toTs || Infinity;
+    const tags = opts.tags;
+    const tagSet = tags && tags.length
+      ? (tags instanceof Set ? tags : new Set(tags))
+      : null;
+    const search = opts.search ? String(opts.search).toLowerCase() : null;
+    return entries.filter(function (e) {
+      if (e.ts < fromTs || e.ts > toTs) return false;
+      if (tagSet && !tagSet.has(e.tag)) return false;
+      if (search && e.msg.toLowerCase().indexOf(search) < 0) return false;
+      return true;
+    });
+  }
+
+  load();
+  return {
+    push: push,
+    pushRaw: pushRaw,
+    all: all,
+    clear: clear,
+    filter: filter,
+    MAX_ENTRIES: MAX_ENTRIES
+  };
+})();
+window.LogBuffer = LogBuffer;
+
+/* ========== Console -> LogBuffer hook ========== */
+(function () {
+  const origLog = console.log.bind(console);
+  const origWarn = console.warn.bind(console);
+  const origError = console.error.bind(console);
+
+  function parseTag(msg) {
+    const m = String(msg).match(/^\s*\[([A-Z_0-9]+)\]/);
+    return m ? m[1] : 'APP';
+  }
+
+  function joinArgs(args) {
+    const out = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a instanceof Error) out.push(a.message);
+      else if (typeof a === 'object' && a !== null) {
+        try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
+      } else out.push(String(a));
+    }
+    return out.join(' ');
+  }
+
+  console.log = function () {
+    const msg = joinArgs(arguments);
+    try { LogBuffer.push(parseTag(msg), msg); } catch (e) {}
+    return origLog.apply(null, arguments);
+  };
+  console.warn = function () {
+    const msg = joinArgs(arguments);
+    try { LogBuffer.push(parseTag(msg) || 'WARN', msg); } catch (e) {}
+    return origWarn.apply(null, arguments);
+  };
+  console.error = function () {
+    const msg = joinArgs(arguments);
+    try { LogBuffer.push(parseTag(msg) || 'ERROR', msg); } catch (e) {}
+    return origError.apply(null, arguments);
+  };
+})();
+
+/* ========== Native -> LogBuffer poller ========== */
+(function () {
+  let emptyStreak = 0;
+  function poll() {
+    try {
+      if (window.AppLogNative && typeof AppLogNative.drain === 'function') {
+        const lines = AppLogNative.drain();
+        if (lines && lines.length > 0) {
+          emptyStreak = 0;
+          const arr = lines.split('\n');
+          for (let i = 0; i < arr.length; i++) {
+            const raw = arr[i];
+            if (!raw) continue;
+            const m = raw.match(/^\[([^\]]+)\]\s+\[([A-Z])\/([^\]]*)\]\s+(.*)$/);
+            if (m) {
+              LogBuffer.pushRaw(m[1], m[3] || 'NATIVE', m[4]);
+            } else {
+              LogBuffer.pushRaw(null, 'NATIVE', raw);
+            }
+          }
+        } else {
+          emptyStreak++;
+        }
+      }
+    } catch (e) {}
+    const delay = emptyStreak > 30 ? 5000 : 2000;
+    setTimeout(poll, delay);
+  }
+  setTimeout(poll, 1500);
+})();
+
+/* ========== Logs tab UI ========== */
+(function () {
+  const PLAYBACK_TAGS = [
+    // JS tags
+    'NATIVE_STATE', 'NATIVE_CMD', 'ENGINE', 'SONG',
+    'AUTONEXT_DIAG', 'PIP', 'DIAG_PLAY',
+    'CACHE', 'LSS', 'WEBVIEW_JS',
+    // Native tags
+    'DnialifyVisionOS', 'NativeAudioEngine', 'NAE', 'PlaybackService',
+    'SongCache', 'VisionOsCache', 'CacheEvents',
+    'LocalStreamServer', 'VisionOsResolver',
+    'VisionOsNet', 'VisionOsLoopback', 'OfflineInterceptClient',
+    'VisionOsHarness', 'DnialifyDiag',
+    // Native prefix (fallback)
+    'NATIVE'
+  ];
+
+  function pad(n, w) { return String(n).padStart(w, '0'); }
+  function fmtTs(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + '-' + pad(d.getMonth()+1,2) + '-' + pad(d.getDate(),2)
+      + ' ' + pad(d.getHours(),2) + ':' + pad(d.getMinutes(),2) + ':' + pad(d.getSeconds(),2)
+      + '.' + pad(d.getMilliseconds(),3);
+  }
+  function toLocalInputValue(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + '-' + pad(d.getMonth()+1,2) + '-' + pad(d.getDate(),2)
+      + 'T' + pad(d.getHours(),2) + ':' + pad(d.getMinutes(),2);
+  }
+  function fromInputValue(v) {
+    if (!v) return null;
+    const t = Date.parse(v);
+    return isNaN(t) ? null : t;
+  }
+  function currentFilter() {
+    const preset = (document.getElementById('log-preset') || {}).value || 'playback';
+    const from = fromInputValue((document.getElementById('log-from') || {}).value);
+    const to = fromInputValue((document.getElementById('log-to') || {}).value);
+    const search = ((document.getElementById('log-search') || {}).value || '').trim();
+    let tags = null;
+    if (preset === 'playback') tags = PLAYBACK_TAGS;
+    else if (preset === 'errors') tags = ['ERROR', 'WARN', 'E'];
+    return { fromTs: from || 0, toTs: to || Infinity, tags: tags, search: search || null };
+  }
+  function render() {
+    const pre = document.getElementById('log-view');
+    const cnt = document.getElementById('log-count');
+    if (!pre || !cnt) return;
+    const list = LogBuffer.filter(currentFilter());
+    const tail = list.slice(-2000);
+    pre.textContent = tail.map(function (e) {
+      return '[' + fmtTs(e.ts) + '] [' + e.tag + '] ' + e.msg;
+    }).join('\n');
+    cnt.textContent = list.length + ' lines' + (list.length > 2000 ? ' (showing last 2000)' : '');
+    pre.scrollTop = pre.scrollHeight;
+  }
+  function refreshPresets() {
+    const fromEl = document.getElementById('log-from');
+    const toEl = document.getElementById('log-to');
+    if (fromEl && !fromEl.value) fromEl.value = toLocalInputValue(Date.now() - 60 * 60 * 1000);
+    if (toEl && !toEl.value) toEl.value = toLocalInputValue(Date.now());
+  }
+  function textOut() {
+    return LogBuffer.filter(currentFilter()).map(function (e) {
+      return '[' + fmtTs(e.ts) + '] [' + e.tag + '] ' + e.msg;
+    }).join('\n');
+  }
+  document.addEventListener('click', function (ev) {
+    const id = ev.target && ev.target.id;
+    if (id === 'log-copy') {
+      const txt = textOut();
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt);
+      else {
+        const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {} ta.remove();
+      }
+    } else if (id === 'log-share') {
+      const txt = textOut();
+      try {
+        const file = new File([txt], 'app-log.txt', { type: 'text/plain' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], title: 'App Log' }).catch(function(){});
+        else if (navigator.share) navigator.share({ title: 'App Log', text: txt }).catch(function(){});
+        else if (navigator.clipboard) navigator.clipboard.writeText(txt);
+      } catch (e) {}
+    } else if (id === 'log-clear') {
+      if (window.confirm('Clear all logs?')) { LogBuffer.clear(); render(); }
+    }
+  });
+  ['log-preset','log-from','log-to','log-search'].forEach(function (id) {
+    document.addEventListener('change', function (ev) { if (ev.target && ev.target.id === id) render(); });
+    document.addEventListener('input', function (ev) { if (ev.target && ev.target.id === id) render(); });
+  });
+  setInterval(render, 2000);
+  setTimeout(function () { refreshPresets(); render(); }, 500);
+})();
+
+const APP_VERSION = "2.3.40";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -13,6 +300,51 @@ function isAndroidNative() {
 window.isAndroidNative = isAndroidNative;
 // Feature flag: offline intercept disabled sampai Phase 1 approve (rollback tanpa revert)
 window.__OFFLINE_FLAGS = { CACHE_INTERCEPT: false };
+// TEMP-DIAG frontend-path test hooks (CDP injection). Test infra only.
+// playSong(song, queue, index) at ~1383 takes track object; Player.native uses cur/dur/state.
+window.__diagPlay = function (videoId, title, artist, duration) {
+  try {
+    console.log('[DIAG_PLAY] called for videoId=' + videoId);
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[DIAG_PLAY] called for videoId=' + videoId); } catch (e0) {}
+    if (typeof playSong !== 'function') {
+      console.log('[DIAG_PLAY] error: playSong not defined');
+      return 'error: playSong not defined';
+    }
+    const track = {
+      videoId: videoId,
+      title: title || 'Diag Track',
+      artist: artist || 'Diag Artist',
+      duration: duration || 0,
+      thumbnail: 'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg',
+    };
+    playSong(track);
+    return 'ok';
+  } catch (e) {
+    console.log('[DIAG_PLAY] error: ' + (e && e.message || e));
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[DIAG_PLAY] error: ' + (e && e.message || e)); } catch (e1) {}
+    return 'error: ' + (e && e.message || e);
+  }
+};
+window.__diagState = function () {
+  try {
+    const cur = (window.Player && Player.current) ? Player.current : null;
+    let cache = null;
+    try {
+      const e = (typeof OfflineLib !== 'undefined' && cur) ? OfflineLib.get(cur.videoId) : null;
+      cache = e ? { downloadedBytes: e.downloadedBytes, audioSize: e.audioSize, status: e.cacheStatus } : null;
+    } catch (x) { cache = null; }
+    return JSON.stringify({
+      currentTrack: cur ? cur.videoId : null,
+      queueIndex: window.Player ? Player.index : null,
+      state: window.Player && Player.native ? Player.native.state : 'n/a',
+      cur: window.Player && Player.native ? Player.native.cur : 0,
+      dur: window.Player && Player.native ? Player.native.dur : 0,
+      cacheProgress: cache,
+    });
+  } catch (e) {
+    return 'error: ' + (e && e.message || e);
+  }
+};
 /* ============================================================
    Dnialify Project - Dnialify Music Stream - SPA frontend
    Streams via the official YouTube IFrame player, metadata via
@@ -882,9 +1214,14 @@ function initAudio(){
       try { OfflineLib.onCacheEvent(ev); } catch {}
       return;
     }
-    if (ev.engine !== 'NATIVE') return;
-    try {
-      Player.native = {
+      if (ev.engine !== 'NATIVE') return;
+      try {
+        if (ev.state === 'PLAYING' || ev.state === 'ENDED' || ev.state === 'STOPPED' || ev.state === 'ERROR') {
+          console.log('[AUTONEXT_DIAG] nativeEvent: state=' + ev.state
+            + ' currentTime=' + ev.currentTime + ' duration=' + ev.duration
+            + ' videoId=' + ev.videoId);
+        }
+        Player.native = {
         state: ev.state, source: ev.source, cur: Number(ev.currentTime || 0),
         dur: Number(ev.duration || 0),
       };
@@ -954,6 +1291,10 @@ function initAudio(){
         renderPlayButtons();
       }
       if (ev.state === 'ENDED' && Player.nativeActive) {
+        console.log('[AUTONEXT_DIAG] calling nextTrack. trigger=NATIVE_STATE_ENDED'
+          + ' currentTrack=' + (Player.current ? Player.current.videoId : 'null')
+          + ' queueIndex=' + Player.index + ' state=' + (Player.native ? Player.native.state : 'n/a'));
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PLAYBACK_JS] native ENDED -> nextTrack videoId=' + (ev.videoId || '?')); } catch {}
         try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[NATIVE_STATE] ENDED -> nextTrack'); } catch {}
         nextTrack(true);
         return;
@@ -977,6 +1318,7 @@ function initAudio(){
     if(isPreviewing()) return;
     const cur = a.currentTime || 0;
     const dur = a.duration || 0;
+    try { if (window.NativePlayback && NativePlayback.diagLog && Math.floor(cur) % 2 === 0) NativePlayback.diagLog('[PLAYBACK_JS] timeUpdate ms=' + Math.round(cur * 1000) + ' duration=' + Math.round(dur * 1000)); } catch {}
     // SponsorBlock for audio
     if(a && !a.paused && Player.sbEnabled && Player.sbSegments.length){
       const seg = Player.sbSegments.find(g=> cur >= g.start && cur < g.end - 0.3);
@@ -2074,6 +2416,8 @@ async function fetchQueue(song) {
 }
 
 function nextTrack(auto) {
+  console.log('[AUTONEXT_DIAG] nextTrack entered. caller=' + (new Error().stack || 'unavailable'));
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PLAYBACK_JS] nextTrack auto=' + !!auto + ' current=' + (Player.current && Player.current.videoId || '?')); } catch {}
   if (_isClosed) return;
   if (auto && typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
   if (Player.cued) {

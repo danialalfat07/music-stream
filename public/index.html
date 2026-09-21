@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.39" />
+<meta name="app-version" content="2.3.40" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -278,7 +278,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.39 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.3.40 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -286,6 +286,7 @@ try {
         <button data-stab="settings" class="chip active">Settings</button>
         <button data-stab="playback" class="chip">Playback</button>
         <button data-stab="about" class="chip">About</button>
+        <button data-stab="logs" class="chip">Logs</button>
       </div>
       <div class="settings-body">
         <div data-spane="settings" class="s-pane active">
@@ -347,7 +348,7 @@ try {
           </div>
           <div class="settings-section" id="sec-appinfo">
             <div class="settings-section-title">App Info</div>
-            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.39</span></span></div>
+            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.40</span></span></div>
             <div class="settings-row"><span class="s-label">Download APK</span><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Android Build</a></div>
           </div>
           <div class="settings-section" id="sec-contact">
@@ -359,6 +360,35 @@ try {
               <a href="https://twitter.com/dann4lfat_" target="_blank" rel="noopener" class="pill-btn"><svg class="ic"><use href="#i-tw"/></svg><span>Twitter</span></a>
               <a href="https://t.me/dann4lfat" target="_blank" rel="noopener" class="pill-btn"><svg class="ic"><use href="#i-tg"/></svg><span>Telegram</span></a>
             </div>
+          </div>
+        </div>
+        <div data-spane="logs" class="s-pane">
+          <div class="settings-section">
+            <div class="settings-section-title">Filter</div>
+            <div class="log-filter-row">
+              <label>From <input type="datetime-local" id="log-from"></label>
+              <label>To <input type="datetime-local" id="log-to"></label>
+            </div>
+            <div class="log-filter-row">
+              <label>View
+                <select id="log-preset">
+                  <option value="playback" selected>Playback</option>
+                  <option value="errors">Errors only</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <input type="text" id="log-search" placeholder="Search...">
+            </div>
+            <div class="log-filter-row">
+              <button id="log-copy" class="pill-btn">Copy</button>
+              <button id="log-share" class="pill-btn">Share</button>
+              <button id="log-clear" class="pill-btn">Clear</button>
+              <span id="log-count" class="log-count">0 lines</span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-title">Log</div>
+            <pre id="log-view" class="log-view"></pre>
           </div>
         </div>
       </div>
@@ -420,7 +450,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.39";
+    var VER="2.3.40";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
