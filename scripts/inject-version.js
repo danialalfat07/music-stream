@@ -17,13 +17,11 @@ appSrc = appSrc.replace(/const APP_VERSION = "[^"]+";/, `const APP_VERSION = "${
 if (!appSrc.includes('const APP_VERSION')) throw new Error('APP_VERSION not found in app.js');
 fs.writeFileSync(appPath, appSrc);
 
-// public/index.html - 3 occurrences + VER var
+// public/index.html - meta + VER var (header no longer carries version)
 const htmlPath = path.join(root, 'public', 'index.html');
 let html = fs.readFileSync(htmlPath, 'utf8');
 html = html.replace(/<meta name="app-version" content="[^"]+" \/>/, `<meta name="app-version" content="${ver}" />`);
 html = html.replace(/var VER="[^"]+";/, `var VER="${ver}";`);
-html = html.replace(/by Dnialify Project · v[^·<]+ ·/, `by Dnialify Project · v${ver} ·`);
-html = html.replace(/v<span id="set-version">[^<]+<\/span>/, `v<span id="set-version">${ver}</span>`);
 fs.writeFileSync(htmlPath, html);
 
 // public/sw.js

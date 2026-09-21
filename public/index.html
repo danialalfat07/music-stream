@@ -12,16 +12,16 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 <link rel="preload" as="image" href="/logo.png" />
-<meta name="description" content="Dnialify Music Stream by Dnialify Project - pemutar musik web gratis bergaya Spotify, katalog YouTube Music. Tanpa akun. Cari, play, playlist, lirik sync." />
+<meta name="description" content="Dnialify Music Stream by Dnialify Project - free modern web music player, YouTube Music catalog. No account. Search, play, playlists, synced lyrics." />
 <meta property="og:title" content="Dnialify Music Stream - Dnialify Project" />
-<meta property="og:description" content="Pemutar musik web gratis bergaya Spotify. Cari lagu, playlist, lirik sync. By Dnialify Project." />
+<meta property="og:description" content="Free modern web music player. Search songs, playlists, synced lyrics. By Dnialify Project." />
 <meta property="og:image" content="/logo.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
-<meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
+<meta name="twitter:description" content="Free modern web music player. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.43" />
+<meta name="app-version" content="2.3.45" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -43,7 +43,7 @@ try {
     <div class="splash-name">Dnialify Music Stream</div>
   </div>
 </div>
-<!-- Spotify-style icon sprite -->
+<!-- Icon sprite -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M12.5 3.2a1 1 0 0 0-1 0L3.5 7.8a1 1 0 0 0-.5.9V20a1 1 0 0 0 1 1h5.5v-6h5v6H20a1 1 0 0 0 1-1V8.7a1 1 0 0 0-.5-.9l-8-4.6z"/></symbol>
   <symbol id="i-home-o" viewBox="0 0 24 24"><path d="M12 5.1 5 9.2V19h4v-6h6v6h4V9.2l-7-4.1zm-.5-1.9a1 1 0 0 1 1 0l8 4.6a1 1 0 0 1 .5.9V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1V8.7a1 1 0 0 1 .5-.9l8-4.6z"/></symbol>
@@ -156,7 +156,7 @@ try {
     <div id="view"></div>
   </main>
 
-  <!-- Player bar (Spotify style) -->
+  <!-- Player bar -->
   <div id="miniplayer" class="hidden">
     <div class="pb-left">
       <img id="mini-art" alt="" />
@@ -275,13 +275,18 @@ try {
   <div id="settings-modal" class="hidden">
     <div class="modal-card settings-card">
           <div class="settings-head">
-        <img src="/logo.png" width="56" height="56" alt="" />
-        <div>
-          <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.43 · Spotify-style YT Music player</div>
-        </div>
-        <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
-      </div>
+  <div class="settings-head-row1">
+    <h3 class="settings-title">Dnialify Music Stream</h3>
+    <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="settings-head-row2">
+    <img src="/logo.png" width="32" height="32" alt="" class="settings-mini-logo">
+    <div class="settings-sub-block">
+      <div class="settings-sub-line1">by Dnialify Project</div>
+      <div class="settings-sub-line2">A modern music player</div>
+    </div>
+  </div>
+</div>
       <div class="settings-tabs">
         <button data-stab="settings" class="chip active">Settings</button>
         <button data-stab="playback" class="chip">Playback</button>
@@ -348,10 +353,21 @@ try {
             <div class="settings-row"><span class="s-label">Website update</span><button id="set-update" class="pill-btn"><span id="set-update-label">Check update</span></button></div>
           </div>
           <div class="settings-section" id="sec-appinfo">
-            <div class="settings-section-title">App Info</div>
-            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.43</span></span></div>
-            <div class="settings-row"><span class="s-label">Download APK</span><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Android Build</a></div>
-          </div>
+  <div class="settings-section-title">App Info</div>
+  <div class="settings-row">
+    <span class="s-label">Web Version</span>
+    <span id="about-web-ver" class="about-value">-</span>
+  </div>
+  <div class="settings-row">
+    <span class="s-label">App Version</span>
+    <span id="about-app-ver" class="about-value">-</span>
+  </div>
+  <div class="settings-row">
+    <span class="s-label">Download APK</span>
+    <a href="https://drive.google.com/drive/folders/1yCeRns6XGP5Ii7Yo2ytT6ZkcYHNDQNCu"
+       target="_blank" rel="noopener" class="pill-btn">Google Drive</a>
+  </div>
+</div>
           <div class="settings-section" id="sec-contact">
             <div class="settings-section-title">Contact</div>
             <div class="settings-links">
@@ -461,7 +477,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.43";
+    var VER="2.3.45";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);

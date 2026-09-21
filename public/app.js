@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.44";
+const APP_VERSION = "2.3.45";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3928,7 +3928,7 @@ function setActiveNav(id) {
   });
 }
 
-/* ---- Your Library sidebar (Spotify left rail) ---- */
+/* ---- Your Library sidebar ---- */
 function renderSidebarLibrary() {
   const el = $('#lib-list');
   if (!el) return;
@@ -4688,7 +4688,7 @@ async function viewCharts(view) {
   bindItems(view);
 }
 
-/* Spotify browse-tile palette (fallback when YT colors are missing) */
+/* Browse-tile palette (fallback when YT colors are missing) */
 const MOOD_COLORS = [
   '#1db954',
   '#e13300',
@@ -6128,6 +6128,31 @@ function syncChunkWindowUI() {
   });
   setTimeout(syncChunkWindowUI, 1000);
 })();
+(function() {
+  function populateAbout() {
+    const webEl = document.getElementById('about-web-ver');
+    if (webEl && typeof APP_VERSION !== 'undefined') {
+      webEl.textContent = 'v' + APP_VERSION;
+    }
+    const appEl = document.getElementById('about-app-ver');
+    if (appEl) {
+      let ver = 'n/a';
+      try {
+        if (window.AppInfo && typeof AppInfo.getVersionName === 'function') {
+          ver = AppInfo.getVersionName() || 'n/a';
+        }
+      } catch (e) {}
+      appEl.textContent = ver;
+    }
+  }
+  window.populateAbout = populateAbout;
+  setTimeout(populateAbout, 800);
+  document.addEventListener('click', function(ev) {
+    if (ev.target && ev.target.getAttribute && ev.target.getAttribute('data-stab') === 'about') {
+      populateAbout();
+    }
+  });
+})();
 function openSettingsModal(tab = 'settings') {
   const m = $('#settings-modal');
   if (!m) return;
@@ -6204,7 +6229,6 @@ function openSettingsModal(tab = 'settings') {
       paintFl();
     };
   }
-  const verEl = $('#set-version');
   // Environment-aware sections: web locks Stream to iFrame; APK follows mode.
   // Disabled = visible at 50% opacity, not clickable (never hidden).
   const syncNative = () => {
@@ -6274,8 +6298,7 @@ function openSettingsModal(tab = 'settings') {
     syncNative();
   } catch {}
   applySettingsEnvironment();
-  if (verEl) verEl.textContent = APP_VERSION;
-  if (verEl) verEl.textContent = APP_VERSION;
+  try { populateAbout(); } catch {}
   const updBtn = $('#set-update');
   const updLabel = $('#set-update-label');
   if (updBtn) {
@@ -6306,13 +6329,13 @@ function openSettingsModal(tab = 'settings') {
           updBtn.disabled = false;
         } else {
           if (updLabel) updLabel.textContent = 'Up to date ✓';
-          toast('Web sudah versi terbaru v' + APP_VERSION);
+          toast('Web is already latest v' + APP_VERSION);
           setTimeout(() => { if (updLabel) updLabel.textContent = 'Check update'; }, 2000);
           updBtn.disabled = false;
         }
       } catch {
         if (updLabel) updLabel.textContent = 'Check update';
-        toast('Gagal cek update web');
+        toast('Failed to check web update');
         updBtn.disabled = false;
       } finally {
         if (updLabel && updLabel.textContent === 'Checking…') updLabel.textContent = 'Check update';
@@ -6553,7 +6576,7 @@ $('#mini-like').addEventListener('click', (e) => {
   e.stopPropagation();
   if (Player.current) Library.toggleFav(Player.current);
 });
-/* open Now Playing from art / title / expand button (Spotify behaviour) */
+/* open Now Playing from art / title / expand button */
 const openNP = (e) => {
   e.stopPropagation();
   Player.pending = null;
@@ -6951,7 +6974,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* topbar back / forward (Spotify chrome) */
+/* topbar back / forward */
 $('#nav-back').addEventListener('click', () => history.back());
 $('#nav-fwd').addEventListener('click', () => history.forward());
 $('#lib-new').addEventListener('click', () => go('#/library'));

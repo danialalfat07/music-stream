@@ -112,6 +112,8 @@ public class MainActivity extends BridgeActivity {
             wv.addJavascriptInterface(new LogBridge(), "AppLogNative");
             wv.removeJavascriptInterface("NativeSettings");
             wv.addJavascriptInterface(new NativeSettings(), "NativeSettings");
+            wv.removeJavascriptInterface("AppInfo");
+            wv.addJavascriptInterface(new AppInfo(), "AppInfo");
             // Stage1: Brave JS inject document-start (primary addDocumentStartJavaScript, fallback delegate)
             String bgJs = loadAssetText("brave-video-bg-play.js");
             String pageviewJs = loadAssetText("brave-disable-pageview-api.js");
@@ -896,6 +898,17 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void setChunkWindow(int n) {
             NativeAudioEngine.setChunkWindowSize(n);
+        }
+    }
+
+    public class AppInfo {
+        @JavascriptInterface
+        public String getVersionName() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "unknown";
+            }
         }
     }
 

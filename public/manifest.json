@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Dnialify Music Stream",
   "short_name": "Dnialify",
-  "description": "Pemutar musik web gratis bergaya Spotify - by Dnialify Project. Cari lagu, playlist, lirik sync, tanpa akun.",
+  "description": "Free modern web music player by Dnialify Project. Search songs, playlists, synced lyrics, no account.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -19,7 +19,7 @@
     "entertainment",
     "media"
   ],
-  "lang": "id",
+  "lang": "en",
   "dir": "ltr",
   "icons": [
     {
@@ -63,7 +63,7 @@
     {
       "name": "Home",
       "short_name": "Home",
-      "description": "Buka Home Dnialify",
+      "description": "Open Dnialify Home",
       "url": "/#home",
       "icons": [
         {
@@ -76,7 +76,7 @@
     {
       "name": "Search",
       "short_name": "Search",
-      "description": "Cari lagu",
+      "description": "Search songs",
       "url": "/#search",
       "icons": [
         {
@@ -89,7 +89,7 @@
     {
       "name": "Library",
       "short_name": "Library",
-      "description": "Buka Library kamu",
+      "description": "Open your Library",
       "url": "/#library",
       "icons": [
         {
@@ -102,7 +102,7 @@
     {
       "name": "Charts",
       "short_name": "Charts",
-      "description": "Lihat Charts",
+      "description": "View Charts",
       "url": "/#charts",
       "icons": [
         {
@@ -136,5 +136,5 @@
   "edge_side_panel": {
     "preferred_width": 400
   },
-  "version": "2.3.44"
+  "version": "2.3.45"
 }
