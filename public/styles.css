@@ -1583,7 +1583,10 @@ html[data-theme="light"] .modal-card .pl-form-input {
 .sidebar-social .ic{width:14px;height:14px}
 #settings-modal,#help-modal,#version-update-modal{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
 #settings-modal.hidden,#help-modal.hidden,#version-update-modal.hidden{display:none}
-.settings-card{width:min(92vw,560px);max-height:85vh;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;padding-bottom:24px}
+.settings-card{width:min(92vw,560px);max-height:85vh;overflow:hidden;display:flex;flex-direction:column;border-radius:12px;padding-bottom:0}
+.settings-sticky{position:relative;flex-shrink:0;z-index:10;background:inherit;border-bottom:1px solid rgba(255,255,255,0.08)}
+.settings-body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0 0 24px 0}
+#settings-close{margin-left:auto;flex-shrink:0}
 .settings-head {
   display: flex;
   flex-direction: column;
@@ -1644,11 +1647,12 @@ html[data-theme="light"] .modal-card .pl-form-input {
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 4px 16px 12px;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  min-height: 48px;
+  box-sizing: border-box;
 }
 .settings-tabs::-webkit-scrollbar { display: none; }
 .settings-tabs .chip {
