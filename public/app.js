@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.43";
+const APP_VERSION = "2.3.44";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -4884,6 +4884,26 @@ function getOfflineMaxCached() {
   } catch {}
   return 50;
 }
+function offlineCachePercent(e) {
+  try {
+    const dl = Number(e && e.downloadedBytes) || 0;
+    const total = Number(e && e.audioSize) || 0;
+    if (total > 0 && dl >= 0) return Math.max(0, Math.min(100, Math.floor((dl / total) * 100)));
+    const p = Number(e && e.downloadPercent);
+    if (Number.isFinite(p)) return Math.max(0, Math.min(100, Math.floor(p)));
+  } catch {}
+  return 0;
+}
+function coverHTMLOffline(e) {
+  try {
+    const art = (e && (e.artworkThumb || e.thumbnail)) || '';
+    const u = safeCover(art);
+    const pct = offlineCachePercent(e);
+    if (!u) return `<div class="off-art-wrap"><div class="off-art-dim"></div><div class="off-art-pct">${pct}%</div></div>`;
+    return `<div class="off-art-wrap"><img src="${esc(u)}" class="off-art-img" alt="" loading="lazy">`
+      + `<div class="off-art-dim"></div><div class="off-art-pct">${pct}%</div></div>`;
+  } catch { return ''; }
+}
 function getOfflineTracks() {
   try {
     const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
@@ -4988,8 +5008,9 @@ function offlineBodyHTML() {
       if (pb !== pa) return pb - pa;
       return offLastPlayedAt(b.videoId) - offLastPlayedAt(a.videoId);
     };
+    const byRecent = (a, b) => offLastPlayedAt(b.videoId) - offLastPlayedAt(a.videoId);
     full.sort(byPlay);
-    partial.sort(byPlay);
+    partial.sort(byRecent);
     const maxCached = getOfflineMaxCached();
     const sel = offlineSelectMode || OffUI.select;
     const checkedMap = {};
@@ -5035,9 +5056,8 @@ function offlineBodyHTML() {
         if (OffUI.expanded) {
           html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button><div class="track-list">`
             + partial.map((e) => {
-              const art = e.artworkThumb || e.thumbnail || '';
-              const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
-              return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTML(art, 'track')}`
+              const pct = offlineCachePercent(e);
+              return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTMLOffline(e)}`
                 + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div>`
                 + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
                 + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div></div>`;
@@ -5055,7 +5075,14 @@ function offlineBodyHTML() {
       html += `<button type="button" class="pill-btn off-wide" id="off-morebtn"><span>Show more (${full.length - shown})</span></button>`;
     if (partial.length) {
       if (OffUI.expanded) {
-        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button>`;
+        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button><div class="track-list">`
+          + partial.map((e) => {
+            const pct = offlineCachePercent(e);
+            return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTMLOffline(e)}`
+              + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div>`
+              + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
+              + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div></div>`;
+          }).join('') + `</div>`;
       } else {
         html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
       }
