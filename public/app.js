@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.42";
+const APP_VERSION = "2.3.43";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -4870,17 +4870,119 @@ function bindOfflineNet() {
     window.addEventListener('offline', updateOfflineBanner);
   } catch {}
 }
+function getOfflineMaxCached() {
+  try {
+    const NB = window.NativePlayback;
+    if (NB && NB.getMaxCachedSongs) {
+      const v = NB.getMaxCachedSongs() | 0;
+      if (v > 0) return v;
+    }
+  } catch {}
+  try {
+    const v = parseInt(localStorage.getItem('max_cached_songs'), 10);
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch {}
+  return 50;
+}
+function getOfflineTracks() {
+  try {
+    const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
+    const pins = offPinnedMap();
+    const full = Object.values(m).filter((e) => e && e.videoId && e.cacheStatus === 'COMPLETE');
+    full.sort((a, b) => {
+      const pa = pins[a.videoId] ? 1 : 0, pb = pins[b.videoId] ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+      return offLastPlayedAt(b.videoId) - offLastPlayedAt(a.videoId);
+    });
+    return full.map((e) => ({
+      videoId: e.videoId, title: e.title, artist: e.artist,
+      subtitle: e.artist, thumbnail: e.artworkThumb || e.thumbnail || '',
+      duration: e.duration || 0,
+    }));
+  } catch { return []; }
+}
+function shuffleOfflineArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+function playOfflineSequential() {
+  const list = getOfflineTracks();
+  if (!list.length) { try { toast('No downloaded songs'); } catch {} return; }
+  try { playSong(list[0], list, 0); } catch {}
+}
+function playOfflineShuffle() {
+  const list = getOfflineTracks();
+  if (!list.length) { try { toast('No downloaded songs'); } catch {} return; }
+  const q = shuffleOfflineArray(list.slice());
+  try { playSong(q[0], q, 0); } catch {}
+}
+function onOfflineRowClick(idx) {
+  const list = getOfflineTracks();
+  if (!list.length) return;
+  const i = Math.max(0, Math.min(idx, list.length - 1));
+  try { playSong(list[i], list, i); } catch {}
+}
+let offlineSelectMode = false;
+let offlineSelected = new Set();
+function syncOffUIWithSelect() {
+  try {
+    OffUI.select = offlineSelectMode;
+    OffUI.checked = {};
+    offlineSelected.forEach((vid) => { OffUI.checked[vid] = 1; });
+  } catch {}
+}
+function enterOfflineSelectMode() {
+  offlineSelectMode = true;
+  syncOffUIWithSelect();
+  try { repaintOffline(); } catch {}
+}
+function exitOfflineSelectMode() {
+  offlineSelectMode = false;
+  offlineSelected = new Set();
+  syncOffUIWithSelect();
+  try { repaintOffline(); } catch {}
+}
+function toggleOfflineRowSelection(vid) {
+  if (!vid) return;
+  if (offlineSelected.has(vid)) offlineSelected.delete(vid);
+  else offlineSelected.add(vid);
+  syncOffUIWithSelect();
+  try { repaintOffline(); } catch {}
+}
+function selectAllOfflineRows() {
+  const list = getOfflineTracks();
+  if (offlineSelected.size === list.length && list.length) offlineSelected = new Set();
+  else offlineSelected = new Set(list.map((t) => t.videoId));
+  syncOffUIWithSelect();
+  try { repaintOffline(); } catch {}
+}
+function updateOfflineSelectBar() {
+  try {
+    const n = offlineSelected.size;
+    const total = getOfflineTracks().length;
+    const c = document.getElementById('offline-selcount');
+    if (c) c.textContent = n + ' selected';
+    const t = document.getElementById('offline-select-toggle');
+    if (t) t.textContent = (total && n === total) ? 'Deselect All' : 'Select All';
+    const dl = document.getElementById('offline-dl-sel');
+    const del = document.getElementById('offline-del-sel');
+    if (dl) dl.disabled = !n;
+    if (del) del.disabled = !n;
+  } catch {}
+}
 function offlineBodyHTML() {
-  // Sync, guarded: returns list HTML or empty state. NEVER throws, NEVER ''.
+  // Album-style Offline page. Reuses detail-head / detail-actions / track-list.
+  // NEVER throws, NEVER ''.
   const empty = emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
-  const playAllBtn = `<button type="button" id="offline-play-queue-btn-lib" class="btn-play-all">${icon('i-play')}<span>Play All Downloaded</span></button>`;
   try {
     const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
     const pins = offPinnedMap();
     const all = Object.values(m).filter((e) => e && e.videoId);
     const full = all.filter((e) => e.cacheStatus === 'COMPLETE');
     const partial = all.filter((e) => e.cacheStatus !== 'COMPLETE');
-    // pinned first, then most recently played; never-played sinks to bottom
     const byPlay = (a, b) => {
       const pa = pins[a.videoId] ? 1 : 0, pb = pins[b.videoId] ? 1 : 0;
       if (pb !== pa) return pb - pa;
@@ -4888,102 +4990,196 @@ function offlineBodyHTML() {
     };
     full.sort(byPlay);
     partial.sort(byPlay);
-    if (!all.length) return playAllBtn + empty;
-    const sel = OffUI.select;
-    const nChecked = Object.keys(OffUI.checked).length;
-    const toolbar = sel
-      ? `<div class="off-toolbar"><button type="button" class="pill-btn" id="off-cancel"><span>Batal</span></button><span class="off-count">${nChecked} dipilih</span></div>`
-      : `<div class="off-toolbar"><span class="off-count">${full.length} offline</span><button type="button" class="pill-btn" id="off-select"><span>Pilih</span></button></div>`;
-    const rowHTML = (e, isPartial) => {
+    const maxCached = getOfflineMaxCached();
+    const sel = offlineSelectMode || OffUI.select;
+    const checkedMap = {};
+    try {
+      offlineSelected.forEach((vid) => { checkedMap[vid] = 1; });
+      Object.keys(OffUI.checked || {}).forEach((vid) => { checkedMap[vid] = 1; });
+    } catch {}
+    const nChecked = Object.keys(checkedMap).length;
+    const firstArt = (full[0] && (full[0].artworkThumb || full[0].thumbnail)) || '';
+    const cover = safeCover(firstArt)
+      ? `<img id="offline-art" src="${esc(firstArt)}" alt="">`
+      : `<div class="detail-ph" id="offline-art-ph">${icon('i-note')}</div>`;
+    const header = `<div class="detail-head"><div class="detail-art">${cover}</div>`
+      + `<div class="detail-info"><div class="detail-kicker">Offline</div><h2 id="offline-title">Offline Library</h2>`
+      + `<div id="offline-meta" class="sub">${full.length} / ${maxCached} tracks</div>`
+      + `<div class="detail-actions">`
+      + (full.length
+        ? `<button id="offline-play" class="pill-btn primary">${icon('i-play')}<span>Play</span></button>`
+          + `<button id="offline-shuffle" class="pill-btn">${icon('i-shuffle')}<span>Shuffle</span></button>`
+        : '')
+      + `<button id="offline-select-toggle" class="pill-btn" style="margin-left:auto;${sel ? '' : 'display:none;'}">${nChecked === full.length && full.length ? 'Deselect All' : 'Select All'}</button>`
+      + `</div></div></div>`;
+    const rowHTML = (e, idx) => {
       try {
         const vid = e.videoId;
-        const pct = e.cacheStatus === 'COMPLETE' ? 100 : Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
         const art = e.artworkThumb || e.thumbnail || '';
         const dur = Number(e.duration) > 0 ? fmtTime(Number(e.duration)) : '';
-        const sub = [e.artist || '', dur].filter(Boolean).join(' • ');
-        const playable = !sel && e.cacheStatus === 'COMPLETE' && e.offlineAvailable;
-        const check = sel ? `<input type="checkbox" class="off-check" data-offcheck="${esc(vid)}"${OffUI.checked[vid] ? ' checked' : ''} />` : '';
+        const checked = !!checkedMap[vid];
         const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
-        const bar = `<div class="off-bar2"><div class="off-fill2${e.cacheStatus === 'COMPLETE' ? ' done' : ''}" style="width:${pct}%"></div></div>`;
-        const badge = isPartial ? '<span class="off-partial">Partial</span>' : '';
-        return `<div class="off-wrap${isPartial ? ' is-partial' : ''}"><div class="track off-row2"${playable ? ` data-offplay="${esc(vid)}"` : ''} data-offrow="${esc(vid)}">`
-          + `${check}${coverHTML(art, 'track')}`
-          + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(sub)}${badge}</div>${bar}</div>`
+        return `<div class="track${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-idx="${idx}" data-offrow="${esc(vid)}">`
+          + `<span class="t-num">${String(idx + 1).padStart(2, '0')}</span>`
+          + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
+          + `${coverHTML(art, 'track')}`
+          + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(e.artist || '')}</div></div>`
+          + (dur ? `<span class="tdur">${esc(dur)}</span>` : '')
           + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
-          + `</div></div>`;
-      } catch {
-        return '';
-      }
+          + `</div>`;
+      } catch { return ''; }
     };
+    if (!full.length) {
+      let html = header + empty;
+      if (partial.length) {
+        if (OffUI.expanded) {
+          html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button><div class="track-list">`
+            + partial.map((e) => {
+              const art = e.artworkThumb || e.thumbnail || '';
+              const pct = Math.max(0, Math.min(100, Number(e.downloadPercent || 0)));
+              return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTML(art, 'track')}`
+                + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div>`
+                + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
+                + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div></div>`;
+            }).join('') + `</div>`;
+        } else {
+          html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
+        }
+      }
+      return html;
+    }
     const shown = Math.min(OffUI.shown, full.length);
-    let html = playAllBtn + toolbar + `<div class="track-list">` + full.slice(0, shown).map((e) => rowHTML(e, false)).join('') + `</div>`;
+    let html = header + `${trackHeadHTML()}<div id="offline-list" class="track-list">`
+      + full.slice(0, shown).map((e, i) => rowHTML(e, i)).join('') + `</div>`;
     if (full.length > shown)
-      html += `<button type="button" class="pill-btn off-wide" id="off-morebtn"><span>Muat lebih banyak (${full.length - shown})</span></button>`;
+      html += `<button type="button" class="pill-btn off-wide" id="off-morebtn"><span>Show more (${full.length - shown})</span></button>`;
     if (partial.length) {
       if (OffUI.expanded) {
-        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Sembunyikan</span></button><div class="track-list">`
-          + partial.map((e) => rowHTML(e, true)).join('') + `</div>`;
+        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button>`;
       } else {
-        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Lihat lagu yang belum terdownload (${partial.length})</span></button>`;
+        html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
       }
     }
     if (sel)
-      html += `<div class="off-selectbar"><button type="button" class="pill-btn primary" id="off-dl"><span>Download</span></button><button type="button" class="pill-btn" id="off-del"><span>Delete</span></button></div>`;
+      html += `<div id="offline-selbar" class="select-bar"><span id="offline-selcount">${nChecked} selected</span>`
+        + `<button id="offline-dl-sel" class="pill-btn"${nChecked ? '' : ' disabled'}><span>Download</span></button>`
+        + `<button id="offline-del-sel" class="pill-btn"${nChecked ? '' : ' disabled'}><span>Delete</span></button>`
+        + `<button id="offline-cancel-sel" class="pill-btn"><span>Cancel</span></button></div>`;
     return html;
   } catch {
-    return playAllBtn + empty;
+    return emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
   }
 }
 function bindOfflineRows(root) {
-  // Play-all-downloaded entry (Library tab, always visible).
+  const scope = root || document;
+  const playBtn = scope.querySelector ? scope.querySelector('#offline-play') : document.getElementById('offline-play');
+  if (playBtn && !playBtn._offBound) {
+    playBtn._offBound = true;
+    playBtn.addEventListener('click', () => { try { playOfflineSequential(); } catch {} });
+  }
+  const shBtn = scope.querySelector ? scope.querySelector('#offline-shuffle') : document.getElementById('offline-shuffle');
+  if (shBtn && !shBtn._offBound) {
+    shBtn._offBound = true;
+    shBtn.addEventListener('click', () => { try { playOfflineShuffle(); } catch {} });
+  }
+  const selToggle = scope.querySelector ? scope.querySelector('#offline-select-toggle') : document.getElementById('offline-select-toggle');
+  if (selToggle && !selToggle._offBound) {
+    selToggle._offBound = true;
+    selToggle.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      try { selectAllOfflineRows(); } catch {}
+      try { updateOfflineSelectBar(); } catch {}
+    });
+  }
+  // Play-all-downloaded entry (legacy, always visible if present).
   try {
-    const b = root.querySelector('#offline-play-queue-btn-lib');
+    const b = scope.querySelector ? scope.querySelector('#offline-play-queue-btn-lib') : null;
     if (b && !b._offQBound) {
       b._offQBound = true;
       b.addEventListener('click', () => { try { playOfflineQueue(); } catch {} });
     }
   } catch {}
   // Phase 8 offline rows: COMPLETE -> native CACHED_AUDIO, never iFrame
-  $$('[data-offplay]', root).forEach((b) =>
+  $$('[data-offplay]', scope).forEach((b) =>
     b.addEventListener('click', () => {
       try { OfflineLib.play(b.dataset.offplay); } catch {}
     }),
   );
   // PARTIAL/PAUSED/FAILED -> resume via proven record mechanism (never byte 0)
-  $$('[data-offcont]', root).forEach((b) =>
+  $$('[data-offcont]', scope).forEach((b) =>
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
       try { OfflineLib.continueDownload(b.dataset.offcont); } catch {}
     }),
   );
-  // toolbar: select mode
-  const selBtn = $('#off-select', root) || document.getElementById('off-select');
-  if (selBtn) selBtn.addEventListener('click', () => {
-    OffUI.select = true; OffUI.checked = {}; repaintOffline();
-  });
-  const cancelBtn = document.getElementById('off-cancel');
-  if (cancelBtn) cancelBtn.addEventListener('click', () => {
-    OffUI.select = false; OffUI.checked = {}; repaintOffline();
-  });
-  // row tap in select mode = toggle checkbox (never play)
-  $$('[data-offrow]', root).forEach((r) =>
+  // Album rows: click plays, long-press enters select mode.
+  $$('[data-offrow]', scope).forEach((r) => {
+    if (r._offRowBound) return;
+    r._offRowBound = true;
+    let pressTimer = null;
+    let longPressed = false;
+    const vid = r.dataset.offrow;
+    const idx = Number(r.dataset.idx);
+    const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    const startPress = () => {
+      longPressed = false;
+      clearPress();
+      pressTimer = setTimeout(() => {
+        longPressed = true;
+        try {
+          if (!offlineSelectMode) enterOfflineSelectMode();
+          if (vid) {
+            offlineSelected.add(vid);
+            syncOffUIWithSelect();
+            repaintOffline();
+          }
+        } catch {}
+      }, 500);
+    };
+    r.addEventListener('touchstart', () => { startPress(); }, { passive: true });
+    r.addEventListener('touchend', () => { clearPress(); });
+    r.addEventListener('touchmove', () => { clearPress(); });
+    r.addEventListener('mousedown', (e) => { if (e.button === 0) startPress(); });
+    r.addEventListener('mouseup', () => { clearPress(); });
+    r.addEventListener('mouseleave', () => { clearPress(); });
+    r.addEventListener('contextmenu', (e) => { e.preventDefault(); });
     r.addEventListener('click', (ev) => {
-      if (!OffUI.select) return;
-      if (ev.target.closest('.off-more') || ev.target.closest('.off-check')) return;
-      const vid = r.dataset.offrow;
-      if (!vid) return;
-      if (OffUI.checked[vid]) delete OffUI.checked[vid]; else OffUI.checked[vid] = 1;
-      repaintOffline();
-    }),
-  );
-  $$('.off-check', root).forEach((c) =>
+      const wasLong = longPressed;
+      longPressed = false;
+      clearPress();
+      if (wasLong) return;
+      if (ev.target.closest && (ev.target.closest('.off-more') || ev.target.closest('.track-check') || ev.target.closest('input'))) return;
+      if (offlineSelectMode || OffUI.select) {
+        if (!vid) return;
+        if (offlineSelected.has(vid)) offlineSelected.delete(vid);
+        else {
+          const cb = r.querySelector('input[data-offcheck]');
+          if (cb && cb.disabled) return;
+          offlineSelected.add(vid);
+        }
+        syncOffUIWithSelect();
+        repaintOffline();
+        return;
+      }
+      if (Number.isFinite(idx) && idx >= 0) {
+        try { onOfflineRowClick(idx); } catch {}
+      } else if (vid) {
+        try { OfflineLib.play(vid); } catch {}
+      }
+    });
+  });
+  $$('[data-offcheck]', scope).forEach((c) => {
+    if (c._offCheckBound) return;
+    c._offCheckBound = true;
+    c.addEventListener('click', (ev) => { ev.stopPropagation(); });
     c.addEventListener('change', () => {
-      const vid = c.dataset.offcheck;
-      if (!vid) return;
-      if (c.checked) OffUI.checked[vid] = 1; else delete OffUI.checked[vid];
+      const vid2 = c.dataset.offcheck;
+      if (!vid2) return;
+      if (c.checked) offlineSelected.add(vid2); else offlineSelected.delete(vid2);
+      syncOffUIWithSelect();
       repaintOffline();
-    }),
-  );
+    });
+  });
   // per-row ⋮ menu (Download / Pin / Delete)
   $$('[data-offmore]', root).forEach((b) =>
     b.addEventListener('click', (ev) => {
@@ -5007,11 +5203,12 @@ function bindOfflineRows(root) {
   if (moreBtn) moreBtn.addEventListener('click', () => {
     OffUI.shown += LIBRARY_LIMIT; repaintOffline();
   });
-  const dlBtn = document.getElementById('off-dl');
-  if (dlBtn) dlBtn.addEventListener('click', () => {
+  const runDownloadSelected = () => {
+    const vids = Array.from(offlineSelected.length !== undefined && offlineSelected.size !== undefined ? offlineSelected : []);
+    const list = vids.length ? vids : Object.keys(OffUI.checked || {});
     let n = 0;
     try {
-      Object.keys(OffUI.checked).forEach((vid) => {
+      list.forEach((vid) => {
         let e = null;
         try { e = OfflineLib.get(vid); } catch {}
         if (!e || e.cacheStatus === 'COMPLETE') return;
@@ -5019,17 +5216,42 @@ function bindOfflineRows(root) {
       });
     } catch {}
     toast(n ? `Downloading ${n} song${n > 1 ? 's' : ''}…` : 'Nothing to download (all COMPLETE)');
+    offlineSelectMode = false; offlineSelected = new Set();
     OffUI.select = false; OffUI.checked = {}; repaintOffline();
-  });
-  const delBtn = document.getElementById('off-del');
-  if (delBtn) delBtn.addEventListener('click', () => {
-    const vids = Object.keys(OffUI.checked);
+  };
+  const runDeleteSelected = () => {
+    const vids = offlineSelected.size ? Array.from(offlineSelected) : Object.keys(OffUI.checked || {});
     if (!vids.length) return;
-    if (!confirm(`Hapus ${vids.length} lagu dari cache?`)) return;
+    if (!confirm(`Delete ${vids.length} song${vids.length > 1 ? 's' : ''} from cache?`)) return;
     try { vids.forEach((vid) => deleteOffCache(vid)); } catch {}
     toast(`Deleted ${vids.length} from cache`);
+    offlineSelectMode = false; offlineSelected = new Set();
     OffUI.select = false; OffUI.checked = {}; repaintOffline();
-  });
+  };
+  const dlBtn = document.getElementById('off-dl');
+  if (dlBtn && !dlBtn._offBound) { dlBtn._offBound = true; dlBtn.addEventListener('click', runDownloadSelected); }
+  const delBtn = document.getElementById('off-del');
+  if (delBtn && !delBtn._offBound) { delBtn._offBound = true; delBtn.addEventListener('click', runDeleteSelected); }
+  const dlSel = document.getElementById('offline-dl-sel');
+  if (dlSel && !dlSel._offBound) { dlSel._offBound = true; dlSel.addEventListener('click', runDownloadSelected); }
+  const delSel = document.getElementById('offline-del-sel');
+  if (delSel && !delSel._offBound) { delSel._offBound = true; delSel.addEventListener('click', runDeleteSelected); }
+  const cancelSel = document.getElementById('offline-cancel-sel');
+  if (cancelSel && !cancelSel._offBound) {
+    cancelSel._offBound = true;
+    cancelSel.addEventListener('click', () => { try { exitOfflineSelectMode(); } catch {} });
+  }
+  const cancelLegacy = document.getElementById('off-cancel');
+  if (cancelLegacy && !cancelLegacy._offBound) {
+    cancelLegacy._offBound = true;
+    cancelLegacy.addEventListener('click', () => { try { exitOfflineSelectMode(); } catch {} });
+  }
+  const selLegacy = document.getElementById('off-select');
+  if (selLegacy && !selLegacy._offBound) {
+    selLegacy._offBound = true;
+    selLegacy.addEventListener('click', () => { try { enterOfflineSelectMode(); } catch {} });
+  }
+  try { updateOfflineSelectBar(); } catch {}
 }
 function viewLibrary(view, tab) {
   const tabs = [
@@ -5637,7 +5859,7 @@ function openSongMenu(song, opts = {}) {
         toast(pinned ? 'Pinned to top' : 'Unpinned');
         try { route(); } catch {}
       } else if (a === 'delcache') {
-        if (confirm(`Hapus "${displayTitle(song.title) || song.title || song.videoId}" dari cache?`)) {
+        if (confirm(`Delete "${displayTitle(song.title) || song.title || song.videoId}" from cache?`)) {
           deleteOffCache(song.videoId);
           toast('Deleted from cache');
           try { route(); } catch {}

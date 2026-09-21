@@ -1701,4 +1701,14 @@ body.pip-system .fw-bar, body.pip-system .fw-controls { opacity: .6; }
 @media (max-width: 860px){ .off-row2 .off-more{display:inline-flex} }
 .dl-icon { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:12px; color:#1db954; margin-left:6px; }
 .dl-icon .ic { width:14px; height:14px; }
+.hidden { display: none !important; }
+.select-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; background: var(--bg); z-index: 5; border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+.select-bar span:first-child { flex: 1; font-size: 13px; color: var(--muted); }
+.track-check { display: inline-flex; align-items: center; flex: none; }
+.track-check input { width: 18px; height: 18px; accent-color: #1db954; }
+.track.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.track[data-offrow] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.track[data-offrow].selected .t-num { display: none; }
+.detail-art { flex: none; }
+.detail-art img { width: 224px; height: 224px; border-radius: 8px; object-fit: cover; }
 
