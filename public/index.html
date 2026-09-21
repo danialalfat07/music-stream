@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Pemutar musik web gratis bergaya Spotify. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.41" />
+<meta name="app-version" content="2.3.42" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -278,7 +278,7 @@ try {
         <img src="/logo.png" width="56" height="56" alt="" />
         <div>
           <h3>Dnialify Music Stream</h3>
-          <div class="settings-sub">by Dnialify Project · v2.3.41 · Spotify-style YT Music player</div>
+          <div class="settings-sub">by Dnialify Project · v2.3.42 · Spotify-style YT Music player</div>
         </div>
         <button type="button" id="settings-close" class="icon-btn"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
@@ -337,7 +337,8 @@ try {
           <div class="settings-section" id="sec-visionos">
             <div class="settings-section-title">VisionOS Mode</div>
             <div class="settings-row" id="set-cache-row" style="display:none"><span class="s-label">Audio Cache</span><button id="set-cache" class="pill-btn"><span>Off</span></button></div>
-            <div class="settings-row" id="set-max-row" style="display:none"><span class="s-label">Max Cached Songs</span><button id="set-max" class="pill-btn"><span>50</span></button></div>
+             <div class="settings-row" id="set-max-row" style="display:none"><span class="s-label">Max Cached Songs</span><button id="set-max" class="pill-btn"><span>50</span></button></div>
+             <div class="settings-row" id="set-window-row" style="display:none"><span class="s-label">Chunk Window</span><button id="set-window" class="pill-btn"><span id="set-window-value">5</span></button></div>
             <div class="settings-row settings-row--locked" id="set-aq-row" style="display:none"><span class="s-label">Audio Quality<span class="badge-soon">Soon</span></span><button class="pill-btn" disabled><span>Auto</span></button></div>
           </div>
         </div>
@@ -348,7 +349,7 @@ try {
           </div>
           <div class="settings-section" id="sec-appinfo">
             <div class="settings-section-title">App Info</div>
-            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.41</span></span></div>
+            <div class="settings-row"><span class="s-label">Web Version</span><span class="s-value">v<span id="set-version">2.3.42</span></span></div>
             <div class="settings-row"><span class="s-label">Download APK</span><a href="https://github.com/danialalfat07/music-stream/actions/workflows/android-build.yml" target="_blank" rel="noopener" style="color:var(--accent-bright);text-decoration:underline">Android Build</a></div>
           </div>
           <div class="settings-section" id="sec-contact">
@@ -446,11 +447,21 @@ try {
   <canvas id="pip-canvas" width="360" height="640"></canvas>
   <video id="pip-video" muted playsinline autoplay></video>
 </div>
-<script>
+ <div id="window-modal" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
+   <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:240px;">
+     <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Chunk Window (1-200)</div>
+     <input type="number" id="window-input" min="1" max="200" value="5" style="width:100%;padding:8px;font-size:16px;background:#000;color:#fff;border:1px solid #333;border-radius:6px;">
+     <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+       <button id="window-cancel" class="pill-btn">Cancel</button>
+       <button id="window-ok" class="pill-btn">Save</button>
+     </div>
+   </div>
+ </div>
+ <script>
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.41";
+    var VER="2.3.42";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);

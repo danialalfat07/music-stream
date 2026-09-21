@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.41";
+const APP_VERSION = "2.3.42";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -5842,6 +5842,43 @@ function applySettingsEnvironment() {
     lock('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
   } catch {}
 }
+const CHUNK_WINDOW_KEY = 'chunk_window';
+const CHUNK_WINDOW_DEFAULT = 5;
+const CHUNK_WINDOW_MIN = 1;
+const CHUNK_WINDOW_MAX = 200;
+function getChunkWindow() {
+  try {
+    const v = parseInt(localStorage.getItem(CHUNK_WINDOW_KEY), 10);
+    if (!isNaN(v) && v >= CHUNK_WINDOW_MIN && v <= CHUNK_WINDOW_MAX) return v;
+  } catch (e) {}
+  return CHUNK_WINDOW_DEFAULT;
+}
+function setChunkWindow(n) {
+  const v = Math.max(CHUNK_WINDOW_MIN, Math.min(CHUNK_WINDOW_MAX, parseInt(n, 10) || CHUNK_WINDOW_DEFAULT));
+  try { localStorage.setItem(CHUNK_WINDOW_KEY, String(v)); } catch (e) {}
+  const el = document.getElementById('set-window-value');
+  if (el) el.textContent = String(v);
+  try { if (window.NativeSettings && typeof NativeSettings.setChunkWindow === 'function') NativeSettings.setChunkWindow(v); } catch (e) {}
+  return v;
+}
+function syncChunkWindowUI() {
+  const v = getChunkWindow();
+  const el = document.getElementById('set-window-value');
+  if (el) el.textContent = String(v);
+  try { if (window.NativeSettings && typeof NativeSettings.setChunkWindow === 'function') NativeSettings.setChunkWindow(v); } catch (e) {}
+}
+(function () {
+  const close = () => { const m = document.getElementById('window-modal'); if (m) { m.style.display = 'none'; m.classList.add('hidden'); } };
+  document.addEventListener('click', (ev) => {
+    const id = ev.target && ev.target.id;
+    if (id === 'set-window') {
+      const m = document.getElementById('window-modal'); const i = document.getElementById('window-input');
+      if (m && i) { i.value = String(getChunkWindow()); m.style.display = 'flex'; m.classList.remove('hidden'); i.focus(); }
+    } else if (id === 'window-cancel') close();
+    else if (id === 'window-ok') { const i = document.getElementById('window-input'); if (i) setChunkWindow(i.value); close(); }
+  });
+  setTimeout(syncChunkWindowUI, 1000);
+})();
 function openSettingsModal(tab = 'settings') {
   const m = $('#settings-modal');
   if (!m) return;
@@ -5936,6 +5973,7 @@ function openSettingsModal(tab = 'settings') {
     const cBtn = $('#set-cache');
     const mRow = $('#set-max-row');
     const mBtn = $('#set-max');
+    const wRow = $('#set-window-row');
     const aqRow = $('#set-aq-row');
     if (sBtn) {
       const lbl = sBtn.querySelector('span');
@@ -5952,6 +5990,7 @@ function openSettingsModal(tab = 'settings') {
     // keep their own conditional rule (cache On only), independent of lock.
     if (cRow) cRow.style.display = '';
     if (mRow) mRow.style.display = cache ? '' : 'none';
+    if (wRow) wRow.style.display = cache ? '' : 'none';
     if (aqRow) aqRow.style.display = cache ? '' : 'none';
     applySettingsEnvironment();
   };
@@ -5960,6 +5999,7 @@ function openSettingsModal(tab = 'settings') {
     const sBtn = $('#set-stream');
     const cBtn = $('#set-cache');
     const mBtn = $('#set-max');
+    const wBtn = $('#set-window');
     if (sBtn) sBtn.onclick = () => {
       try {
         if (!NB) return;
@@ -5980,6 +6020,8 @@ function openSettingsModal(tab = 'settings') {
       } catch {}
       syncNative();
     };
+    if (wBtn) wBtn.onclick = () => document.getElementById('window-modal')?.querySelector('#window-input')?.focus();
+    syncChunkWindowUI();
     syncNative();
   } catch {}
   applySettingsEnvironment();

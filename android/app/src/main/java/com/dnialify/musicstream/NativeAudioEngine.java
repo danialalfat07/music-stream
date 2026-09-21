@@ -8,7 +8,6 @@ import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import java.util.HashMap;
 import java.util.Map;
 import org.json.JSONObject;
@@ -37,6 +36,9 @@ public final class NativeAudioEngine {
     }
 
     private static final NativeAudioEngine INSTANCE = new NativeAudioEngine();
+    private static volatile int CHUNK_WINDOW_SIZE = 5;
+    public static final int CHUNK_WINDOW_MIN = 1;
+    public static final int CHUNK_WINDOW_MAX = 200;
 
     private final Object lock = new Object();
     private MediaPlayer mp;
@@ -70,6 +72,7 @@ public final class NativeAudioEngine {
     private AudioManager audioManager; // hardware volume readout for debug logs
     private boolean capTested = false; // one-shot LoudnessEnhancer cap probe
     private int enhancerCapMb = -1; // measured device gain ceiling, -1 = unknown
+    private long lastDiagTickLog;
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -81,6 +84,24 @@ public final class NativeAudioEngine {
 
     public static NativeAudioEngine get() {
         return INSTANCE;
+    }
+
+    public static void setChunkWindowSize(int n) {
+        int v = Math.max(CHUNK_WINDOW_MIN, Math.min(CHUNK_WINDOW_MAX, n));
+        if (v == CHUNK_WINDOW_SIZE) return;
+        CHUNK_WINDOW_SIZE = v;
+        final NativeAudioEngine engine = INSTANCE;
+        engine.nlog("[ENGINE] chunk window set to " + v);
+        engine.timer.post(() -> {
+            synchronized (engine.lock) {
+                if (engine.lastTotal > 0 && engine.durationMs > 0 && engine.appCtx != null
+                        && engine.state != State.IDLE && engine.state != State.STOPPED
+                        && engine.state != State.ERROR && engine.state != State.ENDED) {
+                    engine.setWindow(engine.videoId, engine.lastUrl, engine.lastTotal,
+                            engine.currentMs, engine.durationMs, engine.appCtx);
+                }
+            }
+        });
     }
 
     // ---------- public commands (bridge + harness) ----------
@@ -493,7 +514,7 @@ public final class NativeAudioEngine {
         if (one <= 0) return total;
         long edge = SongCache.chunkEndFor(curMs, durMs, total);
         if (edge <= 0) return total;
-        return Math.min(total, edge + 5 * one);
+        return Math.min(total, edge + CHUNK_WINDOW_SIZE * one);
     }
 
     /** Set window for a position; (re)starts resume-aware writer when behind. */
@@ -501,10 +522,14 @@ public final class NativeAudioEngine {
             int durMs, Context ac) {
         windowChunk = chunkIdxForPos(curMs, durMs, total);
         windowEnd = windowEndForPos(curMs, durMs, total);
+        nlog("[NAE] window set chunk=" + windowChunk + " end=" + windowEnd
+                + " curMs=" + curMs + " total=" + total + " writerState="
+                + (SongCache.isDownloading(vid) ? "RUNNING" : (SongCache.isFull(vid) ? "COMPLETE" : "IDLE")));
         if (ac == null || total <= 0) return;
         if (SongCache.hasBytes(ac, vid, Math.min(windowEnd, total))) {
             if (SongCache.isDownloading(vid) && !SongCache.isFull(vid)) {
                 SongCache.pauseDownload(vid);
+                nlog("[NAE] writer paused: reason=window already cached to end=" + windowEnd);
             }
             return;
         }
@@ -655,10 +680,21 @@ public final class NativeAudioEngine {
             // Proxy closes the stream only at true end (or hold timeout):
             // completion is always real. No re-prepare, no resume loop.
             synchronized (lock) {
+                int callbackPosition = -1;
+                int callbackDuration = -1;
+                try { callbackPosition = p.getCurrentPosition(); } catch (Exception ignored) {}
+                try { callbackDuration = p.getDuration(); } catch (Exception ignored) {}
+                nlog("[AUTONEXT_DIAG] MediaPlayer.onCompletion fired. currentPosition="
+                        + callbackPosition + " duration=" + callbackDuration
+                        + " videoId=" + videoId + " writerState=" + writerState(videoId));
                 try {
                     currentMs = p.getDuration();
                 } catch (Exception ignored) {}
                 if (state != State.ERROR) {
+                    nlog("[AUTONEXT_DIAG] ENDED fired. reason=MediaPlayer.onCompletion"
+                            + " currentMs=" + currentMs + " durationMs=" + durationMs
+                            + " state=" + state + " videoId=" + videoId
+                            + " writerState=" + writerState(videoId) + " bufferPos=n/a");
                     setStateLocked(State.ENDED);
                     nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
                 }
@@ -667,6 +703,10 @@ public final class NativeAudioEngine {
         });
         mp.setOnErrorListener((p, what, extra) -> {
             synchronized (lock) {
+                nlog("[AUTONEXT_DIAG] MediaPlayer.onError what=" + what + " extra=" + extra
+                        + " currentPosition=" + safePosition(p) + " duration=" + safeDuration(p)
+                        + " videoId=" + videoId + " state=" + state
+                        + " writerState=" + writerState(videoId));
                 failLocked(VisionOsResolver.R_MEDIA_ERROR,
                         "mediaplayer what=" + what + " extra=" + extra);
             }
@@ -756,6 +796,14 @@ public final class NativeAudioEngine {
                 currentMs = mp.getCurrentPosition();
                 if (durationMs <= 0) durationMs = mp.getDuration();
             } catch (Exception ignored) {}
+            long nowDiag = System.currentTimeMillis();
+            if (nowDiag - lastDiagTickLog >= 2000) {
+                lastDiagTickLog = nowDiag;
+                nlog("[AUTONEXT_DIAG] tick currentMs=" + currentMs + " durationMs=" + durationMs
+                        + " state=" + state + " writerState=" + writerState(videoId)
+                        + " windowEnd=" + windowEnd + " windowChunk=" + windowChunk
+                        );
+            }
             pushEvent("timeUpdate", null);
             // sliding window-5 enforcement on the existing 500ms clock
             // (chunk-cross trigger; I/O only on cross, memory math otherwise).
@@ -776,6 +824,7 @@ public final class NativeAudioEngine {
                         } catch (Exception ignored) {}
                         if (have >= Math.min(windowEnd, lastTotal)) {
                             SongCache.pauseDownload(videoId);
+                            nlog("[NAE] writer paused: reason=window cap hit end=" + windowEnd);
                             nlog("[CACHE] window cap hit videoId=" + videoId
                                     + " end=" + windowEnd);
                         }
@@ -873,5 +922,20 @@ public final class NativeAudioEngine {
 
     static void nlog(String m) {
         Log.d(TAG, m);
+    }
+
+    private static String writerState(String vid) {
+        return SongCache.isDownloading(vid) ? "RUNNING"
+                : (SongCache.isFull(vid) ? "COMPLETE" : "IDLE");
+    }
+
+    private static int safePosition(MediaPlayer player) {
+        try { return player != null ? player.getCurrentPosition() : -1; }
+        catch (Exception ignored) { return -1; }
+    }
+
+    private static int safeDuration(MediaPlayer player) {
+        try { return player != null ? player.getDuration() : -1; }
+        catch (Exception ignored) { return -1; }
     }
 }

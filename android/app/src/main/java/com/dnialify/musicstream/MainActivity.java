@@ -2,6 +2,8 @@ package com.dnialify.musicstream;
 
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.webkit.WebChromeClient;
+import android.webkit.ConsoleMessage;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -63,11 +65,20 @@ public class MainActivity extends BridgeActivity {
             }
             // beta: also unconditional for chrome://inspect next time (requested if (BuildConfig.DEBUG))
             WebView.setWebContentsDebuggingEnabled(true);
-            android.util.Log.d(TAG_DIAG, "WebView remote debugging enabled debuggable=" + isDebuggable);
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                getBridge().getWebView().setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public boolean onConsoleMessage(ConsoleMessage cm) {
+                        Log.d("WEBVIEW_JS", cm.message() + " [" + cm.sourceId() + ":" + cm.lineNumber() + "]");
+                        return true;
+                    }
+                });
+            }
+            Log.d(TAG_DIAG, "WebView remote debugging enabled debuggable=" + isDebuggable);
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "WebView debugging enable failed " + e);
+            Log.d(TAG_DIAG, "WebView debugging enable failed " + e);
         }
-        android.util.Log.d(TAG_DIAG, "Activity onCreate SDK=" + Build.VERSION.SDK_INT + " webkitDocStart=" + androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT));
+        Log.d(TAG_DIAG, "Activity onCreate SDK=" + Build.VERSION.SDK_INT + " webkitDocStart=" + androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT));
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
@@ -97,6 +108,10 @@ public class MainActivity extends BridgeActivity {
             wv.addJavascriptInterface(new PlaybackBridge(), "NativePlayback");
             wv.removeJavascriptInterface("Diagnostics");
             wv.addJavascriptInterface(diagnosticsBridge, "Diagnostics");
+            wv.removeJavascriptInterface("AppLogNative");
+            wv.addJavascriptInterface(new LogBridge(), "AppLogNative");
+            wv.removeJavascriptInterface("NativeSettings");
+            wv.addJavascriptInterface(new NativeSettings(), "NativeSettings");
             // Stage1: Brave JS inject document-start (primary addDocumentStartJavaScript, fallback delegate)
             String bgJs = loadAssetText("brave-video-bg-play.js");
             String pageviewJs = loadAssetText("brave-disable-pageview-api.js");
@@ -106,15 +121,15 @@ public class MainActivity extends BridgeActivity {
                         wv, pageviewJs, Collections.singleton("*"));
                 androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
                         wv, bgJs, Collections.singleton("*"));
-                android.util.Log.d(TAG_DIAG, "WebView addDocumentStartJavaScript injected pageview+bgJs docStartSupported=true");
+                Log.d(TAG_DIAG, "WebView addDocumentStartJavaScript injected pageview+bgJs docStartSupported=true");
             } else if (bgJs != null && pageviewJs != null) {
                 // Old WebView fallback. Main app JS remains fallback for already-loaded pages.
                 wv.evaluateJavascript(pageviewJs + "\n" + bgJs, null);
-                android.util.Log.d(TAG_DIAG, "WebView fallback evaluateJavascript injected docStartSupported=" + androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT));
+                Log.d(TAG_DIAG, "WebView fallback evaluateJavascript injected docStartSupported=" + androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT));
             }
             logKeepRunning();
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "onStart inject error " + e);
+            Log.d(TAG_DIAG, "onStart inject error " + e);
         }
         // Phase 11 - native PiP view (GONE until PiP, mirrors WebView state)
         ensurePipNativeView();
@@ -144,9 +159,9 @@ public class MainActivity extends BridgeActivity {
                 float gainDb = (float) (20.0 * Math.log10(Math.max(1.0, level / 100.0)));
                 extraVolumeEffect.setTargetGain((int) (gainDb * 100));
                 extraVolumeEffect.setEnabled(level > 100);
-                android.util.Log.d(TAG_DIAG, "[Native] volume " + level + "% (" + gainDb + "dB)");
+                Log.d(TAG_DIAG, "[Native] volume " + level + "% (" + gainDb + "dB)");
             } catch (Exception e) {
-                android.util.Log.w(TAG_DIAG, "[Native] extra volume unavailable", e);
+                Log.w(TAG_DIAG, "[Native] extra volume unavailable", e);
             }
         });
     }
@@ -185,7 +200,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        android.util.Log.d(TAG_DIAG, "Activity onWindowFocusChanged hasFocus=" + hasFocus + " " + lifecycleSnapshot());
+        Log.d(TAG_DIAG, "Activity onWindowFocusChanged hasFocus=" + hasFocus + " " + lifecycleSnapshot());
         logPipNative("onWindowFocusChanged:" + hasFocus);
     }
 
@@ -193,12 +208,12 @@ public class MainActivity extends BridgeActivity {
     public void onTopResumedActivityChanged(boolean isTopResumed) {
         // API29+ - top resumed indicates true foreground
         super.onTopResumedActivityChanged(isTopResumed);
-        android.util.Log.d(TAG_DIAG, "Activity onTopResumedActivityChanged isTopResumed=" + isTopResumed + " " + lifecycleSnapshot());
+        Log.d(TAG_DIAG, "Activity onTopResumedActivityChanged isTopResumed=" + isTopResumed + " " + lifecycleSnapshot());
         logPipNative("onTopResumed:" + isTopResumed);
     }
 
     private void logLifecycle(String event) {
-        android.util.Log.d(TAG_DIAG, "Activity " + event + " " + lifecycleSnapshot());
+        Log.d(TAG_DIAG, "Activity " + event + " " + lifecycleSnapshot());
     }
 
     private String lifecycleSnapshot() {
@@ -219,10 +234,10 @@ public class MainActivity extends BridgeActivity {
         try {
             if (getBridge() != null) {
                 boolean kr = getBridge().shouldKeepRunning();
-                android.util.Log.d(TAG_DIAG, "Capacitor keepRunning=" + kr + " bridge=" + getBridge().getClass().getSimpleName());
+                Log.d(TAG_DIAG, "Capacitor keepRunning=" + kr + " bridge=" + getBridge().getClass().getSimpleName());
             }
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "keepRunning check err " + e);
+            Log.d(TAG_DIAG, "keepRunning check err " + e);
         }
     }
     @Override
@@ -233,7 +248,7 @@ public class MainActivity extends BridgeActivity {
                 wv = getBridge().getWebView();
             }
             if (wv == null) {
-                android.util.Log.d(TAG_DIAG, "Back diag wv null " + lifecycleSnapshot());
+                Log.d(TAG_DIAG, "Back diag wv null " + lifecycleSnapshot());
                 moveTaskToBack(true);
                 return;
             }
@@ -242,7 +257,7 @@ public class MainActivity extends BridgeActivity {
             String orig = "null";
             int size = -1;
             int idx = -1;
-            try { canBack = wv.canGoBack(); } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back canGoBack err " + e); }
+            try { canBack = wv.canGoBack(); } catch (Exception e) { Log.d(TAG_DIAG, "Back canGoBack err " + e); }
             try { url = String.valueOf(wv.getUrl()); } catch (Exception e) { url = "err:" + e.getMessage(); }
             try { orig = String.valueOf(wv.getOriginalUrl()); } catch (Exception e) { orig = "err:" + e.getMessage(); }
             try {
@@ -251,12 +266,12 @@ public class MainActivity extends BridgeActivity {
                     size = list.getSize();
                     idx = list.getCurrentIndex();
                     for (int i = 0; i < size; i++) {
-                        try { String itemUrl = list.getItemAtIndex(i).getUrl(); android.util.Log.d(TAG_DIAG, "Back history[" + i + "]=" + itemUrl); }
-                        catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back history[" + i + "] err " + e); }
+                        try { String itemUrl = list.getItemAtIndex(i).getUrl(); Log.d(TAG_DIAG, "Back history[" + i + "]=" + itemUrl); }
+                        catch (Exception e) { Log.d(TAG_DIAG, "Back history[" + i + "] err " + e); }
                     }
                 }
-            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "Back BackForwardList err " + e); }
-            android.util.Log.d(TAG_DIAG, "Back diag wv!=null canGoBack=" + canBack + " url=" + url + " orig=" + orig + " size=" + size + " idx=" + idx + " " + lifecycleSnapshot());
+            } catch (Exception e) { Log.d(TAG_DIAG, "Back BackForwardList err " + e); }
+            Log.d(TAG_DIAG, "Back diag wv!=null canGoBack=" + canBack + " url=" + url + " orig=" + orig + " size=" + size + " idx=" + idx + " " + lifecycleSnapshot());
 
             final boolean finalCanBack = canBack;
             final android.webkit.WebView finalWv = wv;
@@ -282,19 +297,19 @@ public class MainActivity extends BridgeActivity {
                 finalWv.evaluateJavascript(jsState, value -> {
                     try {
                         String raw = value;
-                        android.util.Log.d(TAG_DIAG, "Back JS state raw=" + raw);
+                        Log.d(TAG_DIAG, "Back JS state raw=" + raw);
                         String cleaned = raw;
                         if (cleaned != null && cleaned.length() >= 2 && cleaned.charAt(0) == '\"' && cleaned.charAt(cleaned.length() - 1) == '\"') {
                             cleaned = cleaned.substring(1, cleaned.length() - 1).replace("\\\\", "\\").replace("\\\"", "\"");
                         }
                         if (cleaned == null || cleaned.equals("null") || cleaned.trim().isEmpty()) {
-                            android.util.Log.d(TAG_DIAG, "Back JS state empty, fallback native canGoBack=" + finalCanBack);
+                            Log.d(TAG_DIAG, "Back JS state empty, fallback native canGoBack=" + finalCanBack);
                             if (finalCanBack) { finalWv.goBack(); return; }
                             moveTaskToBack(true);
                             return;
                         }
                         org.json.JSONObject obj = new org.json.JSONObject(cleaned);
-                        if (obj.has("error")) android.util.Log.d(TAG_DIAG, "Back JS error " + obj.optString("error"));
+                        if (obj.has("error")) Log.d(TAG_DIAG, "Back JS error " + obj.optString("error"));
                         boolean modalOpen = obj.optBoolean("modalOpen", false);
                         boolean nowOpen = obj.optBoolean("nowOpen", false);
                         boolean settingsOpen = obj.optBoolean("settingsOpen", false);
@@ -305,69 +320,69 @@ public class MainActivity extends BridgeActivity {
                         String hash = obj.optString("hash", "");
                         String href = obj.optString("href", "");
                         boolean isHome = obj.optBoolean("isHome", false);
-                         android.util.Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " settingsOpen=" + settingsOpen + " helpOpen=" + helpOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " isHome=" + isHome + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
+                         Log.d(TAG_DIAG, "Back JS parsed modalOpen=" + modalOpen + " nowOpen=" + nowOpen + " settingsOpen=" + settingsOpen + " helpOpen=" + helpOpen + " activeTab=" + activeTab + " activePane=" + activePane + " hash=" + hash + " isHome=" + isHome + " historyLen=" + historyLen + " href=" + href + " canBack=" + finalCanBack);
                         if (modalOpen) {
-                            android.util.Log.d(TAG_DIAG, "Back: closeModal modalOpen=true");
+                            Log.d(TAG_DIAG, "Back: closeModal modalOpen=true");
                             finalWv.evaluateJavascript("try{closeModal()}catch(e){}", null);
                             return;
                         }
                         if (nowOpen) {
                             if (activeTab != null && !"player".equals(activeTab)) {
-                                android.util.Log.d(TAG_DIAG, "Back: switchNPTab(player) from " + activeTab);
+                                Log.d(TAG_DIAG, "Back: switchNPTab(player) from " + activeTab);
                                 finalWv.evaluateJavascript("try{switchNPTab('player')}catch(e){}", null);
                                 return;
                             } else {
-                                android.util.Log.d(TAG_DIAG, "Back: closeNowPlaying nowOpen player");
+                                Log.d(TAG_DIAG, "Back: closeNowPlaying nowOpen player");
                                 finalWv.evaluateJavascript("try{closeNowPlaying()}catch(e){}", null);
                                 return;
                             }
                         }
                         if (settingsOpen) {
-                            android.util.Log.d(TAG_DIAG, "Back: closeSettingsModal settingsOpen=true");
+                            Log.d(TAG_DIAG, "Back: closeSettingsModal settingsOpen=true");
                             finalWv.evaluateJavascript("try{closeSettingsModal()}catch(e){}", null);
                             return;
                         }
                         if (helpOpen) {
-                            android.util.Log.d(TAG_DIAG, "Back: closeHelpModal helpOpen=true");
+                            Log.d(TAG_DIAG, "Back: closeHelpModal helpOpen=true");
                             finalWv.evaluateJavascript("try{closeHelpModal()}catch(e){}", null);
                             return;
                         }
                          if (isHome) {
-                             android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true no song hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
+                             Log.d(TAG_DIAG, "Back: moveTaskToBack isHome=true no song hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
                             moveTaskToBack(true);
                             return;
                         }
                         if (finalCanBack) {
-                            android.util.Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash);
+                            Log.d(TAG_DIAG, "Back: goBack canGoBack=true historyLen=" + historyLen + " hash=" + hash);
                             finalWv.goBack();
                             return;
                         }
                         if (historyLen > 1) {
-                            android.util.Log.d(TAG_DIAG, "Back: JS history.back() fallback historyLen=" + historyLen + " hash=" + hash);
+                            Log.d(TAG_DIAG, "Back: JS history.back() fallback historyLen=" + historyLen + " hash=" + hash);
                             finalWv.evaluateJavascript("try{history.back()}catch(e){}", null);
                             return;
                         }
-                        android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack no overlay/history hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
+                        Log.d(TAG_DIAG, "Back: moveTaskToBack no overlay/history hash=" + hash + " canBack=" + finalCanBack + " historyLen=" + historyLen);
                         moveTaskToBack(true);
                     } catch (Exception e) {
-                        android.util.Log.d(TAG_DIAG, "Back JS callback err " + e + " raw=" + value);
+                        Log.d(TAG_DIAG, "Back JS callback err " + e + " raw=" + value);
                         try { if (finalCanBack) { finalWv.goBack(); return; } } catch (Exception ex) {}
                         moveTaskToBack(true);
                     }
                 });
                 return;
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "Back JS eval err " + e);
+                Log.d(TAG_DIAG, "Back JS eval err " + e);
             }
             if (canBack) {
-                android.util.Log.d(TAG_DIAG, "Back: goBack fallback sync canGoBack=true");
+                Log.d(TAG_DIAG, "Back: goBack fallback sync canGoBack=true");
                 wv.goBack();
                 return;
             }
-            android.util.Log.d(TAG_DIAG, "Back: moveTaskToBack fallback sync");
+            Log.d(TAG_DIAG, "Back: moveTaskToBack fallback sync");
             moveTaskToBack(true);
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "Back handler err " + e);
+            Log.d(TAG_DIAG, "Back handler err " + e);
             try { moveTaskToBack(true); } catch (Exception ex) {}
         }
     }
@@ -382,7 +397,7 @@ public class MainActivity extends BridgeActivity {
                 if (decor instanceof ViewGroup) content = (ViewGroup) decor;
             }
             if (content == null) {
-                android.util.Log.d(TAG_DIAG, "[PipNative] attach failed: content null");
+                Log.d(TAG_DIAG, "[PipNative] attach failed: content null");
                 return;
             }
             FrameLayout root = new FrameLayout(this);
@@ -472,12 +487,12 @@ public class MainActivity extends BridgeActivity {
             pipArtistView = artistTv;
             pipLyricsScroll = scroll;
             pipLyricsContainer = lyricsContainer;
-            android.util.Log.d(TAG_DIAG, "[PipNative] attached GONE karaoke parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
+            Log.d(TAG_DIAG, "[PipNative] attached GONE karaoke parent=" + content.getClass().getSimpleName() + " childCount=" + content.getChildCount());
             logPipNative("attached:GONE karaoke");
             updatePipNativeView();
             recalcPipDynamicScaling();
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "[PipNative] attach err " + e);
+            Log.d(TAG_DIAG, "[PipNative] attach err " + e);
         }
     }
 
@@ -501,8 +516,8 @@ public class MainActivity extends BridgeActivity {
             if (pipArtistView != null) pipArtistView.setTextSize(TypedValue.COMPLEX_UNIT_SP, artistSp);
             // store SP values (nama variabel tetap Px untuk kompatibilitas)
             pipDynamicTitlePx = titleSp; pipDynamicArtistPx = artistSp; pipDynamicLyricPx = lyricSp; pipDynamicActivePx = activeSp;
-            android.util.Log.d(TAG_DIAG, "[PipNative] scaling FIX h=" + h + " density=" + density + " titleSp=" + titleSp + " artistSp=" + artistSp + " lyricSp=" + lyricSp + " activeSp=" + activeSp + " PX_vs_SP=SP_benar");
-        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] scaling err " + e); }
+            Log.d(TAG_DIAG, "[PipNative] scaling FIX h=" + h + " density=" + density + " titleSp=" + titleSp + " artistSp=" + artistSp + " lyricSp=" + lyricSp + " activeSp=" + activeSp + " PX_vs_SP=SP_benar");
+        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] scaling err " + e); }
     }
     private float pipDynamicTitlePx = -1, pipDynamicArtistPx = -1, pipDynamicLyricPx = -1, pipDynamicActivePx = -1;
 
@@ -542,7 +557,7 @@ public class MainActivity extends BridgeActivity {
                                 pipArtView.setAlpha(1f);
                             }
                             for (TextView tv : pipLyricLineViews) tv.setVisibility(View.INVISIBLE);
-                            android.util.Log.d(TAG_DIAG, "[PipNative] update no-lyrics fallback header only");
+                            Log.d(TAG_DIAG, "[PipNative] update no-lyrics fallback header only");
                             return;
                         }
                         if (pipLyricsScroll != null) pipLyricsScroll.setVisibility(View.VISIBLE);
@@ -554,7 +569,7 @@ public class MainActivity extends BridgeActivity {
                             applyLyricLineStyle(tv, isActive, isActive ? 0 : Math.abs(i - 5));
                             tv.setVisibility(isActive ? View.VISIBLE : View.INVISIBLE);
                         }
-                        android.util.Log.d(TAG_DIAG, "[PipNative] update 10line fallback lyric=" + cur + " size=0 activeIdx=" + active);
+                        Log.d(TAG_DIAG, "[PipNative] update 10line fallback lyric=" + cur + " size=0 activeIdx=" + active);
                         return;
                     }
                     if (pipLyricsScroll != null) pipLyricsScroll.setVisibility(View.VISIBLE);
@@ -580,11 +595,11 @@ public class MainActivity extends BridgeActivity {
                     }
                     // COMPREHENSIVE DEBUG
                     boolean _isPip = false; try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) _isPip = isInPictureInPictureMode(); } catch (Exception ignored) {}
-                    android.util.Log.d(TAG_DIAG, "[PipNative] update DEBUG size=" + size + " activeIdx=" + active + " start=" + start + " end=" + end + " window=10 isInPip=" + _isPip);
+                    Log.d(TAG_DIAG, "[PipNative] update DEBUG size=" + size + " activeIdx=" + active + " start=" + start + " end=" + end + " window=10 isInPip=" + _isPip);
                     for (int dbg=0; dbg<10; dbg++) {
                         int src = start + dbg;
                         String txt = (src>=0 && src<size ? pipLyricLines.get(src) : "OUT_OF_BOUNDS");
-                        android.util.Log.d(TAG_DIAG, "[PipNative] line["+dbg+"] srcIdx="+src+" text=\""+txt+"\" isActive="+(src==active)+" visibility="+(src<0||src>end||src>=size?"INVISIBLE":"VISIBLE"));
+                        Log.d(TAG_DIAG, "[PipNative] line["+dbg+"] srcIdx="+src+" text=\""+txt+"\" isActive="+(src==active)+" visibility="+(src<0||src>end||src>=size?"INVISIBLE":"VISIBLE"));
                     }
                     for (int i = 0; i < 10; i++) {
                         TextView tv = pipLyricLineViews.get(i);
@@ -616,8 +631,8 @@ public class MainActivity extends BridgeActivity {
                                 View av = pipLyricLineViews.get(idxInWin);
                                 int target = av.getTop() - (pipLyricsScroll.getHeight() - av.getHeight())/2;
                                 pipLyricsScroll.smoothScrollTo(0, Math.max(0, target));
-                                android.util.Log.d(TAG_DIAG, "[PipNative] smoothScrollTo target=" + target + " activeTop=" + av.getTop());
-                            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] scroll err " + e); }
+                                Log.d(TAG_DIAG, "[PipNative] smoothScrollTo target=" + target + " activeTop=" + av.getTop());
+                            } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] scroll err " + e); }
                         }, 150);
                         try {
                             for (int i=0;i<pipLyricLineViews.size();i++) {
@@ -628,12 +643,12 @@ public class MainActivity extends BridgeActivity {
                         } catch (Exception ignored) {}
                         lastPipRenderedActiveIdx = activeFinal;
                     } else {
-                        android.util.Log.d(TAG_DIAG, "[PipNative] skip scroll same activeIdx=" + activeFinal);
+                        Log.d(TAG_DIAG, "[PipNative] skip scroll same activeIdx=" + activeFinal);
                     }
-                    android.util.Log.d(TAG_DIAG, "[PipNative] update 10line title=" + pipTitle + " artist=" + pipArtist + " activeIdx=" + active + " window=" + start + "-" + end + " size=" + size + " lyric=" + pipCurrentLyric + " shouldScroll=" + shouldScroll);
-                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update err " + e); }
+                    Log.d(TAG_DIAG, "[PipNative] update 10line title=" + pipTitle + " artist=" + pipArtist + " activeIdx=" + active + " window=" + start + "-" + end + " size=" + size + " lyric=" + pipCurrentLyric + " shouldScroll=" + shouldScroll);
+                } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] update err " + e); }
             });
-        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] update outer err " + e); }
+        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] update outer err " + e); }
     }
 
     private void applyLyricLineStyle(TextView tv, boolean isActive, int dist) {
@@ -682,16 +697,16 @@ public class MainActivity extends BridgeActivity {
                                     pipArtView.setImageBitmap(bmp);
                                     pipArtworkBitmap = bmp;
                                     pipLoadedArtworkUrl = target;
-                                    android.util.Log.d(TAG_DIAG, "[PipNative] artwork loaded " + bmp.getWidth() + "x" + bmp.getHeight() + " url=" + target);
+                                    Log.d(TAG_DIAG, "[PipNative] artwork loaded " + bmp.getWidth() + "x" + bmp.getHeight() + " url=" + target);
                                 }
-                            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] set bmp err " + e); }
+                            } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] set bmp err " + e); }
                         });
                     } else {
-                        android.util.Log.d(TAG_DIAG, "[PipNative] artwork decode null url=" + target);
+                        Log.d(TAG_DIAG, "[PipNative] artwork decode null url=" + target);
                     }
-                } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] artwork load err " + e + " url=" + target); }
+                } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] artwork load err " + e + " url=" + target); }
             }).start();
-        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] loadArt outer err " + e); }
+        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] loadArt outer err " + e); }
     }
 
     private void logPipNative(String phase) {
@@ -709,13 +724,13 @@ public class MainActivity extends BridgeActivity {
                     parentInfo = p.getClass().getSimpleName() + " vis=" + (p.getVisibility()==View.VISIBLE?"VISIBLE":"GONE") + " size=" + p.getWidth() + "x" + p.getHeight() + " idx=" + p.indexOfChild(pipNativeView) + "/" + p.getChildCount();
                 }
             } catch (Exception e) { parentInfo = "err:"+e; }
-            android.util.Log.d(TAG_DIAG, "[PipNative] " + phase + " isInPip=" + isPip + " visibility=" + vis + " shown=" + shown + " size=" + w + "x" + h + " parent=" + parentInfo + " title=" + pipTitle + " artist=" + pipArtist + " lyric=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()));
-        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] log err " + e); }
+            Log.d(TAG_DIAG, "[PipNative] " + phase + " isInPip=" + isPip + " visibility=" + vis + " shown=" + shown + " size=" + w + "x" + h + " parent=" + parentInfo + " title=" + pipTitle + " artist=" + pipArtist + " lyric=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()));
+        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] log err " + e); }
     }
 
     @Override
     public void onDestroy() {
-        android.util.Log.d(TAG_DIAG, "Activity onDestroy " + lifecycleSnapshot());
+        Log.d(TAG_DIAG, "Activity onDestroy " + lifecycleSnapshot());
         if (current == this) current = null;
         try {
             if (extraVolumeEffect != null) {
@@ -729,8 +744,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
-        android.util.Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
-        android.util.Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
+        Log.d(TAG_DIAG, "[Native] onPictureInPictureModeChanged pip=" + isInPictureInPictureMode);
+        Log.d(TAG_DIAG, "PiP mode changed isInPip=" + isInPictureInPictureMode + " " + lifecycleSnapshot());
         // Phase 11 - native PiP view visible only in PiP
         try {
             ensurePipNativeView();
@@ -788,7 +803,7 @@ public class MainActivity extends BridgeActivity {
                                         + " alpha=" + wv.getAlpha()
                                         + " size=" + wv.getWidth() + "x" + wv.getHeight()
                                         + " pip=" + pip;
-                                android.util.Log.d(TAG_DIAG, nativeDiag);
+                                Log.d(TAG_DIAG, nativeDiag);
                                 // Force invalidate - Step 9 diagnostic
                                 try { wv.invalidate(); wv.requestLayout(); } catch (Exception ignored) {}
                                 wv.post(() -> { try { wv.invalidate(); wv.requestLayout(); } catch (Exception ignored) {} });
@@ -829,7 +844,7 @@ public class MainActivity extends BridgeActivity {
                                         + "});"
                                         + "}catch(e){return 'diag err '+e;}})()";
                                 getBridge().getWebView().evaluateJavascript(diag, value -> {
-                                    android.util.Log.d(TAG_DIAG, "[PiP-DIAG] pip=" + pip + " " + value);
+                                    Log.d(TAG_DIAG, "[PiP-DIAG] pip=" + pip + " " + value);
                                 });
                                 // Also log via DiagnosticsBridge if available
                                 getBridge().eval("try{var d=(function(){var w=document.getElementById('float-widget');var r=w?w.getBoundingClientRect():{width:0,height:0};var cs=w?getComputedStyle(w):{display:''};return 'pip='+document.body.classList.contains('pip-system')+' hidden='+ (w&&w.classList.contains('hidden'))+' display='+cs.display+' '+r.width+'x'+r.height;})(); if(window.Diagnostics) window.Diagnostics.logLine('[PiP] '+d);}catch(e){}", null);
@@ -841,7 +856,7 @@ public class MainActivity extends BridgeActivity {
                 });
             }
         } catch (Exception e) {
-            android.util.Log.d(TAG_DIAG, "PiP changed notify err " + e);
+            Log.d(TAG_DIAG, "PiP changed notify err " + e);
         }
     }
 
@@ -853,20 +868,34 @@ public class MainActivity extends BridgeActivity {
                 // Split if > 4000 chars (logcat limit)
                 int max = 3500;
                 if (json.length() <= max) {
-                    android.util.Log.d(TAG_DIAG, "JS " + json);
+                    Log.d(TAG_DIAG, "JS " + json);
                 } else {
                     for (int i = 0; i < json.length(); i += max) {
                         int end = Math.min(json.length(), i + max);
-                        android.util.Log.d(TAG_DIAG, "JS chunk " + (i / max) + " " + json.substring(i, end));
+                        Log.d(TAG_DIAG, "JS chunk " + (i / max) + " " + json.substring(i, end));
                     }
                 }
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "Diagnostics log err " + e);
+                Log.d(TAG_DIAG, "Diagnostics log err " + e);
             }
         }
         @JavascriptInterface
         public void logLine(String line) {
-            android.util.Log.d(TAG_DIAG, "JS " + line);
+            Log.d(TAG_DIAG, "JS " + line);
+        }
+    }
+
+    private static class LogBridge {
+        @JavascriptInterface
+        public String drain() {
+            return Log.drain();
+        }
+    }
+
+    public static class NativeSettings {
+        @JavascriptInterface
+        public void setChunkWindow(int n) {
+            NativeAudioEngine.setChunkWindowSize(n);
         }
     }
 
@@ -879,7 +908,7 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void updateWebViewState(String title, String artist, String artwork, boolean isPlaying, double positionMs, double durationMs) {
-            android.util.Log.d("DnialifyDiag", "Bridge updateWebViewState title=" + title + " artist=" + artist + " playing=" + isPlaying + " pos=" + positionMs + " dur=" + durationMs);
+            Log.d("DnialifyDiag", "Bridge updateWebViewState title=" + title + " artist=" + artist + " playing=" + isPlaying + " pos=" + positionMs + " dur=" + durationMs);
             // Phase 11 - mirror to native PiP (WebView is source of truth, no second playback system)
             try {
                 if (title != null) pipTitle = title;
@@ -888,29 +917,29 @@ public class MainActivity extends BridgeActivity {
                 pipIsPlaying = isPlaying;
                 pipPositionMs = (long) positionMs;
                 pipDurationMs = (long) durationMs;
-                android.util.Log.d(TAG_DIAG, "[PipNative] stateUpdate title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " lyric=" + pipCurrentLyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs);
+                Log.d(TAG_DIAG, "[PipNative] stateUpdate title=" + pipTitle + " artist=" + pipArtist + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " lyric=" + pipCurrentLyric + " pos=" + pipPositionMs + " dur=" + pipDurationMs);
                 updatePipNativeView();
-            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] updateWebViewState mirror err " + e); }
+            } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] updateWebViewState mirror err " + e); }
             PlaybackService.updateWebViewState(MainActivity.this, title, artist, artwork, isPlaying, (long) positionMs, (long) durationMs);
         }
 
         @JavascriptInterface
         public void updateLyrics(String prev, String current, String next) {
-            android.util.Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
+            Log.d("DnialifyDiag", "Bridge updateLyrics prev=" + prev + " cur=" + current + " next=" + next);
             // Phase 11 - lyric mirror (single fallback, 10-line window via updateLyricWindow)
             try {
                 pipCurrentLyric = current == null ? "" : current;
-                android.util.Log.d(TAG_DIAG, "[PipNative] lyricUpdate current=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " title=" + pipTitle);
+                Log.d(TAG_DIAG, "[PipNative] lyricUpdate current=" + pipCurrentLyric + " hasArt=" + (pipArtworkUrl!=null&&!pipArtworkUrl.isEmpty()) + " title=" + pipTitle);
                 // if window not yet set, update single view
                 if (pipLyricLines == null || pipLyricLines.isEmpty()) updatePipNativeView();
-            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] lyric mirror err " + e); }
+            } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] lyric mirror err " + e); }
             PlaybackService.updateLyricsStatic(MainActivity.this, prev, current, next);
         }
 
         @JavascriptInterface
         public void updateLyricWindow(String jsonLines, int activeIdx) {
             try {
-                android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow activeIdx=" + activeIdx + " jsonLen=" + (jsonLines==null?0:jsonLines.length()));
+                Log.d(TAG_DIAG, "[PipNative] lyricWindow activeIdx=" + activeIdx + " jsonLen=" + (jsonLines==null?0:jsonLines.length()));
                 java.util.List<String> lines = new java.util.ArrayList<>();
                 if (jsonLines != null && !jsonLines.isEmpty()) {
                     org.json.JSONArray arr = new org.json.JSONArray(jsonLines);
@@ -919,9 +948,9 @@ public class MainActivity extends BridgeActivity {
                 pipLyricLines = lines;
                 pipLyricActiveIdx = activeIdx;
                 if (activeIdx >= 0 && activeIdx < lines.size()) pipCurrentLyric = lines.get(activeIdx);
-                android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow size=" + lines.size() + " active=" + activeIdx + " cur=" + pipCurrentLyric);
+                Log.d(TAG_DIAG, "[PipNative] lyricWindow size=" + lines.size() + " active=" + activeIdx + " cur=" + pipCurrentLyric);
                 updatePipNativeView();
-            } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] lyricWindow err " + e); }
+            } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] lyricWindow err " + e); }
         }
 
         @JavascriptInterface
@@ -936,7 +965,7 @@ public class MainActivity extends BridgeActivity {
         // Phase 8 additive bridge: diagnostic log + native stream settings for web UI.
         @JavascriptInterface
         public void diagLog(String m) {
-            android.util.Log.d("DnialifyVisionOS", "web " + m);
+            Log.d("DnialifyVisionOS", "web " + m);
         }
 
         @JavascriptInterface
@@ -945,7 +974,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void setStreamMode(int mode) {
             StreamSettings.setStreamMode(MainActivity.this, mode);
-            android.util.Log.d("DnialifyVisionOS", "web setStreamMode=" + mode);
+            Log.d("DnialifyVisionOS", "web setStreamMode=" + mode);
         }
 
         @JavascriptInterface
@@ -954,7 +983,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void setAudioCache(boolean on) {
             StreamSettings.setAudioCache(MainActivity.this, on);
-            android.util.Log.d("DnialifyVisionOS", "web setAudioCache=" + on);
+            Log.d("DnialifyVisionOS", "web setAudioCache=" + on);
         }
 
         @JavascriptInterface
@@ -962,7 +991,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void setMaxCachedSongs(int v) {
             StreamSettings.setMaxCachedSongs(MainActivity.this, v);
-            android.util.Log.d("DnialifyVisionOS", "web setMaxCachedSongs=" + v);
+            Log.d("DnialifyVisionOS", "web setMaxCachedSongs=" + v);
         }
 
         @JavascriptInterface
@@ -972,9 +1001,9 @@ public class MainActivity extends BridgeActivity {
                         MainActivity.this, VisionOsDiagActivity.class);
                 i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                 MainActivity.this.startActivity(i);
-                android.util.Log.d("DnialifyVisionOS", "web openVisionOsDiag");
+                Log.d("DnialifyVisionOS", "web openVisionOsDiag");
             } catch (Exception e) {
-                android.util.Log.d("DnialifyVisionOS", "web openVisionOsDiag err " + e);
+                Log.d("DnialifyVisionOS", "web openVisionOsDiag err " + e);
             }
         }
 
@@ -1005,7 +1034,7 @@ public class MainActivity extends BridgeActivity {
         // Phase 8 Engine B command API (WebView -> native). Each logs [NATIVE_CMD].
         @JavascriptInterface
         public void nativePlay(String videoId, String title, String artist, String artwork) {
-            android.util.Log.d("DnialifyVisionOS",
+            Log.d("DnialifyVisionOS",
                     "[NATIVE_CMD] play videoId=" + videoId);
             NativeAudioEngine.get().play(MainActivity.this, videoId, title, artist, artwork);
         }
@@ -1053,7 +1082,7 @@ public class MainActivity extends BridgeActivity {
             try {
                 org.json.JSONObject meta = new org.json.JSONObject(metaJson);
                 String vid = meta.optString("videoId", "");
-                android.util.Log.d("DnialifyVisionOS", "[NATIVE_CMD] cacheSong videoId=" + vid);
+                Log.d("DnialifyVisionOS", "[NATIVE_CMD] cacheSong videoId=" + vid);
                 SongCache.ensureMeta(MainActivity.this, meta);
                 // kick writer when URL known (resolve here, stream-first for UI via nativePlay)
                 new Thread(() -> {
@@ -1064,7 +1093,7 @@ public class MainActivity extends BridgeActivity {
                         SongCache.fetchArtwork(MainActivity.this, vid,
                                 meta.optString("artworkUrl", ""));
                     } catch (Exception e) {
-                        android.util.Log.d("DnialifyVisionOS",
+                        Log.d("DnialifyVisionOS",
                                 "[SONG] cacheSong writer FAIL " + e);
                     }
                 }).start();
@@ -1116,7 +1145,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public String deleteCachedSong(String videoId) {
             try {
-                android.util.Log.d("DnialifyVisionOS",
+                Log.d("DnialifyVisionOS",
                         "[NATIVE_CMD] deleteCachedSong videoId=" + videoId);
                 return SongCache.delete(MainActivity.this, videoId).toString();
             } catch (Exception e) {
@@ -1127,7 +1156,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void clearCachedSongs() {
             try {
-                android.util.Log.d("DnialifyVisionOS", "[NATIVE_CMD] clearCachedSongs");
+                Log.d("DnialifyVisionOS", "[NATIVE_CMD] clearCachedSongs");
                 for (org.json.JSONObject r : SongCache.listRecords(MainActivity.this)) {
                     SongCache.delete(MainActivity.this, r.optString("videoId", ""));
                 }
@@ -1151,13 +1180,13 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void resumeCacheDownload(String videoId) {
-            android.util.Log.d("DnialifyVisionOS",
+            Log.d("DnialifyVisionOS",
                     "[NATIVE_CMD] resumeCache videoId=" + videoId);
             new Thread(() -> {
                 try {
                     if (SongCache.isComplete(MainActivity.this, videoId)) return;
                     if (SongCache.isDownloading(videoId)) {
-                        android.util.Log.d("DnialifyVisionOS",
+                        Log.d("DnialifyVisionOS",
                                 "[SONG] resumeCache SKIP already running " + videoId);
                         return;
                     }
@@ -1167,7 +1196,7 @@ public class MainActivity extends BridgeActivity {
                     SongCache.downloadFull(MainActivity.this, videoId, res.url,
                             clenOf(res.url));
                 } catch (Exception e) {
-                    android.util.Log.d("DnialifyVisionOS",
+                    Log.d("DnialifyVisionOS",
                             "[SONG] resumeCache FAIL " + e);
                 }
             }).start();
@@ -1181,12 +1210,12 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void enterPip() {
-            android.util.Log.d(TAG_DIAG, "[Native] enterPip() CALLED sdk=" + Build.VERSION.SDK_INT + " " + lifecycleSnapshot());
+            Log.d(TAG_DIAG, "[Native] enterPip() CALLED sdk=" + Build.VERSION.SDK_INT + " " + lifecycleSnapshot());
             runOnUiThread(() -> {
                 try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         if (isInPictureInPictureMode()) {
-                            android.util.Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
+                            Log.d(TAG_DIAG, "[Native] enterPip already in PiP, skip");
                             return;
                         }
                         // Phase 11 - show native PiP (artwork+title+artist+lyric) immediately before PiP entry
@@ -1202,20 +1231,20 @@ public class MainActivity extends BridgeActivity {
                                 if (parent != null) { parent.requestLayout(); parent.invalidate(); }
                             }
                             logPipNative("enterPip:VISIBLE before enter");
-                        } catch (Exception e) { android.util.Log.d(TAG_DIAG, "[PipNative] enterPip show err " + e); }
+                        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] enterPip show err " + e); }
                         Rational ratio = new Rational(9, 16);
                         PictureInPictureParams params = new PictureInPictureParams.Builder()
                                 .setAspectRatio(ratio)
                                 .build();
                         boolean result = enterPictureInPictureMode(params);
-                        android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode result=" + result + " " + lifecycleSnapshot());
+                        Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode result=" + result + " " + lifecycleSnapshot());
                         logPipNative("enterPip:afterEnter result=" + result);
                     } else {
-                        android.util.Log.d(TAG_DIAG, "[Native] enterPip skipped SDK<26");
+                        Log.d(TAG_DIAG, "[Native] enterPip skipped SDK<26");
                     }
                 } catch (Exception e) {
-                    android.util.Log.d(TAG_DIAG, "[Native] enterPip failed exception=" + e);
-                    android.util.Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode exception " + e);
+                    Log.d(TAG_DIAG, "[Native] enterPip failed exception=" + e);
+                    Log.d(TAG_DIAG, "[Native] enterPictureInPictureMode exception " + e);
                 }
             });
         }
@@ -1250,7 +1279,7 @@ public class MainActivity extends BridgeActivity {
                     return full;
                 } finally { /* keep db open via helper */ }
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "isCachedOffline err " + e);
+                Log.d(TAG_DIAG, "isCachedOffline err " + e);
                 return false;
             }
         }
@@ -1281,7 +1310,7 @@ public class MainActivity extends BridgeActivity {
                 }
                 c.close();
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "getOfflineProgress err " + e);
+                Log.d(TAG_DIAG, "getOfflineProgress err " + e);
             }
             return "{\"cached\":0,\"total\":0,\"status\":\"not_cached\"}";
         }
@@ -1305,7 +1334,7 @@ public class MainActivity extends BridgeActivity {
                 db.delete("songs", "id=?", new String[]{songId});
                 // cascade will delete sources/segments/assets/jobs via FK
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "deleteOffline err " + e);
+                Log.d(TAG_DIAG, "deleteOffline err " + e);
             }
         }
 
@@ -1325,7 +1354,7 @@ public class MainActivity extends BridgeActivity {
                 c.close();
                 return arr.toString();
             } catch (Exception e) {
-                android.util.Log.d(TAG_DIAG, "listOfflineSongs err " + e);
+                Log.d(TAG_DIAG, "listOfflineSongs err " + e);
                 return "[]";
             }
         }
