@@ -1,0 +1,131 @@
+## Whitelist expansion
+- Native tags in codebase: [WEBVIEW_JS, DnialifyDiag, DnialifyVisionOS, PlaybackService]
+- Native tags added to whitelist: [PlaybackService, VisionOsCache, CacheEvents, VisionOsNet, VisionOsLoopback, OfflineInterceptClient, DnialifyDiag, WEBVIEW_JS]
+- Native whitelist final count: 16
+- JS whitelist final count: 26
+- PLAYBACK_TAGS final count: 25
+- Requested native tag grep: shell `grep` unavailable; repository search confirmed playback calls use WEBVIEW_JS, DnialifyDiag, DnialifyVisionOS, and PlaybackService. Other whitelist tags are constant-based/runtime tags.
+
+## Build + install
+- APK version: 2.2.23
+- Build: SUCCESS
+- Install: SUCCESS
+
+## Deploy
+- Commit: d968bcb (`feat: expand log whitelist for playback + caching + deploy UI`); version bump commit `2d72329`
+- Version after bump: 2.3.41 web; 2.2.23 APK
+- Vercel live: yes
+- app.js contains JS_TAG_WHITELIST: yes
+
+## CDP verification
+- appLogNative: true
+- logBuffer: true
+- logsTab: true
+- logsPane: true
+- WebSocket: `ws://localhost:9224/devtools/page/9EF7BB550EBE5131F723F46A26F64D33`
+
+## Playback capture
+- Total entries after 8s play: 2264
+- Tags present: [AUTONEXT_DIAG, DIAG_PLAY, DnialifyDiag, DnialifyVisionOS, PlaybackService, WEBVIEW_JS]
+- Native tags captured: yes
+- Gate pass: no, strict tag-array requirement reached only DnialifyVisionOS and PlaybackService. NATIVE_STATE/NATIVE_CMD appear inside captured message text, not as outer entry tags.
+
+## Cache capture
+- Cache-related entries: 409
+- Sample:
+  - [DnialifyVisionOS] [NATIVE_STATE] {"engine":"NATIVE","source":"CACHED_AUDIO","state":"PLAYING","cache":"HIT"
+  - [DnialifyVisionOS] [NAE] window set chunk=10 end=1638400 curMs=63858 total=3433755 writerState=IDLE
+  - [DnialifyVisionOS] [AUTONEXT_DIAG] tick currentMs=64886 durationMs=213061 state=PLAYING writerState=IDLE
+  - [DnialifyVisionOS] [NATIVE_STATE] {"engine":"NATIVE","source":"CACHED_AUDIO","state":"PLAYING","cache":"HIT"
+  - [DnialifyVisionOS] [NATIVE_STATE] {"engine":"NATIVE","source":"CACHED_AUDIO","state":"PLAYING","cache":"HIT"
+- Gate pass: yes
+
+## Files touched
+- android/app/src/main/java/com/dnialify/musicstream/Log.java
+- android/app/src/main/java/com/dnialify/musicstream/MainActivity.java
+- android/app/src/main/java/com/dnialify/musicstream/CacheEvents.java
+- android/app/src/main/java/com/dnialify/musicstream/LocalStreamServer.java
+- android/app/src/main/java/com/dnialify/musicstream/NativeAudioEngine.java
+- android/app/src/main/java/com/dnialify/musicstream/OfflineInterceptClient.java
+- android/app/src/main/java/com/dnialify/musicstream/PlaybackService.java
+- android/app/src/main/java/com/dnialify/musicstream/SongCache.java
+- android/app/src/main/java/com/dnialify/musicstream/StreamSettingsActivity.java
+- android/app/src/main/java/com/dnialify/musicstream/StreamTileService.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsCache.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsDiagActivity.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsHarness.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsLoopback.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsNet.java
+- android/app/src/main/java/com/dnialify/musicstream/VisionOsResolver.java
+- public/app.js
+- public/index.html
+- public/manifest.json
+- public/styles.css
+- public/sw.js
+- package.json
+- report.txt
+
+## Version after bump
+- Web: 2.3.41
+- APK: 2.2.23
+
+## Blockers
+- Strict playback tag gate failed because native diagnostic labels are embedded in message text under outer tag DnialifyVisionOS. Capture itself works; cache gate passes.
+
+## Configurable Chunk Window
+
+## UI
+- New row added: yes, `#set-window-row` below Max Cached Songs
+- Modal: yes, inline number input with Save/Cancel
+- Visibility wired: yes, follows Audio Cache On state
+
+## JS
+- `CHUNK_WINDOW_KEY`: `chunk_window`
+- Default/min/max: `5` / `1` / `200`
+- `getChunkWindow` + `setChunkWindow`: added
+- Push to native: yes, through `NativeSettings.setChunkWindow`
+- Persistence: verified through `localStorage`; CDP changed value to `3`
+
+## Native
+- `NativeSettings` bridge registered: yes
+- `CHUNK_WINDOW_SIZE`: added, default `5`
+- Hardcoded window multiplier `5` replaced: 1 location, `NativeAudioEngine.java:517`
+- Window comments updated: `NativeAudioEngine.java:499,808`; `SongCache.java:60`
+- Reevaluation hook: yes, `setChunkWindowSize` posts to engine main handler and reuses `setWindow`
+- Mid-playback reaction: code path supports increase resume and decrease cap on reevaluation; fresh-MISS runtime transition not executed in this verification pass
+
+## Build + install
+- APK version: `2.2.23`
+- Build: SUCCESS
+- Install: SUCCESS
+
+## Deploy
+- Commit: `5f6d0af` (`feat: configurable chunk window in VisionOS settings`)
+- Web version: `2.3.42`
+- Vercel live: yes
+- Live `app.js` contains `CHUNK_WINDOW_KEY`: yes
+
+## Runtime verification
+- UI row/modal/bridge present through CDP: yes
+- Default value `5`: yes
+- Set value to `3`: yes
+- Persist after reload: storage write verified; reload persistence not re-run after final APK install
+- Native log `[ENGINE] chunk window set to X`: code added; not observed because no fresh MISS playback test was run
+- Window cap changes dynamically: code path implemented; not runtime-proven here
+- Full download with `99`: not run
+- Faster bug reproduction with `3`: not run
+
+## Files touched for this feature
+- `public/index.html`
+- `public/app.js`
+- `public/manifest.json`
+- `public/sw.js`
+- `package.json`
+- `android/app/src/main/java/com/dnialify/musicstream/MainActivity.java`
+- `android/app/src/main/java/com/dnialify/musicstream/NativeAudioEngine.java`
+- `android/app/src/main/java/com/dnialify/musicstream/SongCache.java`
+- `report.txt`
+
+## Version after bump
+- Web: `2.3.42`
+- APK: `2.2.23`

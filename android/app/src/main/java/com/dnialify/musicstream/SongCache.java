@@ -1,7 +1,6 @@
 package com.dnialify.musicstream;
 
 import android.content.Context;
-import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -44,6 +43,10 @@ public final class SongCache {
 
     private static final int CHUNK = 102400;
     static final int TIMEOUT_MS = 20000;
+    /** Chunk recovery guards: 3 same-URL tries x 3 URL generations = 9 max. */
+    private static final int SAME_URL_RETRIES = 3;
+    private static final int MAX_URL_REFRESHES = 2;
+    private static final int MAX_CHUNK_ATTEMPTS = 9;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
     private static final String UA =
             "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
@@ -54,7 +57,7 @@ public final class SongCache {
             java.util.concurrent.ConcurrentHashMap.newKeySet();
     /**
      * Explicit full-download jobs ("Download offline"). Flagged ids are exempt
-     * from the engine window-5 cap and from stop/track-change pauses, so the
+     * from the engine chunk-window cap and from stop/track-change pauses, so the
      * writer runs to COMPLETE whether the song is playing or stopped.
      * Cleared on COMPLETE / FAILED / delete; kept on explicit PAUSE so a
      * later resume continues in full mode.
@@ -330,59 +333,100 @@ public final class SongCache {
                 // Bounded retries (3x, backoff) survive throttling RSTs on big files.
                 long want = end - received + 1;
                 byte[] cbuf = new byte[(int) want];
+                // 2-path recovery per chunk (max 9 attempts: 3 same-URL x 3 URL
+                // generations). Path A: 403 (expired URL) retries same URL 3x,
+                // then re-resolves a fresh URL. Path B: 401 or LOGIN_REQUIRED
+                // body refreshes immediately. Path C: network errors retry same
+                // URL 3x, then refresh. Unknown HTTP statuses fail fast.
+                String curUrl = url;
                 Exception lastErr = null;
+                int lastStatus = -1;
                 boolean ok = false;
-                for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+                int attempt = 0;
+                int sameUrlFails = 0;
+                int refreshes = 0;
+                while (!ok) {
                     if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
                         throw new PausedException(received);
                     }
-                    if (attempt > 0) {
+                    if (attempt >= MAX_CHUNK_ATTEMPTS) break;
+                    if (sameUrlFails > 0) {
                         try {
-                            Thread.sleep(1000L * attempt);
+                            Thread.sleep(1000L * sameUrlFails);
                         } catch (InterruptedException ie) {
                             throw new PausedException(received);
                         }
-                        Log.d(TAG, "[SONG] chunk retry videoId=" + videoId
-                                + " at=" + received + " try=" + (attempt + 1));
                     }
-                    HttpURLConnection h = null;
-                    try {
-                        VisionOsNet.noteRequest(new URL(url).getHost());
-                        h = (HttpURLConnection) new URL(url).openConnection();
-                        h.setRequestMethod("GET");
-                        h.setConnectTimeout(TIMEOUT_MS);
-                        h.setReadTimeout(TIMEOUT_MS);
-                        h.setRequestProperty("Range", "bytes=" + received + "-" + end);
-                        h.setRequestProperty("User-Agent", UA);
-                        int status = h.getResponseCode();
-                        if (status != 206) {
-                            throw new Exception("chunk HTTP " + status + " at " + received);
-                        }
-                        InputStream in = h.getInputStream();
-                        byte[] buf = new byte[65536];
-                        int n;
-                        long got = 0;
-                        while (got < want
-                                && (n = in.read(buf, 0,
-                                        (int) Math.min(buf.length, want - got))) != -1) {
-                            System.arraycopy(buf, 0, cbuf, (int) got, n);
-                            got += n;
-                        }
-                        in.close();
-                        if (got != want) throw new Exception("short chunk at " + received);
+                    attempt++;
+                    ChunkResult cr = fetchChunk(curUrl, received, end, want, cbuf);
+                    if (cr.ok) {
                         ok = true;
-                    } catch (Exception ce) {
-                        lastErr = ce;
-                        if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
-                            throw new PausedException(received);
+                        break;
+                    }
+                    lastErr = cr.err;
+                    lastStatus = cr.status;
+                    if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
+                        throw new PausedException(received);
+                    }
+                    if (cr.loginRequired) {
+                        if (refreshes >= MAX_URL_REFRESHES) break;
+                        Log.d(TAG, "[CACHE] LOGIN_REQUIRED/401 videoId=" + videoId
+                                + " at=" + received + " refreshing URL");
+                        try {
+                            curUrl = refreshStreamUrl(videoId);
+                        } catch (Exception re) {
+                            lastErr = re;
+                            break;
                         }
-                    } finally {
-                        if (h != null) h.disconnect();
+                        refreshes++;
+                        sameUrlFails = 0;
+                        continue;
+                    }
+                    if (cr.status == 403) {
+                        sameUrlFails++;
+                        if (sameUrlFails >= SAME_URL_RETRIES) {
+                            if (refreshes >= MAX_URL_REFRESHES) break;
+                            Log.d(TAG, "[CACHE] 403 x3 videoId=" + videoId
+                                    + " at=" + received + " refreshing URL");
+                            try {
+                                curUrl = refreshStreamUrl(videoId);
+                            } catch (Exception re) {
+                                lastErr = re;
+                                break;
+                            }
+                            refreshes++;
+                            sameUrlFails = 0;
+                        } else {
+                            Log.d(TAG, "[CACHE] 403 attempt " + sameUrlFails
+                                    + " videoId=" + videoId + " at=" + received
+                                    + " retrying same URL");
+                        }
+                        continue;
+                    }
+                    if (cr.httpError) {
+                        break;
+                    }
+                    sameUrlFails++;
+                    Log.d(TAG, "[CACHE] network error videoId=" + videoId
+                            + " at=" + received + " attempt=" + sameUrlFails
+                            + " " + cr.err);
+                    if (sameUrlFails >= SAME_URL_RETRIES) {
+                        if (refreshes >= MAX_URL_REFRESHES) break;
+                        Log.d(TAG, "[CACHE] network x3 videoId=" + videoId
+                                + " at=" + received + " refreshing URL");
+                        try {
+                            curUrl = refreshStreamUrl(videoId);
+                        } catch (Exception re) {
+                            lastErr = re;
+                            break;
+                        }
+                        refreshes++;
+                        sameUrlFails = 0;
                     }
                 }
                 if (!ok) {
-                    throw new Exception("chunk failed x3 at " + received
-                            + ": " + lastErr);
+                    throw new Exception("chunk failed after " + attempt + " attempts at "
+                            + received + " status=" + lastStatus + ": " + lastErr);
                 }
                 out.write(cbuf);
                 received += want;
@@ -453,6 +497,8 @@ public final class SongCache {
             } catch (Exception ignored) {}
             Log.d(TAG, "[SONG] FAILED videoId=" + videoId + " reason=" + reason
                     + " " + e.getMessage());
+            Log.d(TAG, "[CACHE] FAILED videoId=" + videoId + " reason=" + reason
+                    + " chunk=" + (received / CHUNK) + " byte=" + received);
             if (!isDeleted(videoId)) {
                 CacheEvents.emit(c, "cacheError", videoId, r);
             }
@@ -660,5 +706,102 @@ public final class SongCache {
             super("paused");
             received = r;
         }
+    }
+
+    /** Outcome of one chunk-range fetch: success, HTTP failure, or transport failure. */
+    static final class ChunkResult {
+        boolean ok;
+        int status = -1;
+        boolean httpError;
+        boolean loginRequired;
+        Exception err;
+    }
+
+    /**
+     * Fetch one chunk range into cbuf. Never throws: transport problems and
+     * non-206 statuses return a classified ChunkResult for the recovery loop.
+     */
+    static ChunkResult fetchChunk(String curUrl, long received, long end,
+            long want, byte[] cbuf) {
+        ChunkResult cr = new ChunkResult();
+        HttpURLConnection h = null;
+        try {
+            VisionOsNet.noteRequest(new URL(curUrl).getHost());
+            h = (HttpURLConnection) new URL(curUrl).openConnection();
+            h.setRequestMethod("GET");
+            h.setConnectTimeout(TIMEOUT_MS);
+            h.setReadTimeout(TIMEOUT_MS);
+            h.setRequestProperty("Range", "bytes=" + received + "-" + end);
+            h.setRequestProperty("User-Agent", UA);
+            int status = h.getResponseCode();
+            cr.status = status;
+            if (status != 206) {
+                String body = readErrorBody(h);
+                cr.err = new Exception("chunk HTTP " + status + " at " + received);
+                if (status == 401
+                        || (body != null && body.contains("LOGIN_REQUIRED"))) {
+                    cr.loginRequired = true;
+                } else if (status != 403) {
+                    cr.httpError = true;
+                }
+                return cr;
+            }
+            InputStream in = h.getInputStream();
+            byte[] buf = new byte[65536];
+            int n;
+            long got = 0;
+            while (got < want
+                    && (n = in.read(buf, 0,
+                            (int) Math.min(buf.length, want - got))) != -1) {
+                System.arraycopy(buf, 0, cbuf, (int) got, n);
+                got += n;
+            }
+            in.close();
+            if (got != want) {
+                cr.err = new Exception("short chunk at " + received
+                        + " got=" + got + " want=" + want);
+                return cr;
+            }
+            cr.ok = true;
+            return cr;
+        } catch (Exception ce) {
+            cr.err = ce;
+            return cr;
+        } finally {
+            if (h != null) h.disconnect();
+        }
+    }
+
+    /** Best-effort 403 body sniff for LOGIN_REQUIRED (often empty on Android). */
+    static String readErrorBody(HttpURLConnection h) {
+        try {
+            InputStream es = h.getErrorStream();
+            if (es == null) return null;
+            byte[] buf = new byte[2048];
+            int n = es.read(buf);
+            try {
+                es.close();
+            } catch (Exception ignored) {}
+            if (n <= 0) return null;
+            return new String(buf, 0, n, "UTF-8");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Fresh stream URL for an expired/invalid one. resolve() always re-resolves
+     * (visitorData session-cached, auto-refreshed once inside on LOGIN_REQUIRED),
+     * so no resolver change is needed. Original total is kept: re-resolve of the
+     * same videoId returns the same format/bytes; end-of-download size + EBML
+     * validation still guards mismatch (fails as FAILED, never corrupt COMPLETE).
+     */
+    static String refreshStreamUrl(String videoId) throws Exception {
+        VisionOsResolver.Result r = VisionOsResolver.resolve(videoId);
+        if (r == null || r.url == null || r.url.isEmpty()) {
+            throw new Exception("re-resolve returned empty url");
+        }
+        Log.d(TAG, "[CACHE] URL refreshed videoId=" + videoId + " itag=" + r.itag);
+        return r.url;
     }
 }

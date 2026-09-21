@@ -496,7 +496,7 @@ public final class NativeAudioEngine {
         }
     }
     /**
-     * Sliding window-5: chunk containing curMs, prefetch 5 ahead, hard stop.
+     * Sliding chunk window: chunk containing curMs, configurable prefetch ahead, hard stop.
      * Chunk size derived from SongCache (follows the 100KB const, no dup).
      * Enforced from the 4 triggers only: play start, chunk cross (tick),
      * seek-refill, track change. No timer, no polling thread.
@@ -805,7 +805,7 @@ public final class NativeAudioEngine {
                         );
             }
             pushEvent("timeUpdate", null);
-            // sliding window-5 enforcement on the existing 500ms clock
+            // Sliding-window enforcement on existing 500ms clock.
             // (chunk-cross trigger; I/O only on cross, memory math otherwise).
             // Cap: bytes at window end + writer running -> pause (quota).
             // Extend: crossed a chunk + behind window + writer idle -> resume.
