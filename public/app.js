@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.47";
+const APP_VERSION = "2.3.48";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -409,12 +409,21 @@ const fmtTime = (s) => {
   return `${m}:${String(sec).padStart(2, '0')}`;
 };
 
-function toast(msg) {
+function toast(msg, durationMs) {
   const t = $('#toast');
   t.textContent = msg;
   t.classList.remove('hidden');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.add('hidden'), 2200);
+  toast._t = setTimeout(() => t.classList.add('hidden'), durationMs || 2200);
+}
+function fmtMs(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return '--:--';
+  const s = Math.max(0, Math.floor(Number(ms) / 1000));
+  const m = Math.floor(s / 60);
+  return m + ':' + String(s % 60).padStart(2, '0');
+}
+function showToast(msg, durationMs) {
+  toast(msg, durationMs || 3000);
 }
 
 function hueFrom(str) {
@@ -1289,6 +1298,27 @@ function initAudio(){
             navigator.mediaSession.setPositionState({ duration: dur, playbackRate: 1, position: Math.min(cur, dur) });
         } catch {}
         renderPlayButtons();
+      }
+      if (ev.event === 'recoveryStatus') {
+        const pos = fmtMs(ev.positionMs);
+        const dur = fmtMs(ev.durationMs);
+        if (ev.status === 'attempting') {
+          showToast('Stream glitch at ' + pos + ' / ' + dur + ' — recovering…', 2500);
+        } else if (ev.status === 'recovered') {
+          showToast('Recovered at ' + pos + ' / ' + dur + ' — playback resumed', 2500);
+        } else if (ev.status === 'failed') {
+          showToast('Recovery failed at ' + pos + ' / ' + dur + ' — ' + (ev.reason || 'unknown'), 5000);
+        }
+        return;
+      }
+      if (ev.state === 'ERROR') {
+        // Premature-completion failure: never auto-next, never retry blindly.
+        if (ev.reason === 'PREMATURE_COMPLETION') {
+          Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
+          Player.nativeActive = false;
+          try { renderPlayButtons(); } catch {}
+          return;
+        }
       }
       if (ev.state === 'ENDED' && Player.nativeActive) {
         console.log('[AUTONEXT_DIAG] calling nextTrack. trigger=NATIVE_STATE_ENDED'
@@ -7541,27 +7571,23 @@ function pipDiag(msg) {
 }
 function isPipVisible() {
   // Best-effort check across all PiP surfaces. No cached flag.
+  // Quiet on purpose: pipDiag bridge logging removed here (1.5s poll spam).
   try {
     const c1 = !!document.pictureInPictureElement;
-    pipDiag('check1 doc.pipElement = ' + c1);
-    if (c1) { pipDiag('isPipVisible result = true (check1)'); return true; }
+    if (c1) return true;
     const c2 = !!(Player.pipWin && !Player.pipWin.closed);
-    pipDiag('check2 pipWin = ' + (c2 ? 'open' : 'none/closed'));
-    if (c2) { pipDiag('isPipVisible result = true (check2)'); return true; }
+    if (c2) return true;
     const w = document.getElementById('float-widget');
     const c3 = !!(w && !w.classList.contains('hidden')
         && document.body.classList.contains('float-mode'));
-    pipDiag('check3 widget visible = ' + c3);
-    if (c3) { pipDiag('isPipVisible result = true (check3)'); return true; }
+    if (c3) return true;
     // Android native PiP: bridge flag if it exists. Otherwise false, the
     // button always allows re-open and native rejects duplicates.
     if (window.NativePip && NativePip.isActive) {
       const c4 = NativePip.isActive();
-      pipDiag('check4 NativePip.isActive = ' + c4);
       if (c4) return true;
     }
-  } catch (e) { pipDiag('isPipVisible threw ' + e); }
-  pipDiag('isPipVisible result = false');
+  } catch (e) { console.debug('[PIP] isPipVisible threw ' + e); }
   return false;
 }
 function isHomePipOn() {

@@ -66,6 +66,8 @@ public final class NativeAudioEngine {
     private LocalStreamServer streamServer; // 127.0.0.1 proxy (no frozen EOF)
     private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
     private int windowChunk = -1;     // playback chunk the window was built for
+    private int recoveryAttempts = 0; // premature-completion recovery tries for current track
+    private String lastRecoveryStatus = ""; // "", "attempting", "recovered", "failed"
     private int appVolumePercent = 100; // app volume 0..300, multiplies hardware volume
     private LoudnessEnhancer boostEnhancer; // unity-gain boost, attached to mp session
     private float currentMpVolume = 1.0f; // last gain written to MediaPlayer
@@ -125,6 +127,8 @@ public final class NativeAudioEngine {
             artwork = art != null ? art : "";
             failReason = null;
             failMessage = null;
+            recoveryAttempts = 0;
+            lastRecoveryStatus = "";
             setStateLocked(State.RESOLVING);
             windowChunk = -1;
             windowEnd = -1;
@@ -677,8 +681,8 @@ public final class NativeAudioEngine {
             pushAll();
         });
         mp.setOnCompletionListener(p -> {
-            // Proxy closes the stream only at true end (or hold timeout):
-            // completion is always real. No re-prepare, no resume loop.
+            long pos;
+            long dur;
             synchronized (lock) {
                 int callbackPosition = -1;
                 int callbackDuration = -1;
@@ -687,19 +691,52 @@ public final class NativeAudioEngine {
                 nlog("[AUTONEXT_DIAG] MediaPlayer.onCompletion fired. currentPosition="
                         + callbackPosition + " duration=" + callbackDuration
                         + " videoId=" + videoId + " writerState=" + writerState(videoId));
-                try {
-                    currentMs = p.getDuration();
-                } catch (Exception ignored) {}
-                if (state != State.ERROR) {
-                    nlog("[AUTONEXT_DIAG] ENDED fired. reason=MediaPlayer.onCompletion"
-                            + " currentMs=" + currentMs + " durationMs=" + durationMs
-                            + " state=" + state + " videoId=" + videoId
-                            + " writerState=" + writerState(videoId) + " bufferPos=n/a");
-                    setStateLocked(State.ENDED);
-                    nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
-                }
+                pos = callbackPosition;
+                dur = durationMs > 0 ? durationMs : callbackDuration;
             }
-            pushAll();
+            long epsilon = 3000;
+            if (dur > 0 && pos >= dur - epsilon) {
+                // Genuine end
+                Log.d(TAG, "[ENGINE] Genuine onCompletion: pos=" + pos + " dur=" + dur);
+                synchronized (lock) {
+                    try {
+                        currentMs = p.getDuration();
+                    } catch (Exception ignored) {}
+                    if (state != State.ERROR) {
+                        nlog("[AUTONEXT_DIAG] ENDED fired. reason=MediaPlayer.onCompletion"
+                                + " currentMs=" + currentMs + " durationMs=" + durationMs
+                                + " state=" + state + " videoId=" + videoId
+                                + " writerState=" + writerState(videoId) + " bufferPos=n/a");
+                        setStateLocked(State.ENDED);
+                        nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                    }
+                }
+                pushAll();
+                return;
+            }
+            // Premature completion: attempt recovery on a worker thread
+            // (blocking prepare must never run on the callback thread).
+            final long lastMs = pos;
+            final long trackDur = dur;
+            final String recVid;
+            final int recGen;
+            final String recDs;
+            synchronized (lock) {
+                recVid = videoId;
+                recGen = playGen;
+                if (streamServer != null && lastTotal > 0) {
+                    recDs = "http://127.0.0.1:" + streamServer.port() + "/local-stream/" + videoId;
+                } else {
+                    recDs = playFile;
+                }
+                recoveryAttempts = 0;
+                lastRecoveryStatus = "attempting";
+            }
+            double pct = trackDur > 0 ? (100.0 * lastMs / trackDur) : 0;
+            Log.e(TAG, "[ENGINE] Premature onCompletion: pos=" + lastMs + " dur=" + trackDur
+                    + " (" + String.format("%.1f", pct) + "%) videoId=" + recVid);
+            pushRecoveryEvent("attempting", recVid, lastMs, trackDur, null);
+            new Thread(() -> attemptPrematureRecovery(recVid, recGen, recDs, lastMs, trackDur)).start();
         });
         mp.setOnErrorListener((p, what, extra) -> {
             synchronized (lock) {
@@ -776,6 +813,110 @@ public final class NativeAudioEngine {
         failMessage = msg;
         nlog("[FALLBACK] START reason=" + reason + " msg=" + msg
                 + " videoId=" + videoId + " action=iFrame");
+    }
+
+    /** Terminal error for unrecovered premature completion: ERROR so JS never auto-nexts. */
+    private void firePrematureError(long pos, long dur, String reason) {
+        synchronized (lock) {
+            lastRecoveryStatus = "failed";
+            failLocked("PREMATURE_COMPLETION",
+                    "pos=" + pos + " dur=" + dur + " reason=" + reason);
+        }
+        pushRecoveryEvent("failed", videoId, pos, dur, reason);
+        pushAll();
+    }
+
+    /** Retry a prematurely-completed track from its last position (worker thread). */
+    private void attemptPrematureRecovery(String recVid, int recGen, String recDs,
+            long lastMs, long trackDur) {
+        String failReason = null;
+        boolean recovered = false;
+        for (int attempt = 1; attempt <= 3 && !recovered; attempt++) {
+            synchronized (lock) {
+                if (recGen != playGen || !recVid.equals(videoId)) return;
+                recoveryAttempts = attempt;
+            }
+            Log.d(TAG, "[ENGINE] Recovery attempt " + attempt + "/3 from pos=" + lastMs);
+            synchronized (lock) {
+                if (recGen != playGen || !recVid.equals(videoId) || mp == null) return;
+                try {
+                    mp.reset();
+                    if (recDs != null && recDs.startsWith("http") && appCtx != null) {
+                        mp.setDataSource(appCtx, Uri.parse(recDs));
+                    } else if (recDs != null && !recDs.isEmpty()) {
+                        mp.setDataSource(recDs);
+                    } else {
+                        failReason = "no data source available for recovery";
+                        continue;
+                    }
+                    mp.prepare();
+                    mp.seekTo((int) Math.max(0, lastMs));
+                    mp.start();
+                } catch (Exception e) {
+                    failReason = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    Log.e(TAG, "[ENGINE] Recovery attempt " + attempt + " failed: " + failReason);
+                    continue;
+                }
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                long newPos = -1;
+                try {
+                    newPos = mp.getCurrentPosition();
+                } catch (Exception ignored) {}
+                if (newPos > lastMs - 500) {
+                    recovered = true;
+                    currentMs = (int) newPos;
+                    setStateLocked(State.PLAYING);
+                    lastRecoveryStatus = "recovered";
+                    Log.d(TAG, "[ENGINE] Recovery SUCCESS at attempt " + attempt
+                            + " newPos=" + newPos);
+                } else {
+                    failReason = "position_not_advancing after attempt " + attempt;
+                }
+            }
+        }
+        if (recovered) {
+            pushRecoveryEvent("recovered", recVid, lastMs, trackDur, null);
+            pushAll();
+        } else {
+            Log.e(TAG, "[ENGINE] Recovery FAILED after 3 attempts. reason=" + failReason);
+            firePrematureError(lastMs, trackDur, failReason);
+        }
+    }
+
+    /** Recovery lifecycle event for the WebView toast log. */
+    private void pushRecoveryEvent(String status, String recVid, long pos, long dur,
+            String reason) {
+        try {
+            JSONObject s;
+            synchronized (lock) {
+                s = snapshotLocked("recoveryStatus");
+            }
+            s.put("status", status);
+            s.put("positionMs", pos);
+            s.put("durationMs", dur);
+            if (recVid != null) s.put("videoId", recVid);
+            if (reason != null) s.put("reason", reason);
+            final String js = "try{if(window.__nativeEvent)window.__nativeEvent("
+                    + JSONObject.quote(s.toString()) + ");}catch(e){}";
+            try {
+                MainActivity a = MainActivity.current;
+                if (a == null) return;
+                a.runOnUiThread(() -> {
+                    try {
+                        android.webkit.WebView wv = a.getBridge() != null
+                                ? a.getBridge().getWebView() : null;
+                        if (wv != null) wv.evaluateJavascript(js, null);
+                    } catch (Exception ignored) {}
+                });
+            } catch (Exception ignored) {}
+            nlog("[NATIVE_STATE] " + s);
+        } catch (Exception e) {
+            Log.e(TAG, "[ENGINE] pushRecoveryEvent error: " + e.getMessage());
+        }
     }
 
     private void setStateLocked(State s) {
@@ -858,6 +999,8 @@ public final class NativeAudioEngine {
             if (event != null) o.put("event", event);
             if (failReason != null) o.put("reason", failReason);
             if (failMessage != null) o.put("message", failMessage);
+            o.put("recoveryAttempts", recoveryAttempts);
+            o.put("lastRecoveryStatus", lastRecoveryStatus != null ? lastRecoveryStatus : "");
             return o;
         } catch (Exception e) {
             return new JSONObject();
