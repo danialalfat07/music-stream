@@ -2246,6 +2246,7 @@ function onTrackChanged(s) {
   // Single choke point: every track change refreshes track-bound UI here.
   // (Player.current is a queue[index] getter, so all paths funnel via startCurrent.)
   if (!s || !s.videoId) return;
+  try { pushPinnedToNative(); } catch {}
   try { offStampPlayed(s.videoId); } catch {}
   try { loadLyrics(s); } catch {}
   try { if (s.thumbnail) loadPipArt(s.thumbnail); } catch {}
@@ -4836,12 +4837,23 @@ function offStampPlayed(vid) {
   try { const mm = offPlayedMap(); mm[vid] = Date.now(); store.set('offline_last_played', mm); } catch {}
 }
 function offIsPinned(vid) { try { return !!offPinnedMap()[vid]; } catch { return false; } }
+function pushPinnedToNative() {
+  try {
+    if (!window.NativePlayback || !NativePlayback.syncPinnedIds) return;
+    const pins = store.get('offline_pinned', {}) || {};
+    const csv = Object.keys(pins).filter(k => pins[k]).join(',');
+    NativePlayback.syncPinnedIds(csv);
+    console.log('[PIN] pushed', csv.split(',').filter(Boolean).length, 'pins to native');
+  } catch (e) {}
+}
+try { setTimeout(pushPinnedToNative, 2000); } catch {}
 function toggleOffPin(vid) {
   if (!vid) return false;
   try {
     const mm = offPinnedMap();
     if (mm[vid]) delete mm[vid]; else mm[vid] = Date.now();
     offSetPinnedMap(mm);
+    try { pushPinnedToNative(); } catch {}
     return !!mm[vid];
   } catch { return false; }
 }
@@ -6240,6 +6252,30 @@ function openSettingsModal(tab = 'settings') {
       spBtn.textContent = Player.speed + '×';
     };
   }
+  const batBtn = $('#set-battery');
+  if (batBtn) {
+    const paintBat = () => {
+      try {
+        const NB = window.NativeBattery;
+        if (NB && NB.isBatteryOptimizationIgnored) {
+          const ok = NB.isBatteryOptimizationIgnored();
+          const lbl = batBtn.querySelector('span') || batBtn;
+          lbl.textContent = ok ? 'Whitelisted' : 'Tap to whitelist';
+          batBtn.classList.toggle('primary', !!ok);
+          return;
+        }
+      } catch {}
+      const lbl = batBtn.querySelector('span') || batBtn;
+      lbl.textContent = 'Tap to whitelist';
+    };
+    paintBat();
+    batBtn.onclick = () => {
+      try {
+        if (window.NativeBattery) window.NativeBattery.openBatteryOptimizationSettings();
+      } catch {}
+      setTimeout(paintBat, 1000);
+    };
+  }
   initVolumeSlider();
   updateVolumeControls(Player.volumeLevel);
   const extraVol = document.getElementById('set-volume-extra');
@@ -6329,6 +6365,7 @@ function openSettingsModal(tab = 'settings') {
   } catch {}
   applySettingsEnvironment();
   try { populateAbout(); } catch {}
+  try { setTimeout(pushPinnedToNative, 2000); } catch {}
   const updBtn = $('#set-update');
   const updLabel = $('#set-update-label');
   if (updBtn) {
