@@ -3,7 +3,6 @@ package com.dnialify.musicstream;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.PowerManager;
-import android.util.Log;
 import android.webkit.WebView;
 import java.util.LinkedHashMap;
 import java.util.Map;

@@ -2,7 +2,6 @@ package com.dnialify.musicstream;
 
 import android.content.Context;
 import android.net.Uri;
-import android.util.Log;
 import androidx.core.content.FileProvider;
 import java.io.File;
 import java.io.FileOutputStream;

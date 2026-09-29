@@ -2,6 +2,8 @@ package com.dnialify.musicstream;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Phase 8 - native-only stream configuration (never touches web UI or production web).
@@ -17,6 +19,7 @@ public final class StreamSettings {
     private static final String KEY_MODE = "stream_mode";
     private static final String KEY_AUDIO_CACHE = "audio_cache";
     private static final String KEY_MAX_CACHED = "max_cached_songs";
+    private static final String KEY_PINNED_IDS = "pinned_video_ids";
 
     public static final int MODE_IFRAME = 0;
     public static final int MODE_VISIONOS = 1;
@@ -67,7 +70,26 @@ public final class StreamSettings {
 
     public static void setMaxCachedSongs(Context c, int v) {
         try {
-            prefs(c).edit().putInt(KEY_MAX_CACHED, Math.max(1, v)).apply();
+            int clamped = Math.max(1, Math.min(1000, v));
+            prefs(c).edit().putInt(KEY_MAX_CACHED, clamped).apply();
+        } catch (Exception ignored) {}
+    }
+
+    public static Set<String> getPinnedIds(Context ctx) {
+        try {
+            Set<String> s = ctx.getApplicationContext()
+                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getStringSet(KEY_PINNED_IDS, new HashSet<>());
+            return s != null ? new HashSet<>(s) : new HashSet<>();
+        } catch (Exception e) {
+            return new HashSet<>();
+        }
+    }
+
+    public static void setPinnedIds(Context ctx, Set<String> ids) {
+        try {
+            ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putStringSet(KEY_PINNED_IDS, new HashSet<>(ids)).apply();
         } catch (Exception ignored) {}
     }
 }

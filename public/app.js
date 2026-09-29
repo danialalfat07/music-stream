@@ -6170,6 +6170,114 @@ function syncChunkWindowUI() {
   });
   setTimeout(syncChunkWindowUI, 1000);
 })();
+const MAX_SONGS_HARD_MAX = 1000;
+const MAX_SONGS_FALLBACK = 200;
+function getCurrentMaxCached() {
+  try {
+    const NB = window.NativePlayback;
+    if (NB && NB.getMaxCachedSongs) {
+      const v = NB.getMaxCachedSongs() | 0;
+      if (v > 0) return v;
+    }
+  } catch {}
+  try {
+    const v = parseInt(localStorage.getItem('max_cached_songs'), 10);
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch {}
+  return MAX_SONGS_FALLBACK;
+}
+function getCurrentCachedCount() {
+  try {
+    const NB = window.NativePlayback;
+    if (NB && NB.getCachedCount) return NB.getCachedCount() | 0;
+  } catch {}
+  return 0;
+}
+function openMaxSongsModal() {
+  const currentMax = getCurrentMaxCached();
+  const currentCount = getCurrentCachedCount();
+  const minEl = document.getElementById('max-songs-min');
+  const input = document.getElementById('max-songs-input');
+  if (minEl) minEl.textContent = String(currentCount);
+  if (input) {
+    input.min = String(0);
+    input.max = String(MAX_SONGS_HARD_MAX);
+    input.value = String(currentMax);
+  }
+  const modal = document.getElementById('max-songs-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+    if (input) input.focus();
+  }
+}
+function closeMaxSongsModal() {
+  const modal = document.getElementById('max-songs-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+}
+function confirmReduceLimit(newMax, currentCount, onConfirm) {
+  const willDelete = Math.max(0, currentCount - newMax);
+  const txt = document.getElementById('max-songs-confirm-text');
+  if (txt) {
+    txt.textContent = `This will delete up to ${willDelete} oldest unpinned songs. Pinned songs are never deleted. Continue?`;
+  }
+  const modal = document.getElementById('max-songs-confirm');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+  const ok = document.getElementById('max-songs-confirm-ok');
+  const cancel = document.getElementById('max-songs-confirm-cancel');
+  const cleanup = () => {
+    if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); }
+    if (ok) ok.onclick = null;
+    if (cancel) cancel.onclick = null;
+  };
+  if (ok) ok.onclick = () => { cleanup(); onConfirm(); };
+  if (cancel) cancel.onclick = () => { cleanup(); };
+}
+function applyMaxSongs(newMax) {
+  const clamped = Math.max(0, Math.min(MAX_SONGS_HARD_MAX, newMax));
+  try {
+    const NB = window.NativePlayback;
+    if (NB && NB.setMaxCachedSongs) {
+      NB.setMaxCachedSongs(clamped);
+    }
+  } catch {}
+  try { localStorage.setItem('max_cached_songs', String(clamped)); } catch {}
+  const el = document.getElementById('set-max-value');
+  if (el) el.textContent = String(clamped);
+  try {
+    const NB = window.NativePlayback;
+    if (NB && NB.enforceLimitNow) NB.enforceLimitNow();
+  } catch {}
+}
+document.addEventListener('click', (ev) => {
+  const t = ev.target && ev.target.closest ? ev.target.closest('#set-max,#max-songs-cancel,#max-songs-ok') : null;
+  const id = (t && t.id) || (ev.target && ev.target.id);
+  if (id === 'set-max') { openMaxSongsModal(); }
+  else if (id === 'max-songs-cancel') { closeMaxSongsModal(); }
+  else if (id === 'max-songs-ok') {
+    const input = document.getElementById('max-songs-input');
+    if (!input) return;
+    const val = parseInt(input.value, 10);
+    if (!Number.isFinite(val) || val < 0) {
+      input.focus();
+      return;
+    }
+    const clamped = Math.min(MAX_SONGS_HARD_MAX, val);
+    const currentCount = getCurrentCachedCount();
+    closeMaxSongsModal();
+    if (clamped < currentCount) {
+      confirmReduceLimit(clamped, currentCount, () => applyMaxSongs(clamped));
+    } else {
+      applyMaxSongs(clamped);
+    }
+  }
+});
 (function() {
   function populateAbout() {
     const webEl = document.getElementById('about-web-ver');
@@ -6323,7 +6431,11 @@ function openSettingsModal(tab = 'settings') {
       if (lbl) lbl.textContent = cache ? 'On' : 'Off';
       cBtn.classList.toggle('primary', !!cache);
     }
-    if (mBtn) mBtn.querySelector('span').textContent = String(max);
+    if (mBtn) { const ml = mBtn.querySelector('span'); if (ml) ml.textContent = String(max); }
+    try {
+      const mv = document.getElementById('set-max-value');
+      if (mv) mv.textContent = String(max);
+    } catch {}
     // Lock state (not display) conveys relevance: the Audio Cache row is
     // always visible so a locked section never looks empty. Max + Quality
     // keep their own conditional rule (cache On only), independent of lock.
@@ -6351,14 +6463,7 @@ function openSettingsModal(tab = 'settings') {
       try { if (NB) NB.setAudioCache(!NB.isAudioCacheOn()); } catch {}
       syncNative();
     };
-    if (mBtn) mBtn.onclick = () => {
-      try {
-        if (!NB) return;
-        const cur = NB.getMaxCachedSongs() | 0 || 100;
-        NB.setMaxCachedSongs(cur >= 200 ? 5 : cur + 5);
-      } catch {}
-      syncNative();
-    };
+    if (mBtn) mBtn.onclick = () => { openMaxSongsModal(); };
     if (wBtn) wBtn.onclick = () => document.getElementById('window-modal')?.querySelector('#window-input')?.focus();
     syncChunkWindowUI();
     syncNative();
@@ -6366,6 +6471,12 @@ function openSettingsModal(tab = 'settings') {
   applySettingsEnvironment();
   try { populateAbout(); } catch {}
   try { setTimeout(pushPinnedToNative, 2000); } catch {}
+  try {
+    setTimeout(() => {
+      const el = document.getElementById('set-max-value');
+      if (el) el.textContent = String(getCurrentMaxCached());
+    }, 500);
+  } catch {}
   const updBtn = $('#set-update');
   const updLabel = $('#set-update-label');
   if (updBtn) {

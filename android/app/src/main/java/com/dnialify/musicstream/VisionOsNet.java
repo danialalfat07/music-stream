@@ -1,6 +1,5 @@
 package com.dnialify.musicstream;
 
-import android.util.Log;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 

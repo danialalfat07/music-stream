@@ -1,7 +1,6 @@
 package com.dnialify.musicstream;
 
 import android.content.Context;
-import android.util.Log;
 import fi.iki.elonen.NanoHTTPD;
 import java.io.File;
 import java.io.IOException;
@@ -21,7 +20,9 @@ import org.json.JSONObject;
 public class LocalStreamServer extends NanoHTTPD {
     static final String TAG = "DnialifyVisionOS";
     private static final int HOLD_POLL_MS = 100;
-    private static final int HOLD_TIMEOUT_MS = 30000;
+    private static final int HOLD_TIMEOUT_MS = 90000;
+    private static final int HOLD_EXTENSION_MS = 30000;
+    private static final int MAX_HOLD_EXTENSIONS = 3;
     private static final int SERVE_BUF = 65536;
 
     private final Context appCtx;
@@ -72,6 +73,8 @@ public class LocalStreamServer extends NanoHTTPD {
             }
         } catch (Exception ignored) {}
         Track t = vid != null ? tracks.get(vid) : null;
+        Log.d(TAG, "[LSS] request range=" + String.valueOf(session.getHeaders().get("range"))
+                + " videoId=" + vid + " total=" + (t == null ? -1 : t.total));
         if (t == null) {
             return newFixedLengthResponse(Response.Status.NOT_FOUND,
                     "text/plain", "gone");
@@ -108,6 +111,8 @@ public class LocalStreamServer extends NanoHTTPD {
         boolean partial = session.getHeaders().get("range") != null
                 || session.getHeaders().get("Range") != null;
         HoldStream in = new HoldStream(t, start, end);
+        Log.d(TAG, "[LSS] response start=" + start + " end=" + end
+                + " expectedBytes=" + (end - start + 1) + " total=" + total);
         Response r;
         if (partial) {
             r = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT,
@@ -121,26 +126,21 @@ public class LocalStreamServer extends NanoHTTPD {
         return r;
     }
 
-    /** Blocking stream: reads file, holds (max 30s) while writer fills. */
+    /** Blocking stream: reads file, holds (max 90s + extensions) while writer fills. */
     final class HoldStream extends InputStream {
         private final Track track;
         private final long end;
         private long pos;
         private volatile boolean closed;
-        private final long bornAt = System.currentTimeMillis();
+        private long bornAt = System.currentTimeMillis();
+        private int holdExtensions = 0;
+        private long lastLoggedHave = -1;
+        private boolean loggedHold;
 
         HoldStream(Track track, long start, long end) {
             this.track = track;
             this.pos = start;
             this.end = end;
-        }
-
-        private long fileLen() {
-            try {
-                File f = new File(track.path);
-                if (f.isFile()) return f.length();
-            } catch (Exception ignored) {}
-            return 0;
         }
 
         private boolean complete() {
@@ -151,6 +151,14 @@ public class LocalStreamServer extends NanoHTTPD {
             } catch (Exception ignored) {
                 return false;
             }
+        }
+
+        private File sourceFile(boolean isComplete) {
+            if (isComplete) {
+                File fin = SongCache.audioFile(appCtx, track.videoId);
+                if (fin.isFile() && fin.length() == track.total) return fin;
+            }
+            return new File(track.path);
         }
 
         @Override
@@ -173,13 +181,21 @@ public class LocalStreamServer extends NanoHTTPD {
                 if (closed) return -1;
                 Track live = tracks.get(track.videoId);
                 if (live == null || live != track) return -1;
-                long have = fileLen();
+                boolean isComplete = complete();
+                File source = sourceFile(isComplete);
+                long have = source.isFile() ? source.length() : 0;
+                if (have != lastLoggedHave) {
+                    lastLoggedHave = have;
+                    Log.d(TAG, "[LSS] file size now=" + have + " expectedTotal="
+                            + track.total + " writerState=" + (isComplete ? "COMPLETE" : "RUNNING_OR_PAUSED")
+                            + " path=" + source.getName());
+                }
                 if (pos < have) {
                     long want = Math.min((long) len, Math.min(end, have - 1) - pos + 1);
                     if (want <= 0) return -1;
                     RandomAccessFile raf = null;
                     try {
-                        raf = new RandomAccessFile(track.path, "r");
+                        raf = new RandomAccessFile(source, "r");
                         raf.seek(pos);
                         int n = raf.read(buf, off, (int) Math.min(want, SERVE_BUF));
                         if (n < 0) return -1;
@@ -195,9 +211,51 @@ public class LocalStreamServer extends NanoHTTPD {
                         } catch (Exception ignored) {}
                     }
                 }
-                // at current EOF: true end only when download COMPLETE
-                if (complete() || pos >= track.total) return -1;
-                if (System.currentTimeMillis() - bornAt > HOLD_TIMEOUT_MS) return -1;
+                // At complete state, re-resolve final file before declaring EOF.
+                if (isComplete) {
+                    File fin = SongCache.audioFile(appCtx, track.videoId);
+                    if (fin.isFile() && fin.length() == track.total && pos < fin.length()) {
+                        continue;
+                    }
+                    if (pos >= track.total) return -1;
+                    Log.d(TAG, "[LSS] writer COMPLETE or true EOF pos=" + pos
+                            + " total=" + track.total + " finalFile=" + fin.getName() + " closing");
+                    return -1;
+                }
+                if (pos >= track.total) return -1;
+                if (!loggedHold) {
+                    loggedHold = true;
+                    Log.d(TAG, "[LSS] reached current EOF, waiting for writer pos=" + pos
+                            + " have=" + have + " end=" + end);
+                }
+                if (System.currentTimeMillis() - bornAt > HOLD_TIMEOUT_MS) {
+                    boolean failed = false;
+                    try {
+                        JSONObject rec = SongCache.getRecord(appCtx, track.videoId);
+                        failed = rec != null
+                                && SongCache.ST_FAILED.equals(rec.optString("cacheStatus", ""));
+                    } catch (Exception ignored) {}
+                    if (isComplete || failed) {
+                        Log.d(TAG, "[LSS] hold timeout exceeded " + (HOLD_TIMEOUT_MS / 1000)
+                                + "s pos=" + pos + " have=" + have + " end=" + end
+                                + " writerState=" + (isComplete ? "COMPLETE" : "FAILED"));
+                        return -1;
+                    }
+                    if (have < track.total && holdExtensions < MAX_HOLD_EXTENSIONS) {
+                        holdExtensions++;
+                        bornAt += HOLD_EXTENSION_MS;
+                        Log.w(TAG, "[LSS] hold timeout, forcing window advance for videoId="
+                                + track.videoId + " ext=" + holdExtensions + "/" + MAX_HOLD_EXTENSIONS);
+                        try {
+                            NativeAudioEngine.requestWindowAdvance(track.videoId);
+                        } catch (Exception ignored) {}
+                    } else {
+                        Log.d(TAG, "[LSS] hold timeout exceeded " + (HOLD_TIMEOUT_MS / 1000)
+                                + "s pos=" + pos + " have=" + have + " end=" + end
+                                + " ext=" + holdExtensions);
+                        return -1;
+                    }
+                }
                 try {
                     Thread.sleep(HOLD_POLL_MS);
                 } catch (InterruptedException e) {

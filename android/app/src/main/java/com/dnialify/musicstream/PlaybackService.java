@@ -104,7 +104,7 @@ public class PlaybackService extends Service {
     // (web still owns queue/metadata decisions via events).
     public static void nativeProgress(Context context, String title, String artist,
             String artwork, boolean playing, long positionMs, long durationMs) {
-        android.util.Log.d("PlaybackService", "nativeProgress playing=" + playing
+        Log.d("PlaybackService", "nativeProgress playing=" + playing
                 + " title=" + title + " hasInstance=" + (instance != null));
         if (instance != null) {
             // Native resume after a prior stop/swipe: a real PLAYING report must
@@ -214,7 +214,7 @@ public class PlaybackService extends Service {
             @Override public void onSkipToPrevious() { sendToWebView("if(window.prevTrack) prevTrack();"); }
             @Override public void onSkipToNext() { sendToWebView("if(window.nextTrack) nextTrack(false);"); }
             @Override public void onSeekTo(long position) {
-                android.util.Log.d("DnialifyDiag", "[Service] onSeekTo pos=" + position + " durMs=" + durationMs + " playing=" + playing + " lastPos=" + positionMs);
+                Log.d("DnialifyDiag", "[Service] onSeekTo pos=" + position + " durMs=" + durationMs + " playing=" + playing + " lastPos=" + positionMs);
                 long pos = Math.max(0, Math.min(position, durationMs > 0 ? durationMs : position));
                 positionMs = pos;
                 lastSeekMs = System.currentTimeMillis();
@@ -222,7 +222,7 @@ public class PlaybackService extends Service {
                 publishNotification();
                 double sec = pos / 1000d;
                 String js = "try{if(window.nativeSeek){window.nativeSeek(" + sec + ");}else{var s=" + sec + ";if(window.Player){if(window.Player.audio)try{window.Player.audio.currentTime=s;}catch(e){} if(window.Player.yt&&window.Player.yt.seekTo)try{window.Player.yt.seekTo(s,true);}catch(e){}}} }catch(e){}";
-                android.util.Log.d("DnialifyDiag", "[Service] onSeekTo dispatch sec=" + sec);
+                Log.d("DnialifyDiag", "[Service] onSeekTo dispatch sec=" + sec);
                 sendToWebView(js);
             }
         });
@@ -237,10 +237,10 @@ public class PlaybackService extends Service {
     }
 
     private void sendToWebView(String script) {
-        android.util.Log.d("DnialifyDiag", "[Service] sendToWebView script=" + script.substring(0, Math.min(400, script.length())));
+        Log.d("DnialifyDiag", "[Service] sendToWebView script=" + script.substring(0, Math.min(400, script.length())));
         MainActivity a = MainActivity.current;
         if (a == null) {
-            android.util.Log.w("DnialifyDiag", "[Service] sendToWebView no activity");
+            Log.w("DnialifyDiag", "[Service] sendToWebView no activity");
             return;
         }
         a.runOnUiThread(() -> {
@@ -250,14 +250,14 @@ public class PlaybackService extends Service {
                 try {
                     android.webkit.WebView wv = a.getBridge() != null ? a.getBridge().getWebView() : null;
                     if (wv != null) {
-                        wv.evaluateJavascript(script, v -> android.util.Log.d("DnialifyDiag", "[Service] evaluateJavascript result=" + v));
+                        wv.evaluateJavascript(script, v -> Log.d("DnialifyDiag", "[Service] evaluateJavascript result=" + v));
                         done = true;
                     }
-                } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] evaluateJavascript fail " + e); }
+                } catch (Exception e) { Log.w("DnialifyDiag", "[Service] evaluateJavascript fail " + e); }
                 if (!done) {
-                    try { a.getBridge().eval(script, null); android.util.Log.d("DnialifyDiag", "[Service] Bridge.eval fallback"); } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] Bridge.eval fail " + e); }
+                    try { a.getBridge().eval(script, null); Log.d("DnialifyDiag", "[Service] Bridge.eval fallback"); } catch (Exception e) { Log.w("DnialifyDiag", "[Service] Bridge.eval fail " + e); }
                 }
-            } catch (Exception e) { android.util.Log.w("DnialifyDiag", "[Service] sendToWebView outer " + e); }
+            } catch (Exception e) { Log.w("DnialifyDiag", "[Service] sendToWebView outer " + e); }
         });
     }
 
@@ -312,11 +312,11 @@ public class PlaybackService extends Service {
                 durationMs = newDur > 0 ? newDur : durationMs;
                 updateMediaSession();
                 publishNotification();
-                android.util.Log.d("DnialifyDiag", "[Service] debounce stale push newPos=" + newPos + " optimistic=" + positionMs + " lastSeekMs=" + lastSeekMs);
+                Log.d("DnialifyDiag", "[Service] debounce stale push newPos=" + newPos + " optimistic=" + positionMs + " lastSeekMs=" + lastSeekMs);
                 return;
             } else {
                 // seek settled, clear debounce
-                android.util.Log.d("DnialifyDiag", "[Service] seek settled newPos=" + newPos + " optimistic=" + positionMs);
+                Log.d("DnialifyDiag", "[Service] seek settled newPos=" + newPos + " optimistic=" + positionMs);
                 lastSeekMs = 0;
             }
         }
@@ -403,7 +403,7 @@ public class PlaybackService extends Service {
     }
 
     private void publishNotification() {
-        android.util.Log.d("PlaybackService", "publishNotification playing=" + playing
+        Log.d("PlaybackService", "publishNotification playing=" + playing
                 + " isStopped=" + isStopped + " dismissedPaused=" + dismissedPaused);
         if (isStopped) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
@@ -425,25 +425,25 @@ public class PlaybackService extends Service {
                 if (sbn.getId() == NOTIFICATION_ID) { present = true; break; }
             }
         } catch (Exception e) {
-            android.util.Log.w("PlaybackService", "heal active-check failed: " + e);
+            Log.w("PlaybackService", "heal active-check failed: " + e);
             return;
         }
         if (present) return;
-        android.util.Log.d("PlaybackService", "heal missing while PLAYING, re-posting");
+        Log.d("PlaybackService", "heal missing while PLAYING, re-posting");
         try {
             startForeground(NOTIFICATION_ID, buildNotification());
-            android.util.Log.d("PlaybackService", "heal re-posted via startForeground");
+            Log.d("PlaybackService", "heal re-posted via startForeground");
         } catch (Exception e) {
-            android.util.Log.w("PlaybackService",
+            Log.w("PlaybackService",
                     "heal startForeground failed, retry via startForegroundService: " + e);
             try {
                 android.content.Intent i = new android.content.Intent(
                         this, PlaybackService.class).setAction(ACTION_ARM);
                 androidx.core.content.ContextCompat.startForegroundService(this, i);
                 startForeground(NOTIFICATION_ID, buildNotification());
-                android.util.Log.d("PlaybackService", "heal re-posted after restart");
+                Log.d("PlaybackService", "heal re-posted after restart");
             } catch (Exception e2) {
-                android.util.Log.e("PlaybackService", "heal FAILED: " + e2);
+                Log.e("PlaybackService", "heal FAILED: " + e2);
             }
         }
     }
@@ -471,7 +471,7 @@ public class PlaybackService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        android.util.Log.d("PlaybackService", "onStartCommand action="
+        Log.d("PlaybackService", "onStartCommand action="
                 + (intent != null ? intent.getAction() : "null") + " startId=" + startId);
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
@@ -480,7 +480,7 @@ public class PlaybackService extends Service {
         if (!"stop".equals(action) && !"dismiss".equals(action)) {
             try { startForeground(NOTIFICATION_ID, buildNotification()); }
             catch (Exception e) {
-                android.util.Log.w("PlaybackService", "entry startForeground failed: " + e);
+                Log.w("PlaybackService", "entry startForeground failed: " + e);
             }
         }
         if ("webViewState".equals(action)) handleState(intent);
@@ -548,9 +548,19 @@ public class PlaybackService extends Service {
         return START_STICKY;
     }
 
-    @Override public void onTaskRemoved(Intent rootIntent) { super.onTaskRemoved(rootIntent); }
+    @Override public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        Log.d("PlaybackService", "[TASK] onTaskRemoved — keeping service alive");
+        if (!isPlaying()) {
+            Log.d("PlaybackService", "[TASK] not playing, stopping service");
+            stopSelf();
+        }
+    }
 
     @Override public void onDestroy() {
+        try {
+            NativeAudioEngine.releaseWakeLockIfHeld();
+        } catch (Exception ignored) {}
         if (mediaSession != null) { mediaSession.setActive(false); mediaSession.release(); }
         mediaSession = null;
         instance = null;

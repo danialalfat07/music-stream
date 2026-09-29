@@ -1,6 +1,5 @@
 package com.dnialify.musicstream;
 
-import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;

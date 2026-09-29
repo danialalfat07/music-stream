@@ -5,7 +5,12 @@ import android.webkit.WebView;
 import android.webkit.WebChromeClient;
 import android.webkit.ConsoleMessage;
 import android.Manifest;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.os.Build;
 import android.app.PictureInPictureParams;
 import android.util.Rational;
@@ -83,6 +88,18 @@ public class MainActivity extends BridgeActivity {
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
         }
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.registerMediaButtonEventReceiver(new android.content.ComponentName(this, PlaybackService.class));
+            }
+        } catch (Exception ignored) {}
+        try {
+            int max = StreamSettings.getMaxCachedSongs(this);
+            SongCache.enforceLimit(this, max);
+        } catch (Exception e) {
+            Log.d(TAG_DIAG, "enforceLimit onCreate failed " + e);
+        }
     }
     private String loadAssetText(String name) {
         try {
@@ -112,8 +129,12 @@ public class MainActivity extends BridgeActivity {
             wv.addJavascriptInterface(new LogBridge(), "AppLogNative");
             wv.removeJavascriptInterface("NativeSettings");
             wv.addJavascriptInterface(new NativeSettings(), "NativeSettings");
+            wv.removeJavascriptInterface("NativeFocus");
+            wv.addJavascriptInterface(new NativeFocus(), "NativeFocus");
             wv.removeJavascriptInterface("AppInfo");
             wv.addJavascriptInterface(new AppInfo(), "AppInfo");
+            wv.removeJavascriptInterface("NativeBattery");
+            wv.addJavascriptInterface(new NativeBattery(), "NativeBattery");
             // Stage1: Brave JS inject document-start (primary addDocumentStartJavaScript, fallback delegate)
             String bgJs = loadAssetText("brave-video-bg-play.js");
             String pageviewJs = loadAssetText("brave-disable-pageview-api.js");
@@ -901,6 +922,22 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    public class NativeFocus {
+        @JavascriptInterface
+        public boolean isNotificationAccessGranted() {
+            return NotificationDuckService.isPermissionGranted();
+        }
+
+        @JavascriptInterface
+        public void openNotificationAccessSettings() {
+            try {
+                Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                MainActivity.this.startActivity(intent);
+            } catch (Exception ignored) {}
+        }
+    }
+
     public class AppInfo {
         @JavascriptInterface
         public String getVersionName() {
@@ -908,6 +945,36 @@ public class MainActivity extends BridgeActivity {
                 return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
             } catch (Exception e) {
                 return "unknown";
+            }
+        }
+    }
+
+    public class NativeBattery {
+        @JavascriptInterface
+        public boolean isBatteryOptimizationIgnored() {
+            try {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                return pm.isIgnoringBatteryOptimizations(getPackageName());
+            } catch (Exception e) {
+                return true;
+            }
+        }
+
+        @JavascriptInterface
+        public void openBatteryOptimizationSettings() {
+            try {
+                Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception e) {
+                try {
+                    Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(i);
+                } catch (Exception e2) {
+                    try { android.util.Log.e("Battery", "Cannot open battery settings: " + e2.getMessage()); } catch (Exception ignored) {}
+                }
             }
         }
     }
@@ -1005,6 +1072,39 @@ public class MainActivity extends BridgeActivity {
         public void setMaxCachedSongs(int v) {
             StreamSettings.setMaxCachedSongs(MainActivity.this, v);
             Log.d("DnialifyVisionOS", "web setMaxCachedSongs=" + v);
+        }
+
+        @JavascriptInterface
+        public int getCachedCount() {
+            try {
+                return SongCache.countComplete(MainActivity.this);
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+
+        @JavascriptInterface
+        public void enforceLimitNow() {
+            try {
+                int max = StreamSettings.getMaxCachedSongs(MainActivity.this);
+                SongCache.enforceLimit(MainActivity.this, max);
+            } catch (Exception e) {
+                Log.e("EnforceNow", "failed: " + e.getMessage());
+            }
+        }
+
+        @JavascriptInterface
+        public void syncPinnedIds(String csv) {
+            try {
+                java.util.Set<String> ids = new java.util.HashSet<>();
+                if (csv != null && !csv.isEmpty()) {
+                    for (String s : csv.split(",")) if (s != null && !s.isEmpty()) ids.add(s);
+                }
+                StreamSettings.setPinnedIds(MainActivity.this, ids);
+                Log.d("PinnedSync", "[PIN] received " + ids.size() + " pinned ids");
+            } catch (Exception e) {
+                Log.e("PinnedSync", "[PIN] failed: " + e.getMessage());
+            }
         }
 
         @JavascriptInterface

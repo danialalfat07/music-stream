@@ -36,7 +36,7 @@ public class OfflineInterceptClient extends WebViewClient {
             // else → return null (let network fetch, then save via bridge)
             return delegate != null ? delegate.shouldInterceptRequest(view, request) : null;
         } catch (Exception e) {
-            android.util.Log.d("DnialifyDiag", "OfflineIntercept shouldInterceptRequest err " + e);
+            Log.d("DnialifyDiag", "OfflineIntercept shouldInterceptRequest err " + e);
             return delegate != null ? delegate.shouldInterceptRequest(view, request) : null;
         }
     }

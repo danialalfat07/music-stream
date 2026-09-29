@@ -345,7 +345,7 @@ try {
           <div class="settings-section" id="sec-visionos">
             <div class="settings-section-title">VisionOS Mode</div>
             <div class="settings-row" id="set-cache-row" style="display:none"><span class="s-label">Audio Cache</span><button id="set-cache" class="pill-btn"><span>Off</span></button></div>
-             <div class="settings-row" id="set-max-row" style="display:none"><span class="s-label">Max Cached Songs</span><button id="set-max" class="pill-btn"><span>50</span></button></div>
+              <div class="settings-row" id="set-max-row" style="display:none"><span class="s-label">Max Cached Songs</span><button id="set-max" class="pill-btn"><span id="set-max-value">200</span></button></div>
              <div class="settings-row" id="set-window-row" style="display:none"><span class="s-label">Chunk Window</span><button id="set-window" class="pill-btn"><span id="set-window-value">5</span></button></div>
             <div class="settings-row settings-row--locked" id="set-aq-row" style="display:none"><span class="s-label">Audio Quality<span class="badge-soon">Soon</span></span><button class="pill-btn" disabled><span>Auto</span></button></div>
           </div>
@@ -466,16 +466,41 @@ try {
   <canvas id="pip-canvas" width="360" height="640"></canvas>
   <video id="pip-video" muted playsinline autoplay></video>
 </div>
- <div id="window-modal" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
-   <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:240px;">
-     <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Chunk Window (1-200)</div>
-     <input type="number" id="window-input" min="1" max="200" value="5" style="width:100%;padding:8px;font-size:16px;background:#000;color:#fff;border:1px solid #333;border-radius:6px;">
-     <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
-       <button id="window-cancel" class="pill-btn">Cancel</button>
-       <button id="window-ok" class="pill-btn">Save</button>
-     </div>
-   </div>
- </div>
+  <div id="window-modal" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
+    <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:240px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Chunk Window (1-200)</div>
+      <input type="number" id="window-input" min="1" max="200" value="5" style="width:100%;padding:8px;font-size:16px;background:#000;color:#fff;border:1px solid #333;border-radius:6px;">
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+        <button id="window-cancel" class="pill-btn">Cancel</button>
+        <button id="window-ok" class="pill-btn">Save</button>
+      </div>
+    </div>
+  </div>
+  <div id="max-songs-modal" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
+    <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:280px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Max Cached Songs</div>
+      <div id="max-songs-hint" style="font-size:12px;opacity:0.7;margin-bottom:12px;">
+        Min: <span id="max-songs-min">0</span> (currently cached) · Max: 1000
+      </div>
+      <input type="number" id="max-songs-input" min="0" max="1000" value="200" style="width:100%;padding:8px;font-size:16px;background:#000;color:#fff;border:1px solid #333;border-radius:6px;">
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+        <button id="max-songs-cancel" class="pill-btn">Cancel</button>
+        <button id="max-songs-ok" class="pill-btn">Save</button>
+      </div>
+    </div>
+  </div>
+  <div id="max-songs-confirm" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;">
+    <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:280px;max-width:340px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Reduce cache limit?</div>
+      <div id="max-songs-confirm-text" style="font-size:13px;opacity:0.85;margin-bottom:14px;line-height:1.5;">
+        This will delete N oldest unpinned songs.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="max-songs-confirm-cancel" class="pill-btn">Cancel</button>
+        <button id="max-songs-confirm-ok" class="pill-btn">Delete &amp; Save</button>
+      </div>
+    </div>
+  </div>
  <script>
 // Dnialify versioning: website cache vs user data separated
 (function(){

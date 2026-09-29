@@ -2,12 +2,15 @@ package com.dnialify.musicstream;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import java.util.HashMap;
 import java.util.Map;
 import org.json.JSONObject;
@@ -67,14 +70,30 @@ public final class NativeAudioEngine {
     private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
     private int windowChunk = -1;     // playback chunk the window was built for
     private int recoveryAttempts = 0; // premature-completion recovery tries for current track
+    private long lastRecoveryAttemptMs = 0;
+    private int consecutiveRecoveryCount = 0;
+    private static final long RECOVERY_DEBOUNCE_MS = 5000;
+    private static final int MAX_CONSECUTIVE_RECOVERIES = 3;
     private String lastRecoveryStatus = ""; // "", "attempting", "recovered", "failed"
+    private boolean recoveryPrepared = false; // one-shot hard-recovery prepare signal, guarded by lock
     private int appVolumePercent = 100; // app volume 0..300, multiplies hardware volume
     private LoudnessEnhancer boostEnhancer; // unity-gain boost, attached to mp session
     private float currentMpVolume = 1.0f; // last gain written to MediaPlayer
     private AudioManager audioManager; // hardware volume readout for debug logs
+    // Audio focus (duck on notifications, pause for other players)
+    private AudioManager focusManager;
+    private AudioFocusRequest focusRequest;
+    private android.media.AudioManager.OnAudioFocusChangeListener focusListener;
+    private final Handler focusHandler = new Handler(Looper.getMainLooper());
+    private boolean pausedByFocus = false;
+    private boolean resumeWhenFocusGained = false;
+    private float preLossVolumePercent = 100f;
+    private boolean isDucked = false;
     private boolean capTested = false; // one-shot LoudnessEnhancer cap probe
     private int enhancerCapMb = -1; // measured device gain ceiling, -1 = unknown
     private long lastDiagTickLog;
+    private PowerManager.WakeLock wakeLock;
+    private boolean wakeLockHeld = false;
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -85,6 +104,13 @@ public final class NativeAudioEngine {
     private NativeAudioEngine() {}
 
     public static NativeAudioEngine get() {
+        return INSTANCE;
+    }
+
+    /** Alias for listeners/services that expect a getInstance() accessor. */
+    public static NativeAudioEngine getInstance() {
+        Log.d(TAG, "[DUCK] getInstance called, hash="
+                + System.identityHashCode(INSTANCE));
         return INSTANCE;
     }
 
@@ -128,6 +154,8 @@ public final class NativeAudioEngine {
             failReason = null;
             failMessage = null;
             recoveryAttempts = 0;
+            consecutiveRecoveryCount = 0;
+            lastRecoveryAttemptMs = 0;
             lastRecoveryStatus = "";
             setStateLocked(State.RESOLVING);
             windowChunk = -1;
@@ -166,6 +194,7 @@ public final class NativeAudioEngine {
                     return;
                 }
                 setStateLocked(State.PAUSED);
+                releaseWakeLock();
                 nlog("[NATIVE_CMD] pause videoId=" + videoId);
             }
         }
@@ -182,6 +211,7 @@ public final class NativeAudioEngine {
                     return;
                 }
                 setStateLocked(State.PLAYING);
+                acquireWakeLock();
                 nlog("[NATIVE_CMD] resume videoId=" + videoId);
             }
         }
@@ -331,6 +361,232 @@ public final class NativeAudioEngine {
                     + " enhEnabled=" + enhOn + " hwVol=" + hwLevel + "/" + hwMax
                     + " enhancerCapMb=" + enhancerCapMb;
         }
+    }
+
+    // ---------- audio focus (duck on notifications, pause for other players) ----------
+
+    /** Current app volume percent (0..300), single source of truth is appVolumePercent. */
+    private float getCurrentVolumePercent() {
+        synchronized (lock) {
+            return appVolumePercent;
+        }
+    }
+
+    /** Focus-safe volume write: reuses the existing 0..300 mapping. */
+    private void applyVolumePercent(float pct) {
+        Log.d(TAG, "[DUCK] applyVolumePercent pct=" + pct + " enhancer=" + (pct > 100));
+        synchronized (lock) {
+            appVolumePercent = Math.max(0, Math.round(pct));
+            applyVolumeLocked();
+        }
+    }
+
+    private void requestAudioFocus() {
+        try {
+            if (appCtx == null) return;
+            if (focusManager == null) {
+                focusManager = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+            }
+            if (focusManager == null) return;
+            if (focusListener == null) {
+                focusListener = change -> onAudioFocusChange(change);
+            }
+            int result;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (focusRequest == null) {
+                    AudioAttributes attrs = new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build();
+                    focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                            .setAudioAttributes(attrs)
+                            .setOnAudioFocusChangeListener(focusListener)
+                            .setWillPauseWhenDucked(false)
+                            .build();
+                }
+                result = focusManager.requestAudioFocus(focusRequest);
+            } else {
+                result = focusManager.requestAudioFocus(focusListener,
+                        AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            }
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                Log.w(TAG, "[FOCUS] request denied");
+                // Still attempt playback but log warning
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "[FOCUS] request failed: " + e);
+        }
+    }
+
+    private void abandonAudioFocus() {
+        try {
+            if (focusManager == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (focusRequest != null) focusManager.abandonAudioFocusRequest(focusRequest);
+            } else if (focusListener != null) {
+                focusManager.abandonAudioFocus(focusListener);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void acquireWakeLock() {
+        try {
+            if (appCtx == null) return;
+            PowerManager pm = (PowerManager) appCtx.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+            if (wakeLock == null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MusicStream:playback");
+                wakeLock.setReferenceCounted(false);
+            }
+            if (!wakeLockHeld) {
+                wakeLock.acquire();
+                wakeLockHeld = true;
+                Log.d(TAG, "[WAKE] acquired");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "[WAKE] acquire failed: " + e.getMessage());
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLockHeld && wakeLock != null) {
+            try {
+                wakeLock.release();
+                wakeLockHeld = false;
+                Log.d(TAG, "[WAKE] released");
+            } catch (Exception ignored) {}
+        }
+    }
+
+    public static void releaseWakeLockIfHeld() {
+        try {
+            NativeAudioEngine e = INSTANCE;
+            synchronized (e.lock) {
+                if (e.wakeLockHeld && e.wakeLock != null) {
+                    try { e.wakeLock.release(); } catch (Exception ignored) {}
+                    e.wakeLockHeld = false;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void onAudioFocusChange(int change) {
+        Log.d(TAG, "[FOCUS] change=" + change);
+        switch (change) {
+            case AudioManager.AUDIOFOCUS_LOSS:
+                // Other app took focus permanently (YouTube, etc.)
+                // Pause; user must resume manually
+                pauseForFocusLoss(false);
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                // Other app took focus temporarily (call, video ad, etc.)
+                // Pause; expect auto-resume
+                pauseForFocusLoss(true);
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                // Notification or short sound — duck volume to 50%
+                duckForNotification();
+                break;
+            case AudioManager.AUDIOFOCUS_GAIN:
+                // Focus regained — restore or resume
+                restoreFromFocusGain();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void pauseForFocusLoss(boolean autoResume) {
+        MediaPlayer player;
+        synchronized (lock) {
+            if (mp == null) return;
+            player = mp;
+            try {
+                preLossVolumePercent = getCurrentVolumePercent();
+                pausedByFocus = true;
+                resumeWhenFocusGained = autoResume;
+                player.pause();
+                setStateLocked(State.PAUSED);
+                releaseWakeLock();
+            } catch (Exception e) {
+                Log.e(TAG, "[FOCUS] pause failed: " + e.getMessage());
+                return;
+            }
+        }
+        pushEvent("NATIVE_STATE", "state=PAUSED reason=audio_focus");
+        pushAll();
+    }
+
+    private void restoreFromFocusGain() {
+        if (isDucked) {
+            isDucked = false;
+            focusHandler.removeCallbacks(this::unduckIfNotGained);
+        }
+        // Restore volume first
+        applyVolumePercent(preLossVolumePercent);
+        boolean shouldResume;
+        synchronized (lock) {
+            shouldResume = pausedByFocus && resumeWhenFocusGained;
+            if (shouldResume) {
+                pausedByFocus = false;
+                resumeWhenFocusGained = false;
+            }
+        }
+        if (shouldResume) {
+            synchronized (lock) {
+                if (mp == null) return;
+                try {
+                    mp.start();
+                    setStateLocked(State.PLAYING);
+                    acquireWakeLock();
+                } catch (Exception e) {
+                    Log.e(TAG, "[FOCUS] resume failed: " + e.getMessage());
+                    return;
+                }
+            }
+            pushEvent("NATIVE_STATE", "state=PLAYING reason=audio_focus_resume");
+            pushAll();
+        }
+    }
+
+    private void duckForNotification() {
+        Log.d(TAG, "[DUCK] duckForNotification start, currentVolumePercent="
+                + getCurrentVolumePercent() + " isDucked=" + isDucked);
+        Log.d(TAG, "[DUCK] duckForNotification called, preLoss saved=" + preLossVolumePercent
+                + " current=" + getCurrentVolumePercent());
+        synchronized (lock) {
+            if (mp == null || state != State.PLAYING) return;
+        }
+        if (isDucked) return; // already ducked, don't re-save preLoss
+        preLossVolumePercent = getCurrentVolumePercent();
+        isDucked = true;
+        applyVolumePercent(preLossVolumePercent * 0.5f);   // 50% of baseline
+        // Schedule restore — some duck events don't send GAIN back
+        focusHandler.removeCallbacks(this::unduckIfNotGained);
+        focusHandler.postDelayed(this::unduckIfNotGained, 5000);
+    }
+
+    private void unduckIfNotGained() {
+        Log.d(TAG, "[DUCK] unduck timer fired, state=" + state + " preLoss=" + preLossVolumePercent
+                + " current=" + getCurrentVolumePercent());
+        if (!isDucked) return;
+        isDucked = false;
+        synchronized (lock) {
+            if (state != State.PLAYING) return;
+        }
+        Log.d(TAG, "[DUCK] restoring to " + preLossVolumePercent);
+        applyVolumePercent(preLossVolumePercent);
+    }
+
+    /** Entry point for NotificationDuckService (package-visible on purpose). */
+    public void onExternalNotification(String pkg) {
+        Log.d(TAG, "[DUCK] onExternalNotification called pkg=" + pkg
+                + " state=" + state + " mp=" + (mp != null)
+                + " instanceHash=" + System.identityHashCode(this));
+        synchronized (lock) {
+            if (state != State.PLAYING || mp == null) return;
+        }
+        duckForNotification();
     }
 
     public JSONObject getState() {
@@ -579,10 +835,33 @@ public final class NativeAudioEngine {
         }
     }
 
+    /** Force-advance chunk window on LSS hold timeout (called from proxy thread). */
+    public static void requestWindowAdvance(String vid) {
+        final NativeAudioEngine engine = INSTANCE;
+        if (vid == null || vid.isEmpty()) return;
+        engine.timer.post(() -> {
+            synchronized (engine.lock) {
+                if (!vid.equals(engine.videoId)) return;
+                if (engine.lastTotal <= 0 || engine.durationMs <= 0 || engine.appCtx == null) return;
+                if (engine.state == State.IDLE || engine.state == State.STOPPED
+                        || engine.state == State.ERROR || engine.state == State.ENDED) return;
+                int cur = engine.currentMs;
+                try {
+                    if (engine.mp != null) cur = engine.mp.getCurrentPosition();
+                } catch (Exception ignored) {}
+                engine.setWindow(vid, engine.lastUrl, engine.lastTotal, cur,
+                        engine.durationMs, engine.appCtx);
+                nlog("[NAE] window advance on demand videoId=" + vid);
+            }
+        });
+    }
+
     /** startPath with generation + start offset (initial fill and seek-refill share it). */
     private void startPathAt(String path, Source src, Context c, int gen, int startMs) {
         synchronized (lock) {
             if (gen != playGen) return;
+            consecutiveRecoveryCount = 0;
+            lastRecoveryAttemptMs = 0;
             pendingStartMs = Math.max(0, startMs);
             prepareLocked();
             seeking = false;
@@ -622,6 +901,8 @@ public final class NativeAudioEngine {
         // BOTTOM FALLBACK ONLY (cache-first bypass): total<=0, chunking impossible.
         nlog("[ENGINE] BOTTOM-FALLBACK stream (cache-first bypassed) videoId=" + videoId);
         synchronized (lock) {
+            consecutiveRecoveryCount = 0;
+            lastRecoveryAttemptMs = 0;
             prepareLocked();
             source = src;
             setStateLocked(State.BUFFERING);
@@ -657,6 +938,7 @@ public final class NativeAudioEngine {
                     durationMs = p.getDuration();
                 } catch (Exception ignored) {}
                 currentMs = 0;
+                requestAudioFocus();
                 try {
                     p.start();
                 } catch (Exception e) {
@@ -675,6 +957,7 @@ public final class NativeAudioEngine {
                 }
                 setStateLocked(State.PLAYING);
                 applyVolumeLocked();
+                acquireWakeLock();
                 nlog("[NATIVE_STATE] state=PLAYING videoId=" + videoId
                         + " duration=" + (durationMs / 1000.0));
             }
@@ -714,14 +997,33 @@ public final class NativeAudioEngine {
                 pushAll();
                 return;
             }
-            // Premature completion: attempt recovery on a worker thread
+            // Premature completion: debounce loop, then recover on worker thread
             // (blocking prepare must never run on the callback thread).
             final long lastMs = pos;
             final long trackDur = dur;
             final String recVid;
             final int recGen;
             final String recDs;
+            final int recCount;
             synchronized (lock) {
+                long now = System.currentTimeMillis();
+                if (now - lastRecoveryAttemptMs < RECOVERY_DEBOUNCE_MS) {
+                    consecutiveRecoveryCount++;
+                } else {
+                    consecutiveRecoveryCount = 0;
+                }
+                lastRecoveryAttemptMs = now;
+                if (consecutiveRecoveryCount > MAX_CONSECUTIVE_RECOVERIES) {
+                    Log.e(TAG, "[ENGINE] Recovery loop detected, giving up. Firing error.");
+                    consecutiveRecoveryCount = 0;
+                    long epos = pos;
+                    long edur = dur;
+                    try { epos = p.getCurrentPosition(); } catch (Exception ignored) {}
+                    try { edur = p.getDuration(); } catch (Exception ignored) {}
+                    firePrematureError(epos, edur, "RECOVERY_LOOP");
+                    return;
+                }
+                recCount = consecutiveRecoveryCount;
                 recVid = videoId;
                 recGen = playGen;
                 if (streamServer != null && lastTotal > 0) {
@@ -734,9 +1036,11 @@ public final class NativeAudioEngine {
             }
             double pct = trackDur > 0 ? (100.0 * lastMs / trackDur) : 0;
             Log.e(TAG, "[ENGINE] Premature onCompletion: pos=" + lastMs + " dur=" + trackDur
-                    + " (" + String.format("%.1f", pct) + "%) videoId=" + recVid);
+                    + " (" + String.format("%.1f", pct) + "%) videoId=" + recVid
+                    + " consecutive=" + recCount);
             pushRecoveryEvent("attempting", recVid, lastMs, trackDur, null);
-            new Thread(() -> attemptPrematureRecovery(recVid, recGen, recDs, lastMs, trackDur)).start();
+            final int skipSoft = recCount > 1 ? 1 : 0;
+            new Thread(() -> attemptPrematureRecovery(recVid, recGen, recDs, lastMs, trackDur, skipSoft)).start();
         });
         mp.setOnErrorListener((p, what, extra) -> {
             synchronized (lock) {
@@ -774,6 +1078,8 @@ public final class NativeAudioEngine {
 
     private void stopLocked(String why) {
         timer.removeCallbacks(ticker);
+        abandonAudioFocus();
+        releaseWakeLock();
         try {
             if (streamServer != null) streamServer.unregister(videoId);
         } catch (Exception ignored) {}
@@ -807,6 +1113,7 @@ public final class NativeAudioEngine {
 
     private void failLocked(String reason, String msg) {
         timer.removeCallbacks(ticker);
+        releaseWakeLock();
         releaseLocked();
         state = State.ERROR;
         failReason = reason;
@@ -828,7 +1135,65 @@ public final class NativeAudioEngine {
 
     /** Retry a prematurely-completed track from its last position (worker thread). */
     private void attemptPrematureRecovery(String recVid, int recGen, String recDs,
-            long lastMs, long trackDur) {
+            long lastMs, long trackDur, int skipSoft) {
+        // Phase 1: soft-seek with actual playback verification (p2 > p1).
+        if (skipSoft <= 0) {
+            try {
+                try {
+                    synchronized (lock) {
+                        if (recGen != playGen || !recVid.equals(videoId) || mp == null) return;
+                        mp.seekTo((int) Math.max(0, lastMs));
+                        mp.start();
+                    }
+                    Thread.sleep(500);
+                    long p1;
+                    synchronized (lock) {
+                        if (recGen != playGen || !recVid.equals(videoId) || mp == null) return;
+                        p1 = mp.getCurrentPosition();
+                    }
+                    Thread.sleep(500);
+                    long p2;
+                    boolean playing;
+                    synchronized (lock) {
+                        if (recGen != playGen || !recVid.equals(videoId) || mp == null) return;
+                        p2 = mp.getCurrentPosition();
+                        try { playing = mp.isPlaying(); } catch (Exception ignored) { playing = false; }
+                    }
+                    if (playing && p2 > p1 && p2 >= lastMs - 500) {
+                        synchronized (lock) {
+                            currentMs = (int) p2;
+                            setStateLocked(State.PLAYING);
+                            consecutiveRecoveryCount = 0;
+                            lastRecoveryStatus = "recovered";
+                            acquireWakeLock();
+                        }
+                        Log.d(TAG, "[ENGINE] Recovery SUCCESS via soft-seek newPos=" + p2);
+                        pushRecoveryEvent("recovered", recVid, lastMs, trackDur, "soft-seek");
+                        pushAll();
+                        return;
+                    } else {
+                        boolean pl;
+                        synchronized (lock) {
+                            boolean tmp = false;
+                            try { tmp = mp != null && mp.isPlaying(); } catch (Exception ignored) {}
+                            pl = tmp;
+                        }
+                        Log.w(TAG, "[ENGINE] Soft recovery check failed: isPlaying=" + pl
+                                + " p1=" + p1 + " p2=" + p2);
+                        throw new Exception("soft recovery position did not advance");
+                    }
+                } catch (Exception e) {
+                    if ("soft recovery position did not advance".equals(e.getMessage())) throw e;
+                    throw e;
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "[ENGINE] Soft-seek failed, falling back to hard recovery: " + e);
+            }
+        } else {
+            Log.d(TAG, "[ENGINE] Skipping soft recovery, consecutive=" + skipSoft);
+        }
+        // Phase 2: hard recovery, up to 3 attempts. Async prepare with a
+        // one-shot OnPreparedListener (seek + start); no blocking sleep.
         String failReason = null;
         boolean recovered = false;
         for (int attempt = 1; attempt <= 3 && !recovered; attempt++) {
@@ -840,6 +1205,7 @@ public final class NativeAudioEngine {
             synchronized (lock) {
                 if (recGen != playGen || !recVid.equals(videoId) || mp == null) return;
                 try {
+                    recoveryPrepared = false;
                     mp.reset();
                     if (recDs != null && recDs.startsWith("http") && appCtx != null) {
                         mp.setDataSource(appCtx, Uri.parse(recDs));
@@ -849,33 +1215,57 @@ public final class NativeAudioEngine {
                         failReason = "no data source available for recovery";
                         continue;
                     }
-                    mp.prepare();
-                    mp.seekTo((int) Math.max(0, lastMs));
-                    mp.start();
+                    final long seekTarget = Math.max(0, lastMs);
+                    mp.setOnPreparedListener(p -> {
+                        synchronized (lock) {
+                            try { p.seekTo((int) seekTarget); } catch (Exception ignored) {}
+                            try { p.start(); } catch (Exception ignored) {}
+                            recoveryPrepared = true;
+                            lock.notifyAll();
+                        }
+                    });
+                    mp.prepareAsync();
+                    long deadline = System.currentTimeMillis() + 10000;
+                    while (!recoveryPrepared) {
+                        long waitMs = deadline - System.currentTimeMillis();
+                        if (waitMs <= 0) break;
+                        try {
+                            lock.wait(waitMs);
+                        } catch (InterruptedException e) {
+                            return;
+                        }
+                        if (recGen != playGen || !recVid.equals(videoId)) return;
+                    }
+                    if (!recoveryPrepared) {
+                        failReason = "prepare timeout on attempt " + attempt;
+                        continue;
+                    }
+                    boolean playingNow = false;
+                    long newPos = -1;
+                    try {
+                        playingNow = mp.isPlaying();
+                        newPos = mp.getCurrentPosition();
+                    } catch (Exception ignored) {}
+                    if (playingNow && newPos >= lastMs - 500) {
+                        recovered = true;
+                        currentMs = (int) newPos;
+                        setStateLocked(State.PLAYING);
+                        lastRecoveryStatus = "recovered";
+                        acquireWakeLock();
+                        Log.d(TAG, "[ENGINE] Recovery SUCCESS at attempt " + attempt
+                                + " newPos=" + newPos);
+                    } else {
+                        failReason = "position_not_advancing after attempt " + attempt;
+                    }
                 } catch (Exception e) {
                     failReason = e.getClass().getSimpleName() + ": " + e.getMessage();
                     Log.e(TAG, "[ENGINE] Recovery attempt " + attempt + " failed: " + failReason);
-                    continue;
                 }
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    return;
-                }
-                long newPos = -1;
-                try {
-                    newPos = mp.getCurrentPosition();
-                } catch (Exception ignored) {}
-                if (newPos > lastMs - 500) {
-                    recovered = true;
-                    currentMs = (int) newPos;
-                    setStateLocked(State.PLAYING);
-                    lastRecoveryStatus = "recovered";
-                    Log.d(TAG, "[ENGINE] Recovery SUCCESS at attempt " + attempt
-                            + " newPos=" + newPos);
-                } else {
-                    failReason = "position_not_advancing after attempt " + attempt;
-                }
+            }
+        }
+        synchronized (lock) {
+            if (mp != null) {
+                try { mp.setOnPreparedListener(null); } catch (Exception ignored) {}
             }
         }
         if (recovered) {

@@ -3,7 +3,6 @@ package com.dnialify.musicstream;
 import android.content.Intent;
 import android.os.Build;
 import android.service.quicksettings.TileService;
-import android.util.Log;
 
 /**
  * Phase 8 - diagnostic entry point (Quick Settings tile).

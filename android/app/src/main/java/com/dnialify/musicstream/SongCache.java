@@ -270,6 +270,66 @@ public final class SongCache {
         return RUNNING.contains(videoId);
     }
 
+    public static synchronized int countComplete(Context ctx) {
+        try {
+            File dir = dir(ctx);
+            if (dir == null || !dir.exists()) return 0;
+            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm"));
+            return files == null ? 0 : files.length;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    public static synchronized void enforceLimit(Context ctx, int max) {
+        if (max <= 0 || ctx == null) return;
+        try {
+            File dir = dir(ctx);
+            if (dir == null || !dir.exists()) return;
+            java.util.Set<String> pinned;
+            try {
+                pinned = StreamSettings.getPinnedIds(ctx);
+            } catch (Exception e) {
+                pinned = new java.util.HashSet<>();
+            }
+            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm"));
+            if (files == null) return;
+            Log.d(TAG, "[EVICT] start: files=" + files.length + " max=" + max + " pinned=" + pinned.size());
+            if (files.length <= max) {
+                Log.d(TAG, "[EVICT] within limit, nothing to do");
+                return;
+            }
+            java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            int count = files.length;
+            for (File f : files) {
+                if (count <= max) break;
+                String vid = f.getName().replace(".webm", "");
+                if (pinned.contains(vid)) {
+                    Log.d(TAG, "[EVICT] skip pinned " + vid);
+                    continue;
+                }
+                try {
+                    boolean ok = f.delete();
+                    File meta = new File(dir, vid + ".song.json");
+                    if (meta.exists()) meta.delete();
+                    File part = new File(dir, vid + ".webm.part");
+                    if (part.exists()) part.delete();
+                    if (ok) {
+                        count--;
+                        Log.d(TAG, "[EVICT] removed " + vid + " count now " + count);
+                    } else {
+                        Log.e(TAG, "[EVICT] delete failed " + vid);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "[EVICT] error " + vid + ": " + e.getMessage());
+                }
+            }
+            Log.d(TAG, "[EVICT] done: final count=" + count);
+        } catch (Exception e) {
+            Log.e(TAG, "[EVICT] fatal: " + e.getMessage());
+        }
+    }
+
     /**
      * Download audio with persistent progress + resume from .part.
      * RESUME_SUPPORTED: part kept, Range continues when server 206s.
@@ -463,6 +523,10 @@ public final class SongCache {
                 Log.d(TAG, "[SONG] COMPLETE videoId=" + videoId + " bytes=" + total
                         + " chunks=" + chunks);
                 CacheEvents.emit(c, "cacheComplete", videoId, r);
+                try {
+                    int max = StreamSettings.getMaxCachedSongs(c);
+                    enforceLimit(c, max);
+                } catch (Exception ignored) {}
             }
         } catch (PausedException p) {
             try {
