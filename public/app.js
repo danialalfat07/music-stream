@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.51";
+const APP_VERSION = "2.3.52";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -4995,6 +4995,48 @@ function syncOffUIWithSelect() {
     OffUI.checked = {};
     offlineSelected.forEach((vid) => { OffUI.checked[vid] = 1; });
   } catch {}
+  try { updateOfflineSelectToolbar(); } catch {}
+}
+function getSelectedOfflineIds() {
+  try {
+    if (offlineSelected && offlineSelected.size) return Array.from(offlineSelected);
+  } catch {}
+  try {
+    const keys = Object.keys(OffUI.checked || {}).filter((k) => OffUI.checked[k]);
+    if (keys.length) return keys;
+  } catch {}
+  try {
+    return Array.from(document.querySelectorAll('.track[data-offrow].selected'))
+      .map((r) => r.dataset.offrow || r.dataset.videoId).filter(Boolean);
+  } catch {}
+  return [];
+}
+function updateOfflineSelectToolbar() {
+  const toolbar = document.getElementById('offline-select-toolbar');
+  if (!toolbar) return;
+  const countEl = document.getElementById('offline-select-count');
+  const dlBtn = document.getElementById('offline-select-download');
+  const delBtn = document.getElementById('offline-select-delete');
+  const active = !!(offlineSelectMode || (typeof OffUI !== 'undefined' && OffUI.select));
+  let n = 0;
+  try { n = getSelectedOfflineIds().length; } catch {}
+  if (!n) {
+    try {
+      n = document.querySelectorAll('.track[data-offrow] input[data-offcheck]:checked').length;
+    } catch {}
+  }
+  if (active) {
+    toolbar.style.display = 'flex';
+    toolbar.classList.remove('hidden');
+    document.body.classList.add('has-select-toolbar');
+    if (countEl) countEl.textContent = n + ' dipilih';
+    if (dlBtn) dlBtn.disabled = !n;
+    if (delBtn) delBtn.disabled = !n;
+  } else {
+    toolbar.style.display = 'none';
+    toolbar.classList.add('hidden');
+    document.body.classList.remove('has-select-toolbar');
+  }
 }
 function enterOfflineSelectMode() {
   offlineSelectMode = true;
@@ -5005,6 +5047,7 @@ function exitOfflineSelectMode() {
   offlineSelectMode = false;
   offlineSelected = new Set();
   syncOffUIWithSelect();
+  try { updateOfflineSelectToolbar(); } catch {}
   try { repaintOffline(); } catch {}
 }
 function toggleOfflineRowSelection(vid) {
@@ -5026,6 +5069,43 @@ function selectAllOfflineRows() {
   syncOffUIWithSelect();
   try { repaintOffline(); } catch {}
 }
+document.addEventListener('click', (ev) => {
+  const t = ev.target && ev.target.closest ? ev.target.closest('#offline-select-download,#offline-select-delete') : null;
+  const id = (t && t.id) || null;
+  if (!id) return;
+  if (id === 'offline-select-download') {
+    const ids = getSelectedOfflineIds();
+    if (!ids.length) return;
+    const toDownload = ids.filter((vid) => {
+      try {
+        const e = OfflineLib.get(vid);
+        return !e || e.cacheStatus !== 'COMPLETE';
+      } catch { return true; }
+    });
+    let n = 0;
+    try {
+      toDownload.forEach((vid) => { try { OfflineLib.continueDownload(vid); n++; } catch {} });
+    } catch {}
+    try { toast(n ? `Downloading ${n} song${n > 1 ? 's' : ''}…` : 'Nothing to download (all COMPLETE)'); } catch {}
+    try { exitOfflineSelectMode(); } catch {}
+    return;
+  }
+  if (id === 'offline-select-delete') {
+    const ids = getSelectedOfflineIds();
+    if (!ids.length) return;
+    let pinned = [];
+    try { pinned = ids.filter((vid) => offIsPinned(vid)); } catch {}
+    if (pinned.length) {
+      if (!confirm(pinned.length + ' selected tracks are pinned. Delete anyway?')) return;
+    } else {
+      if (!confirm('Delete ' + ids.length + ' cached tracks?')) return;
+    }
+    try { ids.forEach((vid) => deleteOffCache(vid)); } catch {}
+    try { toast('Deleted ' + ids.length + ' tracks'); } catch {}
+    try { exitOfflineSelectMode(); } catch {}
+    return;
+  }
+});
 function updateOfflineSelectBar() {
   try {
     const n = offlineSelected.size;
@@ -5084,7 +5164,9 @@ function offlineBodyHTML() {
         ? `<button id="offline-play" class="pill-btn primary">${icon('i-play')}<span>Play</span></button>`
           + `<button id="offline-shuffle" class="pill-btn">${icon('i-shuffle')}<span>Shuffle</span></button>`
         : '')
-      + `<button id="offline-select-toggle" class="pill-btn" style="margin-left:auto;${sel ? '' : 'display:none;'}">${nChecked === totalCount && totalCount ? 'Deselect All' : 'Select All'}</button>`
+      + (sel
+        ? `<button id="offline-select-toggle" class="pill-btn" style="margin-left:auto;">${nChecked === totalCount && totalCount ? 'Deselect All' : 'Select All'}</button>`
+        : `<button id="offline-select-open" class="pill-btn" style="margin-left:auto;"><span>Select</span></button>`)
       + `</div></div></div>`;
     const rowHTML = (e, idx) => {
       try {
@@ -5173,6 +5255,16 @@ function bindOfflineRows(root) {
       ev.stopPropagation();
       try { selectAllOfflineRows(); } catch {}
       try { updateOfflineSelectBar(); } catch {}
+      try { updateOfflineSelectToolbar(); } catch {}
+    });
+  }
+  const selOpen = scope.querySelector ? scope.querySelector('#offline-select-open') : document.getElementById('offline-select-open');
+  if (selOpen && !selOpen._offBound) {
+    selOpen._offBound = true;
+    selOpen.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      try { enterOfflineSelectMode(); } catch {}
+      try { updateOfflineSelectToolbar(); } catch {}
     });
   }
   // Play-all-downloaded entry (legacy, always visible if present).
@@ -5336,6 +5428,7 @@ function bindOfflineRows(root) {
     selLegacy.addEventListener('click', () => { try { enterOfflineSelectMode(); } catch {} });
   }
   try { updateOfflineSelectBar(); } catch {}
+  try { updateOfflineSelectToolbar(); } catch {}
 }
 function viewLibrary(view, tab) {
   const tabs = [

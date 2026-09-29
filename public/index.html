@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Free modern web music player. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.51" />
+<meta name="app-version" content="2.3.52" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -466,6 +466,11 @@ try {
   <canvas id="pip-canvas" width="360" height="640"></canvas>
   <video id="pip-video" muted playsinline autoplay></video>
 </div>
+  <div id="offline-select-toolbar" class="hidden">
+    <span id="offline-select-count">0 dipilih</span>
+    <button id="offline-select-download" class="pill-btn">Download</button>
+    <button id="offline-select-delete" class="pill-btn">Delete</button>
+  </div>
   <div id="window-modal" class="hidden" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
     <div style="background:#1c1c1c;padding:20px;border-radius:12px;min-width:240px;">
       <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Chunk Window (1-200)</div>
@@ -505,7 +510,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.51";
+    var VER="2.3.52";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
