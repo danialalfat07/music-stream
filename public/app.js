@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.50";
+const APP_VERSION = "2.3.51";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -5015,16 +5015,26 @@ function toggleOfflineRowSelection(vid) {
   try { repaintOffline(); } catch {}
 }
 function selectAllOfflineRows() {
-  const list = getOfflineTracks();
-  if (offlineSelected.size === list.length && list.length) offlineSelected = new Set();
-  else offlineSelected = new Set(list.map((t) => t.videoId));
+  let ids = [];
+  try {
+    const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
+    ids = Object.values(m).filter((e) => e && e.videoId).map((e) => e.videoId);
+  } catch {}
+  if (!ids.length) ids = getOfflineTracks().map((t) => t.videoId);
+  if (offlineSelected.size === ids.length && ids.length) offlineSelected = new Set();
+  else offlineSelected = new Set(ids);
   syncOffUIWithSelect();
   try { repaintOffline(); } catch {}
 }
 function updateOfflineSelectBar() {
   try {
     const n = offlineSelected.size;
-    const total = getOfflineTracks().length;
+    let total = 0;
+    try {
+      const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
+      total = Object.values(m).filter((e) => e && e.videoId).length;
+    } catch {}
+    if (!total) total = getOfflineTracks().length;
     const c = document.getElementById('offline-selcount');
     if (c) c.textContent = n + ' selected';
     const t = document.getElementById('offline-select-toggle');
@@ -5061,6 +5071,7 @@ function offlineBodyHTML() {
       Object.keys(OffUI.checked || {}).forEach((vid) => { checkedMap[vid] = 1; });
     } catch {}
     const nChecked = Object.keys(checkedMap).length;
+    const totalCount = full.length + partial.length;
     const firstArt = (full[0] && (full[0].artworkThumb || full[0].thumbnail)) || '';
     const cover = safeCover(firstArt)
       ? `<img id="offline-art" src="${esc(firstArt)}" alt="">`
@@ -5073,7 +5084,7 @@ function offlineBodyHTML() {
         ? `<button id="offline-play" class="pill-btn primary">${icon('i-play')}<span>Play</span></button>`
           + `<button id="offline-shuffle" class="pill-btn">${icon('i-shuffle')}<span>Shuffle</span></button>`
         : '')
-      + `<button id="offline-select-toggle" class="pill-btn" style="margin-left:auto;${sel ? '' : 'display:none;'}">${nChecked === full.length && full.length ? 'Deselect All' : 'Select All'}</button>`
+      + `<button id="offline-select-toggle" class="pill-btn" style="margin-left:auto;${sel ? '' : 'display:none;'}">${nChecked === totalCount && totalCount ? 'Deselect All' : 'Select All'}</button>`
       + `</div></div></div>`;
     const rowHTML = (e, idx) => {
       try {
@@ -5092,18 +5103,28 @@ function offlineBodyHTML() {
           + `</div>`;
       } catch { return ''; }
     };
+    const partialRowHTML = (e) => {
+      try {
+        const vid = e.videoId;
+        const pct = offlineCachePercent(e);
+        const checked = !!checkedMap[vid];
+        const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
+        return `<div class="track off-row2${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-offrow="${esc(vid)}">`
+          + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
+          + `${coverHTMLOffline(e)}`
+          + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div>`
+          + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
+          + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div>`
+          + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
+          + `</div>`;
+      } catch { return ''; }
+    };
     if (!full.length) {
       let html = header + empty;
       if (partial.length) {
         if (OffUI.expanded) {
           html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button><div class="track-list">`
-            + partial.map((e) => {
-              const pct = offlineCachePercent(e);
-              return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTMLOffline(e)}`
-                + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div>`
-                + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
-                + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div></div>`;
-            }).join('') + `</div>`;
+            + partial.map((e) => partialRowHTML(e)).join('') + `</div>`;
         } else {
           html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
         }
@@ -5118,13 +5139,7 @@ function offlineBodyHTML() {
     if (partial.length) {
       if (OffUI.expanded) {
         html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Hide incomplete (${partial.length})</span></button><div class="track-list">`
-          + partial.map((e) => {
-            const pct = offlineCachePercent(e);
-            return `<div class="track off-row2" data-offrow="${esc(e.videoId)}">${coverHTMLOffline(e)}`
-              + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || e.videoId)}</div>`
-              + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
-              + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div></div>`;
-          }).join('') + `</div>`;
+          + partial.map((e) => partialRowHTML(e)).join('') + `</div>`;
       } else {
         html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
       }
@@ -5261,7 +5276,7 @@ function bindOfflineRows(root) {
       openSongMenu({
         videoId: vid, title: e.title || vid, artist: e.artist || '',
         thumbnail: e.artworkThumb || e.thumbnail || '', duration: e.duration || 0,
-      }, { offlineRow: true });
+      }, { offlineRow: true, cacheStatus: e.cacheStatus || '' });
     }),
   );
   const expBtn = document.getElementById('off-expand');
@@ -5904,6 +5919,7 @@ function openSongMenu(song, opts = {}) {
     ${row('pl', 'i-plus', 'Add to playlist')}
     ${row('offdl', 'i-download', 'Download offline')}
     ${row('mp3', 'i-save', 'Download MP3')}
+    ${(opts.offlineRow && opts.cacheStatus && opts.cacheStatus !== 'COMPLETE') ? row('resumedl', 'i-download', 'Resume download') : ''}
     ${opts.offlineRow ? row('pin', 'i-pin', offIsPinned(song.videoId) ? 'Unpin' : 'Pin') : ''}
     ${opts.offlineRow ? row('delcache', 'i-trash', 'Delete from cache') : ''}
     ${row('share', 'i-share', 'Share')}
@@ -5922,6 +5938,7 @@ function openSongMenu(song, opts = {}) {
         openAddToPlaylist(song);
         return;
       } else if (a === 'offdl') downloadOffline(song);
+      else if (a === 'resumedl') { try { OfflineLib.continueDownload(song.videoId); toast('Resuming download…'); } catch {} }
       else if (a === 'mp3') downloadMp3(song);
       else if (a === 'pin') {
         const pinned = toggleOffPin(song.videoId);
