@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.54";
+const APP_VERSION = "2.3.55";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -688,6 +688,7 @@ const Library = {
     st[k].title = song.title;
     st[k].thumbnail = song.thumbnail;
     store.set('stats', st);
+    try { StatsX.onPlay(song.videoId, song.artist); } catch {}
   },
   get stats() {
     return store.get('stats', {});
@@ -705,8 +706,172 @@ const Library = {
         const st = store.get('stats', {});
         for (const k in pending) if (st[k]) st[k].secs += pending[k];
         store.set('stats', st);
+        try { StatsX.onListenSecs(pending, st); } catch {}
       } catch {}
     }, 4000);
+  },
+};
+
+/* ========== extended stats tracking (smw_stats_*) ========== */
+const ARTIST_GENRE = {
+  'raisa': 'R&B', 'afgan': 'R&B', 'tulus': 'Jazz', 'reza artamevia': 'R&B',
+  'rizky febian': 'Pop', 'judika': 'Pop', 'rossa': 'Pop', 'lyodra': 'Pop',
+  'tiara andini': 'Pop', 'ziva magnolya': 'Pop', 'mahen': 'Pop',
+  'noah': 'Rock', 'sheila on 7': 'Rock', 'dewa 19': 'Rock', 'peterpan': 'Rock',
+  'ungu': 'Rock', "d'masiv": 'Rock',
+  'via vallen': 'Dangdut', 'nella kharisma': 'Dangdut', 'happy asmara': 'Dangdut',
+  'rich brian': 'Hip-Hop', 'ramengvrl': 'Hip-Hop', 'young lex': 'Hip-Hop',
+  'bts': 'K-Pop', 'blackpink': 'K-Pop', 'newjeans': 'K-Pop', 'ive': 'K-Pop',
+  'taylor swift': 'Pop', 'ed sheeran': 'Pop', 'ariana grande': 'Pop',
+  'bruno mars': 'Pop', 'the weeknd': 'R&B', 'dua lipa': 'Pop',
+  'queen': 'Rock', 'coldplay': 'Rock', 'linkin park': 'Rock',
+};
+function genreOf(artist) {
+  try {
+    const a = String(artist || '').split(',')[0].trim().toLowerCase();
+    return ARTIST_GENRE[a] || 'Unknown';
+  } catch { return 'Unknown'; }
+}
+const StatsX = {
+  _playStart: 0,
+  _playVid: '',
+  log(m) { try { LogBuffer.push('STATS', m); } catch {} },
+  dayKey(d) {
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  },
+  pushEvent(ev) {
+    try {
+      const arr = store.get('stats_events', []);
+      arr.push(ev);
+      while (arr.length > 5000) arr.shift();
+      store.set('stats_events', arr);
+    } catch {}
+  },
+  onPlay(videoId, artist) {
+    try {
+      const now = new Date();
+      const dk = this.dayKey(now);
+      const daily = store.get('stats_daily', {});
+      const de = daily[dk] || { plays: 0, secs: 0 };
+      de.plays++;
+      daily[dk] = de;
+      const keys = Object.keys(daily).sort();
+      while (keys.length > 90) delete daily[keys.shift()];
+      store.set('stats_daily', daily);
+      const hours = store.get('stats_hours', {});
+      const hk = String(now.getHours());
+      hours[hk] = (hours[hk] || 0) + 1;
+      store.set('stats_hours', hours);
+      const days = store.get('stats_days', {});
+      const wk = String(now.getDay());
+      days[wk] = (days[wk] || 0) + 1;
+      store.set('stats_days', days);
+      const st = store.get('stats_streak', { current: 0, longest: 0, lastDate: '' });
+      const yk = this.dayKey(new Date(now.getTime() - 86400000));
+      if (st.lastDate !== dk) {
+        st.current = (st.lastDate === yk) ? (st.current || 0) + 1 : 1;
+        st.lastDate = dk;
+      }
+      if (st.current > (st.longest || 0)) st.longest = st.current;
+      store.set('stats_streak', st);
+      const g = genreOf(artist);
+      const gm = store.get('stats_genres', {});
+      const ge = gm[g] || { plays: 0, secs: 0 };
+      ge.plays++;
+      gm[g] = ge;
+      store.set('stats_genres', gm);
+      this.pushEvent({ ts: Date.now(), videoId: videoId, type: 'play', pos: 0 });
+      this.sessionTick();
+      this._playStart = Date.now();
+      this._playVid = videoId;
+      this.log('play ' + videoId);
+    } catch {}
+  },
+  onListenSecs(pending, st) {
+    try {
+      let total = 0;
+      const gm = store.get('stats_genres', {});
+      let gDirty = false;
+      for (const k in pending) {
+        const s = Math.round(pending[k]);
+        total += s;
+        const a = st && st[k] ? st[k].artist : '';
+        const g = genreOf(a);
+        const ge = gm[g] || { plays: 0, secs: 0 };
+        ge.secs += s;
+        gm[g] = ge;
+        gDirty = true;
+      }
+      if (!total) return;
+      if (gDirty) store.set('stats_genres', gm);
+      const dk = this.dayKey(new Date());
+      const daily = store.get('stats_daily', {});
+      const de = daily[dk] || { plays: 0, secs: 0 };
+      de.secs += total;
+      daily[dk] = de;
+      store.set('stats_daily', daily);
+    } catch {}
+  },
+  onTrackEnd(auto) {
+    try {
+      if (!this._playStart || !this._playVid) return;
+      const elapsed = Math.round((Date.now() - this._playStart) / 1000);
+      const vid = this._playVid;
+      this._playStart = 0;
+      this._playVid = '';
+      const type = (auto || elapsed >= 30) ? 'complete' : 'skip';
+      this.pushEvent({ ts: Date.now(), videoId: vid, type: type, pos: elapsed });
+      this.log(type + ' ' + vid + ' pos=' + elapsed);
+    } catch {}
+  },
+  sessionTick() {
+    try {
+      const now = Date.now();
+      const arr = store.get('stats_sessions', []);
+      const last = arr[arr.length - 1];
+      if (!last || now - last.end > 5 * 60 * 1000) {
+        arr.push({ start: now, end: now, plays: 1 });
+        while (arr.length > 500) arr.shift();
+      } else { last.end = now; last.plays++; }
+      store.set('stats_sessions', arr);
+    } catch {}
+  },
+  endSession() {
+    try {
+      const arr = store.get('stats_sessions', []);
+      const last = arr[arr.length - 1];
+      if (last) { last.end = Date.now(); store.set('stats_sessions', arr); }
+    } catch {}
+  },
+  backfill() {
+    try {
+      if (store.get('stats_migrated_v1', false)) return 0;
+      const hist = store.get('hist', []);
+      const daily = store.get('stats_daily', {});
+      const hours = store.get('stats_hours', {});
+      const days = store.get('stats_days', {});
+      let n = 0;
+      hist.forEach((s) => {
+        if (!s || !s.playedAt) return;
+        const d = new Date(s.playedAt);
+        const dk = this.dayKey(d);
+        const de = daily[dk] || { plays: 0, secs: 0 };
+        de.plays++;
+        daily[dk] = de;
+        const hk = String(d.getHours());
+        hours[hk] = (hours[hk] || 0) + 1;
+        const wk = String(d.getDay());
+        days[wk] = (days[wk] || 0) + 1;
+        n++;
+      });
+      store.set('stats_daily', daily);
+      store.set('stats_hours', hours);
+      store.set('stats_days', days);
+      store.set('stats_migrated_v1', true);
+      this.log('[stats] backfilled ' + n + ' entries from history');
+      return n;
+    } catch { return 0; }
   },
 };
 
@@ -2454,6 +2619,7 @@ function nextTrack(auto) {
   try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PLAYBACK_JS] nextTrack auto=' + !!auto + ' current=' + (Player.current && Player.current.videoId || '?')); } catch {}
   if (_isClosed) return;
   if (auto && typeof _lastCloseMs !== 'undefined' && Date.now() - _lastCloseMs < 5000) return;
+  try { StatsX.onTrackEnd(!!auto); } catch {}
   if (Player.cued) {
     if (auto) return;
     togglePlay();
@@ -2515,9 +2681,11 @@ function prevTrack() {
     return;
   }
   if (Player.index > 0) {
+    try { StatsX.onTrackEnd(false); } catch {}
     Player.index--;
     startCurrent();
   } else if (wasNative) {
+    try { StatsX.onTrackEnd(false); } catch {}
     startCurrent(); // native restart-from-0 (ghost yt.seekTo would silence it)
   } else if (Player.yt) Player.yt.seekTo(0);
 }
@@ -4777,19 +4945,79 @@ async function viewMoods(view) {
 function viewStats(view) {
   const st = Library.stats;
   const rows = Object.entries(st).map(([videoId, v]) => ({ videoId, ...v }));
-  const totalPlays = rows.reduce((a, r) => a + r.plays, 0);
-  const totalMin = Math.round(rows.reduce((a, r) => a + r.secs, 0) / 60);
+  const totalPlays = rows.reduce((a, r) => a + (r.plays || 0), 0);
+  const totalMin = Math.round(rows.reduce((a, r) => a + (r.secs || 0), 0) / 60);
+  const streak = (() => { try { return store.get('stats_streak', { current: 0, longest: 0 }); } catch { return { current: 0, longest: 0 }; } })();
   // top artists
   const byArtist = {};
   rows.forEach((r) => {
     const a = (r.artist || 'Unknown').split(',')[0].trim() || 'Unknown';
-    byArtist[a] = (byArtist[a] || 0) + r.plays;
+    byArtist[a] = (byArtist[a] || 0) + (r.plays || 0);
   });
   const topArtists = Object.entries(byArtist)
     .sort((x, y) => y[1] - x[1])
     .slice(0, 10);
-  const topSongs = [...rows].sort((x, y) => y.plays - x.plays).slice(0, 20);
+  const topSongs = [...rows].sort((x, y) => (y.plays || 0) - (x.plays || 0)).slice(0, 20);
   const maxA = topArtists[0] ? topArtists[0][1] : 1;
+  // daily last 30
+  const daily = (() => { try { return store.get('stats_daily', {}); } catch { return {}; } })();
+  const dayMs = 86400000;
+  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+  const last30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(todayMid.getTime() - i * dayMs);
+    const k = StatsX.dayKey(d);
+    const e = daily[k] || { plays: 0, secs: 0 };
+    last30.push({ k: k, label: d.getDate(), plays: e.plays || 0, min: Math.round((e.secs || 0) / 60) });
+  }
+  const maxDay = Math.max(1, ...last30.map((d) => d.plays));
+  // hourly
+  const hours = (() => { try { return store.get('stats_hours', {}); } catch { return {}; } })();
+  const hArr = [];
+  for (let h = 0; h < 24; h++) hArr.push({ h: h, n: hours[String(h)] || 0 });
+  const maxH = Math.max(1, ...hArr.map((x) => x.n));
+  const peakH = hArr.reduce((a, b) => (b.n > a.n ? b : a), hArr[0]);
+  // weekday
+  const wdays = (() => { try { return store.get('stats_days', {}); } catch { return {}; } })();
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const wArr = WD.map((name, i) => ({ name: name, n: wdays[String(i)] || 0 }));
+  const maxW = Math.max(1, ...wArr.map((x) => x.n));
+  const peakW = wArr.reduce((a, b) => (b.n > a.n ? b : a), wArr[0]);
+  // offline
+  let offTotal = 0, offDone = 0, offBytes = 0, offLyr = 0;
+  try {
+    const m = (typeof OfflineLib !== 'undefined' && OfflineLib.map) ? OfflineLib.map() : {};
+    Object.values(m).forEach((e) => {
+      offTotal++;
+      if (e.cacheStatus === 'COMPLETE') {
+        offDone++;
+        offBytes += Number(e.audioSize) || 0;
+        if (e.lyricsStatus === 'AVAILABLE') offLyr++;
+      }
+    });
+  } catch {}
+  const offPct = offTotal ? Math.round((offDone / offTotal) * 100) : 0;
+  const lyrPct = offDone ? Math.round((offLyr / offDone) * 100) : 0;
+  // library
+  const favN = Library.favorites.length;
+  const pls = Library.playlists;
+  const plTracks = pls.reduce((a, p) => a + ((p.tracks && p.tracks.length) || 0), 0);
+  const savN = Library.saved.length;
+  // search
+  const srec = (() => { try { return store.get('srec', []); } catch { return []; } })();
+  // events: skip / complete rate
+  const evts = (() => { try { return store.get('stats_events', []); } catch { return []; } })();
+  let evPlays = 0, evSkips = 0, evDone = 0;
+  evts.forEach((e) => {
+    if (e.type === 'play') evPlays++;
+    else if (e.type === 'skip') evSkips++;
+    else if (e.type === 'complete') evDone++;
+  });
+  const skipRate = evPlays ? Math.round((evSkips / evPlays) * 100) : 0;
+  const compRate = evPlays ? Math.round((evDone / evPlays) * 100) : 0;
+  const colHTML = (vals, maxV, fmtLbl, peakIdx) => `<div class="stat-cols">` + vals.map((v, i) =>
+    `<div class="stat-col" title="${esc(v.tip || '')}"><div class="stat-col-bar${i === peakIdx ? ' peak' : ''}" style="height:${Math.max(2, Math.round((v.n / maxV) * 88))}px"></div><div class="stat-col-lbl">${fmtLbl(v, i)}</div></div>`,
+  ).join('') + `</div>`;
   view.innerHTML = `<div class="hello-row"><div>
       <div class="greeting">This device only</div>
       <h1 class="page-title">Listening stats</h1>
@@ -4798,7 +5026,18 @@ function viewStats(view) {
       <div class="stat-card"><div class="stat-num">${totalPlays}</div><div class="stat-lbl">Total plays</div></div>
       <div class="stat-card"><div class="stat-num">${totalMin}</div><div class="stat-lbl">Minutes listened</div></div>
       <div class="stat-card"><div class="stat-num">${rows.length}</div><div class="stat-lbl">Unique songs</div></div>
-      <div class="stat-card"><div class="stat-num">${Object.keys(byArtist).length}</div><div class="stat-lbl">Artists</div></div>
+      <div class="stat-card"><div class="stat-num">🔥 ${streak.current || 0}</div><div class="stat-lbl">Day streak (best ${streak.longest || 0})</div></div>
+    </div>
+    <div class="shelf"><div class="shelf-title">Last 30 days</div>
+      ${colHTML(last30.map((d) => ({ n: d.plays, tip: d.k + ': ' + d.plays + ' plays · ' + d.min + ' min' })), maxDay, (v, i) => (i % 5 === 0 ? last30[i].label : ''), -1)}
+    </div>
+    <div class="shelf"><div class="shelf-title">By hour</div>
+      <div class="sub">Paling aktif jam ${String(peakH.h).padStart(2, '0')}:00 (${peakH.n} plays)</div>
+      ${colHTML(hArr.map((x) => ({ n: x.n, tip: x.h + ':00 - ' + x.n + ' plays' })), maxH, (v, i) => (i % 3 === 0 ? String(i) : ''), peakH.h)}
+    </div>
+    <div class="shelf"><div class="shelf-title">By weekday</div>
+      <div class="sub">Peak: ${peakW.name} (${peakW.n} plays)</div>
+      ${colHTML(wArr.map((x) => ({ n: x.n, tip: x.name + ' - ' + x.n + ' plays' })), maxW, (v, i) => WD[i], wArr.indexOf(peakW))}
     </div>
     ${
       topArtists.length
@@ -4809,23 +5048,56 @@ function viewStats(view) {
     ${
       topSongs.length
         ? `<div class="shelf"><div class="shelf-title">Most played</div>${trackHeadHTML()}<div class="track-list">
-      ${topSongs.map((r, i) => trackRowHTML({ videoId: r.videoId, title: r.title, subtitle: `${r.artist} · ${r.plays} plays · ${Math.round(r.secs / 60)} min`, thumbnail: r.thumbnail, tn: i + 1 })).join('')}</div></div>`
+      ${topSongs.map((r, i) => trackRowHTML({ videoId: r.videoId, title: r.title, subtitle: `${r.artist} · ${r.plays} plays · ${Math.round((r.secs || 0) / 60)} min`, thumbnail: r.thumbnail, tn: i + 1 })).join('')}</div></div>`
         : ''
     }
-    ${!rows.length ? emptyHTML('No stats yet', 'Play some music - totals build up as you listen.', { label: 'Browse home', go: '#/home', ic: 'i-chart' }) : ''}`;
-  if (rows.length) {
-    view.innerHTML += `<div class="stat-actions"><button class="pill-btn" id="stat-export">${icon('i-download')}<span>Export CSV</span></button><button class="pill-btn" id="stat-clear">${icon('i-trash')}<span>Clear history</span></button></div>`;
+    <div class="shelf"><div class="shelf-title">Offline</div>
+      <div class="stats-cards">
+        <div class="stat-card"><div class="stat-num">${offDone}/${offTotal}</div><div class="stat-lbl">Cached (${offPct}%)</div></div>
+        <div class="stat-card"><div class="stat-num">${(offBytes / 1048576).toFixed(1)} MB</div><div class="stat-lbl">Cache size</div></div>
+        <div class="stat-card"><div class="stat-num">${lyrPct}%</div><div class="stat-lbl">Lyrics coverage</div></div>
+      </div>
+    </div>
+    <div class="shelf"><div class="shelf-title">Library</div>
+      <div class="stats-cards">
+        <div class="stat-card"><div class="stat-num">${favN}</div><div class="stat-lbl">Favorites</div></div>
+        <div class="stat-card"><div class="stat-num">${pls.length}</div><div class="stat-lbl">Playlists (${plTracks} tracks)</div></div>
+        <div class="stat-card"><div class="stat-num">${savN}</div><div class="stat-lbl">Saved</div></div>
+      </div>
+    </div>
+    <div class="shelf"><div class="shelf-title">Search</div>
+      <div class="sub">${srec.length} recent ${srec.length === 1 ? 'search' : 'searches'}${srec.length ? ': ' + srec.slice(0, 5).map((q) => esc(q)).join(' · ') : ''}</div>
+    </div>
+    <div class="shelf"><div class="shelf-title">Skips &amp; completions</div>
+      <div class="stats-cards">
+        <div class="stat-card"><div class="stat-num">${skipRate}%</div><div class="stat-lbl">Skip rate (${evSkips}/${evPlays})</div></div>
+        <div class="stat-card"><div class="stat-num">${compRate}%</div><div class="stat-lbl">Completion (${evDone}/${evPlays})</div></div>
+      </div>
+    </div>
+    ${!rows.length && !evPlays ? emptyHTML('No stats yet', 'Play some music - totals build up as you listen.', { label: 'Browse home', go: '#/home', ic: 'i-chart' }) : ''}`;
+  if (rows.length || evPlays) {
+    view.innerHTML += `<div class="stat-actions"><button class="pill-btn" id="stat-export">${icon('i-download')}<span>Export CSV</span></button><button class="pill-btn" id="stat-reset">${icon('i-trash')}<span>Reset stats</span></button><button class="pill-btn" id="stat-clear">${icon('i-trash')}<span>Clear history</span></button></div>`;
   }
   bindItems(view);
   $('#stat-export')?.addEventListener('click', () => {
-    const header = 'title,artist,plays,minutes,lastPlayed\n';
-    const rowsCsv = Object.entries(Library.stats)
-      .map(
-        ([id, v]) =>
-          `"${String(v.title).replace(/"/g, '""')}","${String(v.artist).replace(/"/g, '""')}",${v.plays},${Math.round(v.secs / 60)},"${new Date(v.last).toISOString()}"`,
-      )
+    const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+    let csv = 'title,artist,plays,minutes,lastPlayed\n';
+    csv += Object.entries(Library.stats)
+      .map(([id, v]) => `${q(v.title)},${q(v.artist)},${v.plays},${Math.round((v.secs || 0) / 60)},${q(new Date(v.last).toISOString())}`)
       .join('\n');
-    const blob = new Blob([header + rowsCsv], { type: 'text/csv' });
+    csv += '\n\ndate,plays,minutes\n';
+    try {
+      const dd = store.get('stats_daily', {});
+      csv += Object.keys(dd).sort().map((k) => `${k},${dd[k].plays || 0},${Math.round((dd[k].secs || 0) / 60)}`).join('\n');
+    } catch {}
+    csv += '\n\nhour,plays\n';
+    try {
+      const hh = store.get('stats_hours', {});
+      csv += Array.from({ length: 24 }, (_, h) => `${h},${hh[String(h)] || 0}`).join('\n');
+    } catch {}
+    csv += '\n\ntype,count\n';
+    csv += `play,${evPlays}\nskip,${evSkips}\ncomplete,${evDone}\n`;
+    const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -4833,6 +5105,19 @@ function viewStats(view) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
     toast('Stats exported');
+  });
+  $('#stat-reset')?.addEventListener('click', () => {
+    if (!confirm('Reset all listening stats? Library, playlists and history are kept.')) return;
+    try { store.set('stats', {}); } catch {}
+    try { store.set('stats_daily', {}); } catch {}
+    try { store.set('stats_hours', {}); } catch {}
+    try { store.set('stats_days', {}); } catch {}
+    try { store.set('stats_genres', {}); } catch {}
+    try { store.set('stats_events', []); } catch {}
+    try { store.set('stats_sessions', []); } catch {}
+    try { store.set('stats_streak', { current: 0, longest: 0, lastDate: '' }); } catch {}
+    toast('Stats reset');
+    route();
   });
   $('#stat-clear')?.addEventListener('click', () => {
     if (!confirm('Clear all listening stats & history?')) return;
@@ -7923,6 +8208,7 @@ try {
   if (!localStorage.getItem('smw_user_data_version')) {
     try { localStorage.setItem('smw_user_data_version', String(USER_DATA_VERSION)); } catch {}
   }
+  try { StatsX.backfill(); } catch {}
 } catch {}
 // server-authoritative version check (no-store, 5min cooldown, mandatory before play)
 checkAppVersion({ silent: true }).catch(() => {});
@@ -7992,8 +8278,10 @@ document.addEventListener(
   true,
 );
 window.addEventListener('pagehide', persistQueue);
+window.addEventListener('pagehide', () => { try { StatsX.endSession(); } catch {} });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) persistQueue();
+  if (document.hidden) { try { StatsX.endSession(); } catch {} }
 });
 restoreQueue();
 route();

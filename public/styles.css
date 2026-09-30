@@ -1101,6 +1101,11 @@ html[data-theme="light"] .pl-pick-name { color: #121212; }
 .sb-bar { flex: 1; height: 10px; background: var(--hover-strong); border-radius: 5px; overflow: hidden; }
 .sb-bar div { height: 100%; background: var(--accent-bright); border-radius: 5px; }
 .sb-n { width: 40px; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stat-cols { display: flex; align-items: flex-end; gap: 4px; min-height: 110px; padding: 8px 0 2px; }
+.stat-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.stat-col-bar { width: 100%; max-width: 22px; background: var(--hover-strong); border-radius: 3px 3px 0 0; }
+.stat-col-bar.peak { background: var(--accent-bright); }
+.stat-col-lbl { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 12px; }
 
 #np-sb.on { border-color: var(--accent-bright); color: var(--accent-bright); }
 
