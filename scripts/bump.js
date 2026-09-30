@@ -21,3 +21,12 @@ if (!/^(\d+)\.(\d+)\.(\d+)(-beta\.\d+)?$/.test(next)) {
 process.argv[2] = next;
 require('./bump-web-version.js');
 console.log(`${current} -> ${next} (APK remains ${pkg.version})`);
+// Keep version sync: stage everything the bump touches so a later
+// `git commit` can't leave package.json behind public/ (stale /api/app-version).
+try {
+  const { execSync } = require('node:child_process');
+  execSync('git add package.json package-lock.json public/', { cwd: root, stdio: 'inherit' });
+  console.log('staged: package.json package-lock.json public/');
+} catch (e) {
+  console.error('git add failed (commit manually): ' + e.message);
+}
