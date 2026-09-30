@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.55";
+const APP_VERSION = "2.3.56";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -874,6 +874,437 @@ const StatsX = {
     } catch { return 0; }
   },
 };
+
+/* ========== monthly wrapped recap (smw_wrapped_*) ========== */
+const WRAP_GRADS = [
+  ['#1DB954', '#0A8F3C'], ['#8B5CF6', '#5B21B6'], ['#F59E0B', '#B45309'],
+  ['#EC4899', '#9D174D'], ['#06B6D4', '#0E7490'], ['#EF4444', '#991B1B'],
+  ['#3B82F6', '#1E40AF'], ['#10B981', '#065F46'], ['#F97316', '#9A3412'],
+  ['#6366F1', '#3730A3'],
+];
+const WRAP_WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WrappedX = {
+  _ym: '', _idx: 0, _cards: [], _mode: 'deck', _list: [], _tx: 0,
+  pfx() { try { return (typeof BUILD_CHANNEL !== 'undefined' && BUILD_CHANNEL === 'beta') ? 'smw_beta_' : 'smw_'; } catch { return 'smw_'; } },
+  ymOf(d) { const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1); },
+  mKey(ym) { return 'wrapped_' + String(ym).replace('-', '_'); },
+  seenKey(ym) { return 'wrapped_seen_' + String(ym).replace('-', '_'); },
+  monthRange(ym) {
+    const [y, m] = String(ym).split('-').map(Number);
+    return { start: new Date(y, m - 1, 1).getTime(), end: new Date(y, m, 1).getTime() };
+  },
+  monthName(ym) {
+    try {
+      const [y, m] = String(ym).split('-').map(Number);
+      return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' }) + ' ' + y;
+    } catch { return String(ym); }
+  },
+  getSnap(ym) { try { return store.get(this.mKey(ym), null); } catch { return null; } },
+  listWrapped() {
+    const out = [];
+    try {
+      const px = this.pfx() + 'wrapped_';
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.indexOf(px) !== 0) continue;
+        const m = k.slice(px.length).match(/^(\d{4})_(\d{2})$/);
+        if (!m) continue;
+        const ym = m[1] + '-' + m[2];
+        try { out.push({ ym: ym, snap: JSON.parse(localStorage.getItem(k)) }); } catch {}
+      }
+    } catch {}
+    out.sort((a, b) => (a.ym < b.ym ? 1 : -1));
+    return out;
+  },
+  pruneWrapped() {
+    try {
+      const list = this.listWrapped();
+      if (list.length <= 12) return;
+      const px = this.pfx();
+      list.slice(12).forEach((e) => { try { localStorage.removeItem(px + this.mKey(e.ym)); } catch {} });
+    } catch {}
+  },
+  generateWrappedSnapshot(year, month) {
+    const p = (n) => String(n).padStart(2, '0');
+    const ym = year + '-' + p(month);
+    const { start, end } = this.monthRange(ym);
+    const inM = (ts) => ts >= start && ts < end;
+    let evts = [];
+    try { evts = store.get('stats_events', []) || []; } catch { evts = []; }
+    const mev = evts.filter((e) => e && inM(e.ts));
+    const plays = mev.filter((e) => e.type === 'play').length;
+    const skips = mev.filter((e) => e.type === 'skip').length;
+    const dones = mev.filter((e) => e.type === 'complete').length;
+    let daily = {};
+    try { daily = store.get('stats_daily', {}) || {}; } catch {}
+    let totP = 0, totS = 0, peakDate = '', peakN = -1;
+    Object.keys(daily).forEach((k) => {
+      if (k.indexOf(ym) !== 0) return;
+      const e = daily[k] || {};
+      totP += e.plays || 0; totS += e.secs || 0;
+      if ((e.plays || 0) > peakN) { peakN = e.plays || 0; peakDate = k; }
+    });
+    const minutes = Math.round(totS / 60);
+    // peak hour from month events, fallback global
+    const hc = new Array(24).fill(0);
+    mev.filter((e) => e.type === 'play').forEach((e) => { try { hc[new Date(e.ts).getHours()]++; } catch {} });
+    let peakHour = hc.indexOf(Math.max(...hc));
+    if (!mev.length) {
+      try {
+        const gh = store.get('stats_hours', {});
+        let bk = '0', bn = -1;
+        for (let h = 0; h < 24; h++) { const n = gh[String(h)] || 0; if (n > bn) { bn = n; bk = String(h); } }
+        peakHour = parseInt(bk, 10) || 0;
+      } catch {}
+    }
+    let peakDay = '';
+    try { peakDay = peakDate ? WRAP_WD[new Date(peakDate + 'T12:00:00').getDay()] : ''; } catch {}
+    // per-video month counts
+    let st = {};
+    try { st = store.get('stats', {}) || {}; } catch {}
+    const cnt = {};
+    mev.filter((e) => e.type === 'play' && e.videoId).forEach((e) => { cnt[e.videoId] = (cnt[e.videoId] || 0) + 1; });
+    const meta = (vid) => (st[vid] || { title: vid, artist: 'Unknown', thumbnail: '' });
+    let topSongs = [];
+    if (Object.keys(cnt).length) {
+      topSongs = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([vid, c]) => {
+        const m = meta(vid);
+        return { videoId: vid, title: m.title || vid, artist: m.artist || 'Unknown', thumbnail: m.thumbnail || '', count: c };
+      });
+    } else {
+      topSongs = Object.entries(st).filter(([, v]) => v && v.last && inM(v.last))
+        .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0)).slice(0, 5)
+        .map(([vid, v]) => ({ videoId: vid, title: v.title || vid, artist: v.artist || 'Unknown', thumbnail: v.thumbnail || '', count: v.plays || 0 }));
+    }
+    const byA = {};
+    const artThumb = {};
+    const srcRows = topSongs.length ? topSongs.map((s) => ({ artist: s.artist, count: s.count, thumbnail: s.thumbnail })) :
+      Object.entries(st).filter(([, v]) => v && v.last && inM(v.last)).map(([, v]) => ({ artist: v.artist || 'Unknown', count: v.plays || 0, thumbnail: v.thumbnail || '' }));
+    srcRows.forEach((r) => {
+      const a = String(r.artist || 'Unknown').split(',')[0].trim() || 'Unknown';
+      byA[a] = (byA[a] || 0) + (r.count || 0);
+      if (!artThumb[a] && r.thumbnail) artThumb[a] = r.thumbnail;
+    });
+    const topArtists = Object.entries(byA).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([artist, count]) => ({ artist: artist, count: count, thumbnail: artThumb[artist] || '' }));
+    // genre: month-first, fallback global
+    let topGenre = { name: 'Unknown', pct: 0 };
+    try {
+      const gc = {};
+      let gn = 0;
+      const gsrc = Object.keys(cnt).length ? Object.entries(cnt).map(([vid, c]) => ({ artist: meta(vid).artist, count: c })) : srcRows;
+      gsrc.forEach((r) => { const g = genreOf(r.artist); gc[g] = (gc[g] || 0) + (r.count || 0); gn += r.count || 0; });
+      const best = Object.entries(gc).sort((a, b) => b[1] - a[1])[0];
+      if (best && gn) topGenre = { name: best[0], pct: Math.round((best[1] / gn) * 100) };
+      else {
+        const gm = store.get('stats_genres', {});
+        const be = Object.entries(gm).sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))[0];
+        if (be) { const t = Object.values(gm).reduce((a, x) => a + (x.plays || 0), 0) || 1; topGenre = { name: be[0], pct: Math.round(((be[1].plays || 0) / t) * 100) }; }
+      }
+    } catch {}
+    let streakN = 0;
+    try {
+      const sz = store.get('stats_streak', { current: 0, longest: 0, lastDate: '' });
+      streakN = (sz.lastDate && String(sz.lastDate).indexOf(ym) === 0) ? (sz.current || 0) : 0;
+    } catch {}
+    let newDis = [];
+    try {
+      newDis = Object.entries(st).filter(([, v]) => v && v.last && inM(v.last) && (v.plays || 0) <= 2)
+        .sort((a, b) => (b[1].last || 0) - (a[1].last || 0)).slice(0, 5)
+        .map(([vid, v]) => ({ videoId: vid, title: v.title || vid, artist: v.artist || 'Unknown', thumbnail: v.thumbnail || '' }));
+    } catch {}
+    let offRatio = 0;
+    try {
+      const m = (typeof OfflineLib !== 'undefined' && OfflineLib.map) ? OfflineLib.map() : {};
+      const done = new Set(Object.values(m).filter((e) => e && e.cacheStatus === 'COMPLETE').map((e) => e.videoId));
+      const pl = mev.filter((e) => e.type === 'play');
+      const cp = pl.filter((e) => done.has(e.videoId)).length;
+      offRatio = pl.length ? cp / pl.length : 0;
+    } catch {}
+    let favN = 0, plN = 0;
+    try { favN = (store.get('fav', []) || []).length; } catch {}
+    try { plN = (store.get('pls', []) || []).length; } catch {}
+    const snap = {
+      month: ym, generatedAt: Date.now(), plays: totP || plays, minutes: minutes,
+      topSongs: topSongs, topArtists: topArtists, topGenre: topGenre, peakHour: peakHour < 0 ? 0 : peakHour,
+      peakDay: peakDay || '', peakDate: peakDate || '', streak: streakN,
+      skipRate: plays ? skips / plays : 0, completionRate: plays ? dones / plays : 0,
+      newDiscoveries: newDis, offlineRatio: offRatio, favCount: favN, playlistCount: plN,
+      totalUniqueSongs: Object.keys(st).length, isEmpty: ((totP || plays) === 0),
+    };
+    try { store.set(this.mKey(ym), snap); } catch {}
+    try { this.pruneWrapped(); } catch {}
+    return snap;
+  },
+  ensureLastMonthSnapshot() {
+    try {
+      const now = new Date();
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const ym = this.ymOf(lm);
+      if (this.getSnap(ym)) { this.pruneWrapped(); return this.getSnap(ym); }
+      return this.generateWrappedSnapshot(lm.getFullYear(), lm.getMonth() + 1);
+    } catch { return null; }
+  },
+  checkWrappedTrigger() {
+    try {
+      const now = new Date();
+      if (now.getDate() > 7) return false;
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const ym = this.ymOf(lm);
+      const snap = this.getSnap(ym);
+      if (!snap) return false;
+      const seen = store.get(this.seenKey(ym), false);
+      if (seen) return false;
+      this.openDeck(ym);
+      return true;
+    } catch { return false; }
+  },
+  ensureModal() {
+    let m = document.getElementById('wrapped-modal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'wrapped-modal';
+    m.className = 'hidden';
+    m.innerHTML = '<div id="wrapped-progress"></div><button id="wrapped-close" aria-label="Close">\u2715</button><div id="wrapped-deck"></div><div id="wrapped-tap-left"></div><div id="wrapped-tap-right"></div>';
+    document.body.appendChild(m);
+    $('#wrapped-close', m)?.addEventListener('click', () => this.closeWrapped());
+    $('#wrapped-tap-left', m)?.addEventListener('click', () => this.goWrapped(-1));
+    $('#wrapped-tap-right', m)?.addEventListener('click', () => this.goWrapped(1));
+    const deck = $('#wrapped-deck', m);
+    deck?.addEventListener('touchstart', (e) => { try { this._tx = e.changedTouches[0].clientX; } catch {} }, { passive: true });
+    deck?.addEventListener('touchend', (e) => {
+      try {
+        const dx = e.changedTouches[0].clientX - this._tx;
+        if (dx < -60) this.goWrapped(1); else if (dx > 60) this.goWrapped(-1);
+      } catch {}
+    }, { passive: true });
+    return m;
+  },
+  openArchive() {
+    try {
+      this._mode = 'archive';
+      const m = this.ensureModal();
+      const saved = this.listWrapped();
+      // live current-month entry so fresh plays are visible before month rolls over
+      const curYm = this.ymOf(new Date());
+      let live = null;
+      try {
+        const { start, end } = this.monthRange(curYm);
+        const ev = (store.get('stats_events', []) || []).filter((e) => e && e.ts >= start && e.ts < end && e.type === 'play');
+        if (ev.length && !saved.some((s) => s.ym === curYm)) {
+          const [y, mo] = curYm.split('-').map(Number);
+          const tmp = this.generateWrappedSnapshot; // reuse compute without persisting
+          const keep = this.getSnap(curYm);
+          live = { ym: curYm, live: true, snap: keep || null, plays: ev.length };
+          if (!keep) { try { localStorage.removeItem(this.pfx() + this.mKey(curYm)); } catch {} }
+        }
+      } catch {}
+      this._list = saved;
+      const rows = saved.map((e) => {
+        const s = e.snap || {};
+        const ta = (s.topArtists && s.topArtists[0] && s.topArtists[0].artist) || '—';
+        return `<button class="wrapped-arch-row" data-ym="${esc(e.ym)}"><span class="war-month">${esc(this.monthName(e.ym))}</span><span class="war-sub">${s.plays || 0} plays · ${esc(ta)}</span></button>`;
+      }).join('');
+      const liveRow = live ? `<button class="wrapped-arch-row live" data-ym="${esc(curYm)}" data-live="1"><span class="war-month">${esc(this.monthName(curYm))} (so far)</span><span class="war-sub">${live.plays} plays · live</span></button>` : '';
+      $('#wrapped-progress', m).innerHTML = '';
+      $('#wrapped-deck', m).innerHTML = `<div class="wrapped-arch"><h2 class="wrapped-arch-title">Monthly Recap</h2><div class="wrapped-arch-sub">Last 12 months · tap a month to replay</div>${liveRow}${rows || '<div class="wrapped-empty">No recaps yet. Play music and check back next month.</div>'}</div>`;
+      $$('.wrapped-arch-row', m).forEach((b) => b.addEventListener('click', () => {
+        const ym = b.getAttribute('data-ym');
+        if (b.getAttribute('data-live')) this.openDeckLive(ym); else this.openDeck(ym);
+      }));
+      m.classList.remove('hidden');
+    } catch (e) { try { toast('Could not open recap'); } catch {} }
+  },
+  openDeckLive(ym) {
+    try {
+      const [y, mo] = String(ym).split('-').map(Number);
+      const { start, end } = this.monthRange(ym);
+      // compute in-memory without overwriting saved history semantics
+      const px = this.pfx() + this.mKey(ym);
+      let prev = null;
+      try { prev = localStorage.getItem(px); } catch {}
+      const snap = this.generateWrappedSnapshot(y, mo);
+      try { if (prev === null) localStorage.removeItem(px); } catch {}
+      this._openDeckWith(ym, snap, true);
+    } catch { try { toast('Could not open recap'); } catch {} }
+  },
+  openDeck(ym) {
+    try {
+      let snap = this.getSnap(ym);
+      if (!snap) {
+        const [y, mo] = String(ym).split('-').map(Number);
+        snap = this.generateWrappedSnapshot(y, mo);
+      }
+      this._openDeckWith(ym, snap, false);
+    } catch { try { toast('Could not open recap'); } catch {} }
+  },
+  _openDeckWith(ym, snap, isLive) {
+    this._mode = 'deck';
+    this._ym = ym;
+    this._idx = 0;
+    this._cards = this.buildWrappedCards(snap, !!isLive);
+    const m = this.ensureModal();
+    m.classList.remove('hidden');
+    this.renderDeck();
+  },
+  renderDeck() {
+    const m = document.getElementById('wrapped-modal');
+    if (!m) return;
+    const deck = $('#wrapped-deck', m);
+    const prog = $('#wrapped-progress', m);
+    const n = this._cards.length;
+    prog.innerHTML = this._cards.map((_, i) => `<span class="wseg${i === this._idx ? ' on' : ''}${i < this._idx ? ' done' : ''}"></span>`).join('');
+    deck.innerHTML = this._cards[this._idx] || '';
+    deck.firstElementChild?.classList.add('wslide');
+    $('#wrapped-share')?.addEventListener('click', () => this.shareWrapped());
+    $('#wrapped-close2')?.addEventListener('click', () => this.closeWrapped());
+    $('#wrapped-open-arch')?.addEventListener('click', () => this.openArchive());
+  },
+  goWrapped(dir) {
+    if (this._mode !== 'deck') return;
+    const n = this._cards.length;
+    const nx = this._idx + dir;
+    if (nx < 0 || nx >= n) return;
+    this._idx = nx;
+    this.renderDeck();
+  },
+  closeWrapped() {
+    try {
+      document.getElementById('wrapped-modal')?.classList.add('hidden');
+      if (this._ym && this._mode === 'deck') {
+        try {
+          const now = new Date();
+          const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          if (this.ymOf(lm) === this._ym) store.set(this.seenKey(this._ym), true);
+        } catch {}
+      }
+    } catch {}
+  },
+  grad(i) { const g = WRAP_GRADS[i % WRAP_GRADS.length]; return `linear-gradient(135deg, ${g[0]}, ${g[1]})`; },
+  initials(name) { try { return String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase(); } catch { return '?'; } },
+  artOrInit(thumb, name, cls) {
+    if (thumb) return `<img class="${cls}" src="${esc(thumb)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;${cls} wph&quot;>${esc(this.initials(name))}</div>'">`;
+    return `<div class="${cls} wph">${esc(this.initials(name))}</div>`;
+  },
+  buildWrappedCards(s, isLive) {
+    const mn = this.monthName(s.month);
+    const g = (i) => this.grad(i);
+    const fmtMin = (mins) => { const h = Math.floor(mins / 60), m = mins % 60; return h ? `${h}h ${m}m` : `${m}m`; };
+    // prev-month comparison for card 3
+    let cmpTxt = '';
+    try {
+      const [y, mo] = String(s.month).split('-').map(Number);
+      const pd = new Date(y, mo - 2, 1);
+      const pym = pd.getFullYear() + '-' + String(pd.getMonth() + 1).padStart(2, '0');
+      const daily = store.get('stats_daily', {});
+      let pm = 0;
+      Object.keys(daily).forEach((k) => { if (k.indexOf(pym) === 0) pm += Math.round(((daily[k] || {}).secs || 0) / 60); });
+      if (pm > 0 && s.minutes > 0) {
+        const d = Math.round(((s.minutes - pm) / pm) * 100);
+        cmpTxt = d >= 0 ? `up ${d}% vs last month` : `down ${Math.abs(d)}% vs last month`;
+      } else if (s.minutes > 0) cmpTxt = 'your first tracked month';
+    } catch {}
+    const ta = (s.topArtists && s.topArtists[0]) || null;
+    const ts = (s.topSongs && s.topSongs[0]) || null;
+    const tg = s.topGenre || { name: 'Unknown', pct: 0 };
+    const circ = Math.PI * 2 * 40;
+    const donut = `<svg class="wgenre-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/><circle cx="50" cy="50" r="40" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(circ * (tg.pct || 0) / 100).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`;
+    if (s.isEmpty) {
+      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+        const head = i === 0
+          ? `<div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Quiet month...</h1><div class="wsub">No plays tracked. Play music and your recap will fill in.</div>`
+          : `<div class="wmonth">${esc(mn)}</div><h1 class="wbig">—</h1><div class="wsub">Nothing here yet. Your stats will appear here next time.</div>`;
+        return `<div class="wrapped-card wempty" style="background:${g(i)}">${head}<div class="wfoot">Dnialify Recap · ${esc(s.month)}${i === 9 ? '<br><button class="wbtn ghost" id="wrapped-close2">Close</button>' : ''}</div></div>`;
+      });
+    }
+    const sk = Math.round((s.skipRate || 0) * 100), cp = Math.round((s.completionRate || 0) * 100);
+    const off = Math.round((s.offlineRatio || 0) * 100);
+    const nd = (s.newDiscoveries || []).slice(0, 3).map((d) => `<div class="wchip">${esc(d.title)} · ${esc(d.artist)}</div>`).join('');
+    return [
+      `<div class="wrapped-card" style="background:${g(0)}"><div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Your Monthly Recap</h1><div class="wsub">Tap right to replay your month in music</div><div class="wfoot">Dnialify Music Stream</div></div>`,
+      `<div class="wrapped-card" style="background:${g(1)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${s.plays}</div><div class="wsub">songs played</div><div class="wfoot">${s.totalUniqueSongs} unique · ${s.favCount} favorites</div></div>`,
+      `<div class="wrapped-card" style="background:${g(2)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${esc(fmtMin(s.minutes))}</div><div class="wsub">time listening</div><div class="wfoot">${esc(cmpTxt)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(3)}"><div class="wmonth">Top artist</div>${ta ? this.artOrInit(ta.thumbnail, ta.artist, 'wcirc') + `<h1 class="wbig">${esc(ta.artist)}</h1><div class="wsub">${ta.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(4)}"><div class="wmonth">Top song</div>${ts ? this.artOrInit(ts.thumbnail, ts.title, 'wcirc') + `<h1 class="wbig">${esc(ts.title)}</h1><div class="wsub">${esc(ts.artist)} · ${ts.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Top genre</div>${donut}<h1 class="wbig">${esc(tg.name)}</h1><div class="wsub">${tg.pct}% of your month</div><div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(9)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div><div class="wcta"><button class="wbtn" id="wrapped-share">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
+    ];
+  },
+  async shareWrapped() {
+    try {
+      const ym = this._ym;
+      const s = this.getSnap(ym) || (this._cards && this._cards.length ? null : null);
+      const snap = this.getSnap(ym) || (() => { try { return JSON.parse(localStorage.getItem(this.pfx() + this.mKey(ym))); } catch { return null; } })();
+      if (!snap) { try { toast('Nothing to share'); } catch {} return; }
+      const cv = document.createElement('canvas');
+      cv.width = 1080; cv.height = 1920;
+      const ctx = cv.getContext('2d');
+      const gr = ctx.createLinearGradient(0, 0, 1080, 1920);
+      gr.addColorStop(0, '#1DB954'); gr.addColorStop(1, '#0A8F3C');
+      ctx.fillStyle = gr; ctx.fillRect(0, 0, 1080, 1920);
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      ctx.font = 'bold 64px system-ui, sans-serif';
+      ctx.fillText(this.monthName(snap.month), 540, 220);
+      ctx.font = '40px system-ui, sans-serif';
+      ctx.fillText('My Dnialify Recap', 540, 290);
+      const ta = (snap.topArtists && snap.topArtists[0]) || null;
+      const ts = (snap.topSongs && snap.topSongs[0]) || null;
+      // art circle: try thumbnail, fallback initials
+      const cx = 540, cy = 620, rr = 150;
+      let drew = false;
+      const urls = [ta && ta.thumbnail, ts && ts.thumbnail].filter(Boolean);
+      for (const u of urls) {
+        try {
+          const img = await new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = rej; setTimeout(rej, 3500); im.src = u; });
+          ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.clip();
+          ctx.drawImage(img, cx - rr, cy - rr, rr * 2, rr * 2);
+          ctx.restore(); drew = true; break;
+        } catch {}
+      }
+      if (!drew) {
+        ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 120px system-ui, sans-serif';
+        ctx.fillText(this.initials(ta ? ta.artist : '?'), cx, cy + 40);
+      }
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      ctx.font = 'bold 72px system-ui, sans-serif';
+      ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
+      ctx.font = '44px system-ui, sans-serif';
+      ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
+      ctx.font = 'bold 96px system-ui, sans-serif';
+      ctx.fillText(String(snap.plays) + ' plays', 540, 1150);
+      ctx.font = '56px system-ui, sans-serif';
+      ctx.fillText(String(Math.round((snap.minutes || 0) / 60 * 10) / 10) + ' hours · ' + String(snap.topGenre ? snap.topGenre.name : ''), 540, 1240);
+      ctx.font = '36px system-ui, sans-serif';
+      ctx.fillText('Made with Dnialify Music Stream', 540, 1800);
+      const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('render failed');
+      const file = new File([blob], `dnialify-wrapped-${snap.month}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'My Dnialify Wrapped' });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `dnialify-wrapped-${snap.month}.png`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        try { toast('Recap image downloaded'); } catch {}
+      }
+    } catch (e) {
+      try {
+        const msg = String((e && e.name) || '');
+        if (msg === 'AbortError') return; // user cancelled share: silent no-op
+        toast('Share failed');
+      } catch {}
+    }
+  },
+};
+window.WrappedX = WrappedX;
+function generateWrappedSnapshot(y, m) { return WrappedX.generateWrappedSnapshot(y, m); }
+function checkWrappedTrigger() { return WrappedX.checkWrappedTrigger(); }
 
 /* ================= versioning - website vs user data (separated) ================= */
 // Website assets live in CacheStorage: dnialify-assets-vX
@@ -5022,6 +5453,7 @@ function viewStats(view) {
       <div class="greeting">This device only</div>
       <h1 class="page-title">Listening stats</h1>
     </div></div>
+    <div class="stat-actions" style="margin-bottom:12px"><button class="pill-btn" id="stat-wrapped"><span>📅 Lihat Recap Bulanan</span></button></div>
     <div class="stats-cards">
       <div class="stat-card"><div class="stat-num">${totalPlays}</div><div class="stat-lbl">Total plays</div></div>
       <div class="stat-card"><div class="stat-num">${totalMin}</div><div class="stat-lbl">Minutes listened</div></div>
@@ -5079,6 +5511,7 @@ function viewStats(view) {
     view.innerHTML += `<div class="stat-actions"><button class="pill-btn" id="stat-export">${icon('i-download')}<span>Export CSV</span></button><button class="pill-btn" id="stat-reset">${icon('i-trash')}<span>Reset stats</span></button><button class="pill-btn" id="stat-clear">${icon('i-trash')}<span>Clear history</span></button></div>`;
   }
   bindItems(view);
+  $('#stat-wrapped')?.addEventListener('click', () => { try { WrappedX.openArchive(); } catch {} });
   $('#stat-export')?.addEventListener('click', () => {
     const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
     let csv = 'title,artist,plays,minutes,lastPlayed\n';
@@ -8209,6 +8642,8 @@ try {
     try { localStorage.setItem('smw_user_data_version', String(USER_DATA_VERSION)); } catch {}
   }
   try { StatsX.backfill(); } catch {}
+  try { WrappedX.ensureLastMonthSnapshot(); } catch {}
+  try { setTimeout(() => { try { WrappedX.checkWrappedTrigger(); } catch {} }, 1200); } catch {}
 } catch {}
 // server-authoritative version check (no-store, 5min cooldown, mandatory before play)
 checkAppVersion({ silent: true }).catch(() => {});
