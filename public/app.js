@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.52";
+const APP_VERSION = "2.3.53";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2079,6 +2079,7 @@ const OfflineLib = {
     } catch {}
     if ((location.hash || '').startsWith('#/library/offline')) route();
     try { renderSidebarLibrary(); } catch {}
+    try { refreshDlBadges(); } catch {}
   },
   continueDownload(videoId) {
     if (!videoId) return;
@@ -2247,6 +2248,7 @@ function onTrackChanged(s) {
   // (Player.current is a queue[index] getter, so all paths funnel via startCurrent.)
   if (!s || !s.videoId) return;
   try { pushPinnedToNative(); } catch {}
+  try { refreshDlBadges(); } catch {}
   try { offStampPlayed(s.videoId); } catch {}
   try { loadLyrics(s); } catch {}
   try { if (s.thumbnail) loadPipArt(s.thumbnail); } catch {}
@@ -3615,22 +3617,29 @@ function cardHTML(it) {
     <div class="t">${esc(it.title)}</div><div class="s">${esc(it.subtitle || '')}</div>
   </div>`;
 }
-let _dlMapCache = null, _dlMapAt = 0;
-function renderDownloadedIcon(videoId) {
-  // tiny green check on every song row whose cache is COMPLETE.
-  // map() parses localStorage per call, so memoize briefly per render pass.
+function renderDownloadBadge(videoId) {
   try {
-    if (!videoId || typeof OfflineLib === 'undefined' || !OfflineLib.map) return '';
-    const now = Date.now();
-    if (!_dlMapCache || now - _dlMapAt > 1500) {
-      _dlMapCache = OfflineLib.map() || {};
-      _dlMapAt = now;
+    const e = (typeof OfflineLib !== 'undefined' && OfflineLib.get)
+      ? OfflineLib.get(videoId)
+      : null;
+    if (e && e.cacheStatus === 'COMPLETE') {
+      return '<span class="dl-badge dl-done"><svg><use href="#i-dl-done"/></svg></span>';
     }
-    const e = _dlMapCache[videoId];
-    if (e && e.cacheStatus === 'COMPLETE')
-      return `<span class="dl-icon" title="Downloaded">${icon('i-check')}</span>`;
-  } catch {}
-  return '';
+    return '<span class="dl-badge dl-pending"><svg><use href="#i-dl-pending"/></svg></span>';
+  } catch (err) {
+    return '';
+  }
+}
+function refreshDlBadges() {
+  document.querySelectorAll('[data-video-id]').forEach(row => {
+    const vid = row.dataset.videoId;
+    if (!vid) return;
+    const artWrap = row.querySelector('.track-art-wrap');
+    if (!artWrap) return;
+    const existing = artWrap.querySelector('.dl-badge');
+    if (existing) existing.remove();
+    artWrap.insertAdjacentHTML('beforeend', renderDownloadBadge(vid));
+  });
 }
 function trackRowHTML(it, playing = false, extraBtn = '') {
   const qi = it.qi != null ? ` data-qi="${it.qi}"` : '';
@@ -3640,11 +3649,11 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
   const qn = it.qn ? `<span class="q-num">${it.qn}</span>` : '';
   const tn = it.tn != null ? `<span class="t-num">${it.tn}</span>` : '';
   const cls = `track${playing ? ' playing' : ''}${it.qRadio ? ' q-radio' : ''}${it.qn ? ' q-user' : ''}${it.plId ? ' pl-track' : ''}`;
-  return `<div class="${cls}"${qi}${pl} data-item='${esc(JSON.stringify(it))}'>
+  return `<div class="${cls}"${qi}${pl} data-item='${esc(JSON.stringify(it))}' data-video-id="${esc(it.videoId || '')}">
     <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
     ${tn}${qn}
-    ${coverHTML(it.thumbnail, 'track')}
-    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}${renderDownloadedIcon(it.videoId)}</div><div class="ts">${esc(it.artist || it.subtitle || '')}</div></div>
+    <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
+    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || it.subtitle || '')}</div></div>
     ${it.duration ? `<span class="tdur">${esc(it.duration)}</span>` : ''}
     <button class="tbtn btn-fav" title="Favorite">${icon(Library.isFav(it.videoId) ? 'i-heart-f' : 'i-heart-o')}</button>
     <button class="tbtn btn-queue" title="Add to queue">${icon('i-queue')}</button>
@@ -4926,26 +4935,6 @@ function getOfflineMaxCached() {
   } catch {}
   return 50;
 }
-function offlineCachePercent(e) {
-  try {
-    const dl = Number(e && e.downloadedBytes) || 0;
-    const total = Number(e && e.audioSize) || 0;
-    if (total > 0 && dl >= 0) return Math.max(0, Math.min(100, Math.floor((dl / total) * 100)));
-    const p = Number(e && e.downloadPercent);
-    if (Number.isFinite(p)) return Math.max(0, Math.min(100, Math.floor(p)));
-  } catch {}
-  return 0;
-}
-function coverHTMLOffline(e) {
-  try {
-    const art = (e && (e.artworkThumb || e.thumbnail)) || '';
-    const u = safeCover(art);
-    const pct = offlineCachePercent(e);
-    if (!u) return `<div class="off-art-wrap"><div class="off-art-dim"></div><div class="off-art-pct">${pct}%</div></div>`;
-    return `<div class="off-art-wrap"><img src="${esc(u)}" class="off-art-img" alt="" loading="lazy">`
-      + `<div class="off-art-dim"></div><div class="off-art-pct">${pct}%</div></div>`;
-  } catch { return ''; }
-}
 function getOfflineTracks() {
   try {
     const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
@@ -5178,7 +5167,7 @@ function offlineBodyHTML() {
         return `<div class="track${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-idx="${idx}" data-offrow="${esc(vid)}">`
           + `<span class="t-num">${String(idx + 1).padStart(2, '0')}</span>`
           + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
-          + `${coverHTML(art, 'track')}`
+          + `<span class="track-art-wrap">${coverHTML(art, 'track')}${renderDownloadBadge(vid)}</span>`
           + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(e.artist || '')}</div></div>`
           + (dur ? `<span class="tdur">${esc(dur)}</span>` : '')
           + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
@@ -5188,15 +5177,15 @@ function offlineBodyHTML() {
     const partialRowHTML = (e) => {
       try {
         const vid = e.videoId;
-        const pct = offlineCachePercent(e);
+        const art = e.artworkThumb || e.thumbnail || '';
+        const dur = Number(e.duration) > 0 ? fmtTime(Number(e.duration)) : '';
         const checked = !!checkedMap[vid];
         const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
-        return `<div class="track off-row2${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-offrow="${esc(vid)}">`
+        return `<div class="track${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-offrow="${esc(vid)}">`
           + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
-          + `${coverHTMLOffline(e)}`
-          + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div>`
-          + `<div class="ts">${esc(e.artist || '')}<span class="off-partial">Partial</span></div>`
-          + `<div class="off-bar2"><div class="off-fill2" style="width:${pct}%"></div></div></div>`
+          + `<span class="track-art-wrap">${coverHTML(art, 'track')}${renderDownloadBadge(vid)}</span>`
+          + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(e.artist || '')}</div></div>`
+          + (dur ? `<span class="tdur">${esc(dur)}</span>` : '')
           + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
           + `</div>`;
       } catch { return ''; }
