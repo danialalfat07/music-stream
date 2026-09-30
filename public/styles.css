@@ -908,7 +908,7 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
   background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.42));
   border-radius: 12px;
 }
-#lyrics-container { flex: 1; overflow-y: auto; padding: 28vh 16px; scroll-behavior: smooth; }
+#lyrics-container { flex: 1; overflow-y: auto; padding: 28vh 16px 120px; scroll-behavior: smooth; }
 .lyric-line {
   font-size: clamp(20px, 3.2vw, 28px); font-weight: 800;
   color: rgba(255, 255, 255, 0.42); padding: 9px 4px; cursor: pointer;
@@ -929,6 +929,19 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 }
 .lyrics-empty { color: rgba(255,255,255,.65); text-align: center; padding-top: 30vh; font-weight: 600; text-shadow: 0 1px 8px rgba(0,0,0,.5); }
 #lyrics-source { font-size: 11px; color: rgba(255,255,255,.4); text-align: center; padding: 6px 0 0; }
+/* lyric playnav - sticky bottom above bottom nav, only in lyric pane */
+#lyric-playnav { display: none; position: sticky; bottom: 0; z-index: 5; background: var(--card); border-top: 1px solid var(--border); padding: 8px 12px 12px; }
+html[data-theme="light"] #lyric-playnav { background: #fff; }
+#np-lyrics.active #lyric-playnav { display: block; }
+#lyric-seek-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#lyric-seek-track { flex: 1; position: relative; height: 4px; border-radius: 2px; background: rgba(127,127,127,.35); cursor: pointer; touch-action: none; user-select: none; }
+#lyric-seek-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; border-radius: 2px; background: var(--bar-fill, #1db954); background: #1db954; pointer-events: none; }
+#lyric-seek-knob { position: absolute; top: 50%; left: 0%; width: 12px; height: 12px; margin-left: -6px; margin-top: -6px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,.4); pointer-events: none; }
+#lyric-buttons { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 8px; }
+#lyric-buttons .icon-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--hover); color: var(--text); }
+#lyric-buttons .icon-btn .ic { width: 20px; height: 20px; fill: currentColor; }
+#lyric-buttons #lyric-play { width: 52px; height: 52px; background: var(--play-bg); color: var(--play-fg); }
+#lyric-buttons #lyric-play .ic { width: 24px; height: 24px; }
 
 #queue-list, #related-list { padding: 4px; }
 .q-head {

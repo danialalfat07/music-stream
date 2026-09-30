@@ -21,7 +21,7 @@
 <meta name="twitter:title" content="Dnialify Music Stream - Dnialify Project" />
 <meta name="twitter:description" content="Free modern web music player. By Dnialify Project." />
 <link rel="manifest" href="/manifest.json" />
-<meta name="app-version" content="2.3.57" />
+<meta name="app-version" content="2.3.58" />
 <meta name="msapplication-TileColor" content="#1db954" />
 <meta name="msapplication-TileImage" content="/logo-192.png" />
 <meta name="msapplication-config" content="/browserconfig.xml" />
@@ -254,6 +254,21 @@ try {
         <section id="np-lyrics" class="np-pane">
           <div id="lyrics-container"><div class="lyrics-empty">No lyrics yet</div></div>
           <div id="lyrics-source"></div>
+          <div id="lyric-playnav">
+            <div id="lyric-seek-row">
+              <span id="lyric-cur">0:00</span>
+              <div id="lyric-seek-track">
+                <div id="lyric-seek-fill"></div>
+                <div id="lyric-seek-knob"></div>
+              </div>
+              <span id="lyric-dur">0:00</span>
+            </div>
+            <div id="lyric-buttons">
+              <button id="lyric-prev" class="icon-btn" title="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+              <button id="lyric-play" class="icon-btn lyric-play-main" title="Play/Pause"><svg class="ic"><use href="#i-play"/></svg></button>
+              <button id="lyric-next" class="icon-btn" title="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+            </div>
+          </div>
         </section>
         <section id="np-queue" class="np-pane"><div id="queue-list"></div></section>
         <section id="np-related" class="np-pane"><div id="related-list" class="loading-note">Loading…</div></section>
@@ -511,7 +526,7 @@ try {
 // Dnialify versioning: website cache vs user data separated
 (function(){
   try{
-    var VER="2.3.57";
+    var VER="2.3.58";
     var IS_BETA = VER.indexOf('-beta') !== -1;
     var KEY="dnialify_version";
     var cur = localStorage.getItem(KEY);
