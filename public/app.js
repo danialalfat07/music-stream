@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.56";
+const APP_VERSION = "2.3.57";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -967,13 +967,13 @@ const WrappedX = {
     const meta = (vid) => (st[vid] || { title: vid, artist: 'Unknown', thumbnail: '' });
     let topSongs = [];
     if (Object.keys(cnt).length) {
-      topSongs = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([vid, c]) => {
+      topSongs = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([vid, c]) => {
         const m = meta(vid);
         return { videoId: vid, title: m.title || vid, artist: m.artist || 'Unknown', thumbnail: m.thumbnail || '', count: c };
       });
     } else {
       topSongs = Object.entries(st).filter(([, v]) => v && v.last && inM(v.last))
-        .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0)).slice(0, 5)
+        .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0)).slice(0, 20)
         .map(([vid, v]) => ({ videoId: vid, title: v.title || vid, artist: v.artist || 'Unknown', thumbnail: v.thumbnail || '', count: v.plays || 0 }));
     }
     const byA = {};
@@ -1206,31 +1206,34 @@ const WrappedX = {
     } catch {}
     const ta = (s.topArtists && s.topArtists[0]) || null;
     const ts = (s.topSongs && s.topSongs[0]) || null;
-    const tg = s.topGenre || { name: 'Unknown', pct: 0 };
-    const circ = Math.PI * 2 * 40;
-    const donut = `<svg class="wgenre-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/><circle cx="50" cy="50" r="40" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(circ * (tg.pct || 0) / 100).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`;
+    // topGenre kept in snapshot for backward-compat; card removed (9-card deck)
     if (s.isEmpty) {
-      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+      return [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => {
         const head = i === 0
           ? `<div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Quiet month...</h1><div class="wsub">No plays tracked. Play music and your recap will fill in.</div>`
           : `<div class="wmonth">${esc(mn)}</div><h1 class="wbig">—</h1><div class="wsub">Nothing here yet. Your stats will appear here next time.</div>`;
-        return `<div class="wrapped-card wempty" style="background:${g(i)}">${head}<div class="wfoot">Dnialify Recap · ${esc(s.month)}${i === 9 ? '<br><button class="wbtn ghost" id="wrapped-close2">Close</button>' : ''}</div></div>`;
+        return `<div class="wrapped-card wempty" style="background:${g(i)}">${head}<div class="wfoot">Dnialify Recap · ${esc(s.month)}${i === 8 ? '<br><button class="wbtn ghost" id="wrapped-close2">Close</button>' : ''}</div></div>`;
       });
     }
     const sk = Math.round((s.skipRate || 0) * 100), cp = Math.round((s.completionRate || 0) * 100);
     const off = Math.round((s.offlineRatio || 0) * 100);
     const nd = (s.newDiscoveries || []).slice(0, 3).map((d) => `<div class="wchip">${esc(d.title)} · ${esc(d.artist)}</div>`).join('');
+    const topList = Array.isArray(s.topSongs) ? s.topSongs.slice(0, 20) : [];
+    const topRows = topList.map((t, i) => {
+      const th = t && t.thumbnail ? `<img class="wtop-art" src="${esc(t.thumbnail)}" alt="" loading="lazy" onerror="this.style.display='none'">` : `<div class="wtop-art wph">${esc(this.initials(t ? t.title : '?'))}</div>`;
+      return `<div class="wtop-row"><span class="wtop-num">${i + 1}</span>${th}<div class="wtop-meta"><div class="wtop-title">${esc(t ? (t.title || 'Unknown') : 'Unknown')}</div><div class="wtop-sub">${esc(t ? (t.artist || 'Unknown') : 'Unknown')} · ${t ? (t.count || 0) : 0}x</div></div></div>`;
+    }).join('');
+    const topSec = topRows ? `<div class="wtop-wrap"><div class="wtop-head">Lagu Paling Sering Diputar</div><div class="wtop-list">${topRows}</div></div>` : '';
     return [
       `<div class="wrapped-card" style="background:${g(0)}"><div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Your Monthly Recap</h1><div class="wsub">Tap right to replay your month in music</div><div class="wfoot">Dnialify Music Stream</div></div>`,
       `<div class="wrapped-card" style="background:${g(1)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${s.plays}</div><div class="wsub">songs played</div><div class="wfoot">${s.totalUniqueSongs} unique · ${s.favCount} favorites</div></div>`,
       `<div class="wrapped-card" style="background:${g(2)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${esc(fmtMin(s.minutes))}</div><div class="wsub">time listening</div><div class="wfoot">${esc(cmpTxt)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(3)}"><div class="wmonth">Top artist</div>${ta ? this.artOrInit(ta.thumbnail, ta.artist, 'wcirc') + `<h1 class="wbig">${esc(ta.artist)}</h1><div class="wsub">${ta.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(4)}"><div class="wmonth">Top song</div>${ts ? this.artOrInit(ts.thumbnail, ts.title, 'wcirc') + `<h1 class="wbig">${esc(ts.title)}</h1><div class="wsub">${esc(ts.artist)} · ${ts.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Top genre</div>${donut}<h1 class="wbig">${esc(tg.name)}</h1><div class="wsub">${tg.pct}% of your month</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(9)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div><div class="wcta"><button class="wbtn" id="wrapped-share">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
+      `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button class="wbtn" id="wrapped-share" disabled style="opacity:.5;pointer-events:none">Share (coming soon)</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
     ];
   },
   async shareWrapped() {
