@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.53";
+const APP_VERSION = "2.3.54";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2080,6 +2080,7 @@ const OfflineLib = {
     if ((location.hash || '').startsWith('#/library/offline')) route();
     try { renderSidebarLibrary(); } catch {}
     try { refreshDlBadges(); } catch {}
+    try { scheduleDlRefresh(); } catch {}
   },
   continueDownload(videoId) {
     if (!videoId) return;
@@ -3622,13 +3623,28 @@ function renderDownloadBadge(videoId) {
     const e = (typeof OfflineLib !== 'undefined' && OfflineLib.get)
       ? OfflineLib.get(videoId)
       : null;
-    if (e && e.cacheStatus === 'COMPLETE') {
+    if (!e) return '';
+    if (e.cacheStatus === 'COMPLETE') {
       return '<span class="dl-badge dl-done"><svg><use href="#i-dl-done"/></svg></span>';
     }
-    return '<span class="dl-badge dl-pending"><svg><use href="#i-dl-pending"/></svg></span>';
+    const have = Number(e.downloadedBytes) || 0;
+    const total = Number(e.audioSize) || 0;
+    if (have > 0 && total > 0 && have < total) {
+      const pct = Math.max(1, Math.min(99, Math.round((have / total) * 100)));
+      return '<span class="dl-pct-overlay">' + pct + '%</span>';
+    }
+    return '';
   } catch (err) {
     return '';
   }
+}
+let dlRefreshTimer = null;
+function scheduleDlRefresh() {
+  if (dlRefreshTimer) return;
+  dlRefreshTimer = setTimeout(() => {
+    dlRefreshTimer = null;
+    try { refreshDlBadges(); } catch (e) {}
+  }, 1000);
 }
 function refreshDlBadges() {
   document.querySelectorAll('[data-video-id]').forEach(row => {
@@ -3636,8 +3652,7 @@ function refreshDlBadges() {
     if (!vid) return;
     const artWrap = row.querySelector('.track-art-wrap');
     if (!artWrap) return;
-    const existing = artWrap.querySelector('.dl-badge');
-    if (existing) existing.remove();
+    artWrap.querySelectorAll('.dl-badge, .dl-pct-overlay').forEach(el => el.remove());
     artWrap.insertAdjacentHTML('beforeend', renderDownloadBadge(vid));
   });
 }
