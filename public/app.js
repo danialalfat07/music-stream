@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.59";
+const APP_VERSION = "2.3.60";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1236,65 +1236,115 @@ const WrappedX = {
       `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button class="wbtn" id="wrapped-share" disabled style="opacity:.5;pointer-events:none">Share (coming soon)</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
     ];
   },
-  async shareWrapped() {
+async shareWrapped() {
     try {
       const ym = this._ym;
-      const s = this.getSnap(ym) || (this._cards && this._cards.length ? null : null);
-      const snap = this.getSnap(ym) || (() => { try { return JSON.parse(localStorage.getItem(this.pfx() + this.mKey(ym))); } catch { return null; } })();
-      if (!snap) { try { toast('Nothing to share'); } catch {} return; }
-      const cv = document.createElement('canvas');
-      cv.width = 1080; cv.height = 1920;
-      const ctx = cv.getContext('2d');
-      const gr = ctx.createLinearGradient(0, 0, 1080, 1920);
-      gr.addColorStop(0, '#1DB954'); gr.addColorStop(1, '#0A8F3C');
-      ctx.fillStyle = gr; ctx.fillRect(0, 0, 1080, 1920);
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-      ctx.font = 'bold 64px system-ui, sans-serif';
-      ctx.fillText(this.monthName(snap.month), 540, 220);
-      ctx.font = '40px system-ui, sans-serif';
-      ctx.fillText('My Dnialify Recap', 540, 290);
-      const ta = (snap.topArtists && snap.topArtists[0]) || null;
-      const ts = (snap.topSongs && snap.topSongs[0]) || null;
-      // art circle: try thumbnail, fallback initials
-      const cx = 540, cy = 620, rr = 150;
-      let drew = false;
-      const urls = [ta && ta.thumbnail, ts && ts.thumbnail].filter(Boolean);
-      for (const u of urls) {
-        try {
-          const img = await new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = rej; setTimeout(rej, 3500); im.src = u; });
-          ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.clip();
-          ctx.drawImage(img, cx - rr, cy - rr, rr * 2, rr * 2);
-          ctx.restore(); drew = true; break;
-        } catch {}
-      }
-      if (!drew) {
-        ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 120px system-ui, sans-serif';
-        ctx.fillText(this.initials(ta ? ta.artist : '?'), cx, cy + 40);
-      }
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-      ctx.font = 'bold 72px system-ui, sans-serif';
-      ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
-      ctx.font = '44px system-ui, sans-serif';
-      ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
-      ctx.font = 'bold 96px system-ui, sans-serif';
-      ctx.fillText(String(snap.plays) + ' plays', 540, 1150);
-      ctx.font = '56px system-ui, sans-serif';
-      ctx.fillText(String(Math.round((snap.minutes || 0) / 60 * 10) / 10) + ' hours · ' + String(snap.topGenre ? snap.topGenre.name : ''), 540, 1240);
-      ctx.font = '36px system-ui, sans-serif';
-      ctx.fillText('Made with Dnialify Music Stream', 540, 1800);
-      const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
-      if (!blob) throw new Error('render failed');
-      const file = new File([blob], `dnialify-wrapped-${snap.month}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'My Dnialify Wrapped' });
+      const s = this.getSnap(ym) || (() => { try { return JSON.parse(localStorage.getItem(this.pfx() + this.mKey(ym))); } catch { return null; } })();
+      if (!s) { try { toast('Nothing to share'); } catch {} return; }
+      if (window.NativeShare && window.NativeShare.available()) {
+        const cv = document.createElement('canvas');
+        cv.width = 1080; cv.height = 1920;
+        const ctx = cv.getContext('2d');
+        const gr = ctx.createLinearGradient(0, 0, 1080, 1920);
+        gr.addColorStop(0, '#1DB954'); gr.addColorStop(1, '#0A8F3C');
+        ctx.fillStyle = gr; ctx.fillRect(0, 0, 1080, 1920);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = 'bold 64px system-ui, sans-serif';
+        ctx.fillText(this.monthName(s.month), 540, 220);
+        ctx.font = '40px system-ui, sans-serif';
+        ctx.fillText('My Dnialify Recap', 540, 290);
+        const ta = (s.topArtists && s.topArtists[0]) || null;
+        const ts = (s.topSongs && s.topSongs[0]) || null;
+        // art circle: try thumbnail, fallback initials
+        const cx = 540, cy = 620, rr = 150;
+        let drew = false;
+        const urls = [ta && ta.thumbnail, ts && ts.thumbnail].filter(Boolean);
+        for (const u of urls) {
+          try {
+            const img = await new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = rej; setTimeout(rej, 3500); im.src = u; });
+            ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.clip();
+            ctx.drawImage(img, cx - rr, cy - rr, rr * 2, rr * 2);
+            ctx.restore(); drew = true; break;
+          } catch {}
+        }
+        if (!drew) {
+          ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 120px system-ui, sans-serif';
+          ctx.fillText(this.initials(ta ? ta.artist : '?'), cx, cy + 40);
+        }
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = 'bold 72px system-ui, sans-serif';
+        ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
+        ctx.font = '44px system-ui, sans-serif';
+        ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
+        ctx.font = 'bold 96px system-ui, sans-serif';
+        ctx.fillText(String(s.plays) + ' plays', 540, 1150);
+        ctx.font = '56px system-ui, sans-serif';
+        ctx.fillText(String(Math.round((s.minutes || 0) / 60 * 10) / 10) + ' hours · ' + String(s.topGenre ? s.topGenre.name : ''), 540, 1240);
+        ctx.font = '36px system-ui, sans-serif';
+        ctx.fillText('Made with Dnialify Music Stream', 540, 1800);
+        const dataUrl = cv.toDataURL('image/png');
+        const res = window.NativeShare.sharePngDataUrl(dataUrl, `dnialify-wrapped-${s.month}.png`, 'My Dnialify Wrapped');
+        if (res.ok) {
+          try { toast('Recap shared via app'); } catch {} return;
+        } else {
+          throw new Error(res.error || 'native share failed');
+        }
       } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `dnialify-wrapped-${snap.month}.png`;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-        try { toast('Recap image downloaded'); } catch {}
+        const cv = document.createElement('canvas');
+        cv.width = 1080; cv.height = 1920;
+        const ctx = cv.getContext('2d');
+        const gr = ctx.createLinearGradient(0, 0, 1080, 1920);
+        gr.addColorStop(0, '#1DB954'); gr.addColorStop(1, '#0A8F3C');
+        ctx.fillStyle = gr; ctx.fillRect(0, 0, 1080, 1920);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = 'bold 64px system-ui, sans-serif';
+        ctx.fillText(this.monthName(s.month), 540, 220);
+        ctx.font = '40px system-ui, sans-serif';
+        ctx.fillText('My Dnialify Recap', 540, 290);
+        const ta = (s.topArtists && s.topArtists[0]) || null;
+        const ts = (s.topSongs && s.topSongs[0]) || null;
+        // art circle: try thumbnail, fallback initials
+        const cx = 540, cy = 620, rr = 150;
+        let drew = false;
+        const urls = [ta && ta.thumbnail, ts && ts.thumbnail].filter(Boolean);
+        for (const u of urls) {
+          try {
+            const img = await new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = rej; setTimeout(rej, 3500); im.src = u; });
+            ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.clip();
+            ctx.drawImage(img, cx - rr, cy - rr, rr * 2, rr * 2);
+            ctx.restore(); drew = true; break;
+          } catch {}
+        }
+        if (!drew) {
+          ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 120px system-ui, sans-serif';
+          ctx.fillText(this.initials(ta ? ta.artist : '?'), cx, cy + 40);
+        }
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = 'bold 72px system-ui, sans-serif';
+        ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
+        ctx.font = '44px system-ui, sans-serif';
+        ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
+        ctx.font = 'bold 96px system-ui, sans-serif';
+        ctx.fillText(String(s.plays) + ' plays', 540, 1150);
+        ctx.font = '56px system-ui, sans-serif';
+        ctx.fillText(String(Math.round((s.minutes || 0) / 60 * 10) / 10) + ' hours · ' + String(s.topGenre ? s.topGenre.name : ''), 540, 1240);
+        ctx.font = '36px system-ui, sans-serif';
+        ctx.fillText('Made with Dnialify Music Stream', 540, 1800);
+        const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+        if (!blob) throw new Error('render failed');
+        const file = new File([blob], `dnialify-wrapped-${s.month}.png`, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'My Dnialify Wrapped' });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `dnialify-wrapped-${s.month}.png`;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+          try { toast('Recap image downloaded'); } catch {}
+        }
       }
     } catch (e) {
       try {
@@ -1306,6 +1356,24 @@ const WrappedX = {
   },
 };
 window.WrappedX = WrappedX;
+/* ================= native share helper (reusable: wrapped, lyric quote, playlist cover) ================= */
+window.NativeShare = {
+  available() {
+    try {
+      return !!(window.NativePlayback && typeof window.NativePlayback.sharePng === 'function');
+    } catch { return false; }
+  },
+  sharePngDataUrl(dataUrl, filename, title) {
+    // Returns parsed bridge JSON {ok, bytes} or {ok:false, error}. Throws when bridge missing.
+    const b = window.NativePlayback.sharePng(String(dataUrl || ''), String(filename || 'share.png'), String(title || 'Share'));
+    try { return JSON.parse(b); } catch { return { ok: false, error: 'bad-bridge-json' }; }
+  },
+  async shareCanvas(cv, filename, title) {
+    const dataUrl = cv.toDataURL('image/png');
+    if (!this.available()) return { ok: false, error: 'no-bridge' };
+    return this.sharePngDataUrl(dataUrl, filename, title);
+  },
+};
 function generateWrappedSnapshot(y, m) { return WrappedX.generateWrappedSnapshot(y, m); }
 function checkWrappedTrigger() { return WrappedX.checkWrappedTrigger(); }
 
