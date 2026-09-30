@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.60";
+const APP_VERSION = "2.3.61";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1233,7 +1233,7 @@ const WrappedX = {
       `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
       `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button class="wbtn" id="wrapped-share" disabled style="opacity:.5;pointer-events:none">Share (coming soon)</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
+      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button class="wbtn" id="wrapped-share">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
     ];
   },
 async shareWrapped() {
