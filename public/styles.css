@@ -1939,8 +1939,8 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
 .wrapped-empty { opacity: .7; padding: 20px 4px; }
 
 /* wrapped share preview modal */
-.wsp-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; }
-.wsp-card { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 90vw; max-height: 90vh; background: #1c1c1c; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; z-index: 101; }
+.wsp-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10010; }
+.wsp-card { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 90vw; max-height: 90vh; background: #1c1c1c; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; z-index: 10011; }
 .wsp-card img { max-height: 70vh; max-width: 100%; border-radius: 12px; display: block; }
 .wsp-actions { display: flex; gap: 12px; justify-content: flex-end; }
 

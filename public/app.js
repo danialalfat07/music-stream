@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.65";
+const APP_VERSION = "2.3.66";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1146,7 +1146,7 @@ const WrappedX = {
       this._list = saved;
       const rows = saved.map((e) => {
         const s = e.snap || {};
-        const ta = (s.topArtists && s.topArtists[0] && s.topArtists[0].artist) || '—';
+        const ta = (s.topArtists && s.topArtists[0] && s.topArtists[0].artist) || '-';
         return `<button class="wrapped-arch-row" data-ym="${esc(e.ym)}"><span class="war-month">${esc(this.monthName(e.ym))}</span><span class="war-sub">${s.plays || 0} plays · ${esc(ta)}</span></button>`;
       }).join('');
       const liveRow = live ? `<button class="wrapped-arch-row live" data-ym="${esc(curYm)}" data-live="1"><span class="war-month">${esc(this.monthName(curYm))} (so far)</span><span class="war-sub">${live.plays} plays · live</span></button>` : '';
@@ -1255,7 +1255,7 @@ const WrappedX = {
       return [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => {
         const head = i === 0
           ? `<div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Quiet month...</h1><div class="wsub">No plays tracked. Play music and your recap will fill in.</div>`
-          : `<div class="wmonth">${esc(mn)}</div><h1 class="wbig">—</h1><div class="wsub">Nothing here yet. Your stats will appear here next time.</div>`;
+          : `<div class="wmonth">${esc(mn)}</div><h1 class="wbig">-</h1><div class="wsub">Nothing here yet. Your stats will appear here next time.</div>`;
         return `<div class="wrapped-card wempty" style="background:${g(i)}">${head}<div class="wfoot">Dnialify Recap · ${esc(s.month)}${i === 8 ? '<br><button class="wbtn ghost" id="wrapped-close2">Close</button>' : ''}</div></div>`;
       });
     }
@@ -1272,12 +1272,12 @@ const WrappedX = {
       `<div class="wrapped-card" style="background:${g(0)}"><div class="wmonth">${esc(mn)}${isLive ? ' (so far)' : ''}</div><h1 class="wbig">Your Monthly Recap</h1><div class="wsub">Tap right to replay your month in music</div><div class="wfoot">Dnialify Music Stream</div></div>`,
       `<div class="wrapped-card" style="background:${g(1)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${s.plays}</div><div class="wsub">songs played</div><div class="wfoot">${s.totalUniqueSongs} unique · ${s.favCount} favorites</div></div>`,
       `<div class="wrapped-card" style="background:${g(2)}"><div class="wmonth">${esc(mn)}</div><div class="whuge">${esc(fmtMin(s.minutes))}</div><div class="wsub">time listening</div><div class="wfoot">${esc(cmpTxt)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(3)}"><div class="wmonth">Top artist</div>${ta ? this.artOrInit(ta.thumbnail, ta.artist, 'wcirc') + `<h1 class="wbig">${esc(ta.artist)}</h1><div class="wsub">${ta.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(4)}"><div class="wmonth">Top song</div>${ts ? this.artOrInit(ts.thumbnail, ts.title, 'wcirc') + `<h1 class="wbig">${esc(ts.title)}</h1><div class="wsub">${esc(ts.artist)} · ${ts.count} plays</div>` : '<h1 class="wbig">—</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(3)}"><div class="wmonth">Top artist</div>${ta ? this.artOrInit(ta.thumbnail, ta.artist, 'wcirc') + `<h1 class="wbig">${esc(ta.artist)}</h1><div class="wsub">${ta.count} plays</div>` : '<h1 class="wbig">-</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
+      `<div class="wrapped-card" style="background:${g(4)}"><div class="wmonth">Top song</div>${ts ? this.artOrInit(ts.thumbnail, ts.title, 'wcirc') + `<h1 class="wbig">${esc(ts.title)}</h1><div class="wsub">${esc(ts.artist)} · ${ts.count} plays</div>` : '<h1 class="wbig">-</h1>'}<div class="wfoot">${esc(mn)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
       `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button id="wrapped-share-btn" class="pill-btn">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
+      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' · ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button id="wrapped-share-btn" class="pill-btn">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
     ];
   },
 async shareWrapped() {
@@ -1318,7 +1318,7 @@ async shareWrapped() {
         }
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
         ctx.font = 'bold 72px system-ui, sans-serif';
-        ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
+        ctx.fillText(String(ta ? ta.artist : '-').slice(0, 24), 540, 900);
         ctx.font = '44px system-ui, sans-serif';
         ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
         ctx.font = 'bold 96px system-ui, sans-serif';
@@ -1367,7 +1367,7 @@ async shareWrapped() {
         }
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
         ctx.font = 'bold 72px system-ui, sans-serif';
-        ctx.fillText(String(ta ? ta.artist : '—').slice(0, 24), 540, 900);
+        ctx.fillText(String(ta ? ta.artist : '-').slice(0, 24), 540, 900);
         ctx.font = '44px system-ui, sans-serif';
         ctx.fillText(String(ts ? (ts.title + ' · ' + ts.artist) : '').slice(0, 44), 540, 970);
         ctx.font = 'bold 96px system-ui, sans-serif';
@@ -1457,15 +1457,44 @@ async function renderWrappedShareCard(snapshot) {
   };
   const initials = (value) => String(value || '?').trim().split(/\s+/).slice(0, 2)
     .map((part) => part[0]).join('').toUpperCase() || '?';
-  const loadImage = (url) => new Promise((resolve) => {
-    if (!url) return resolve(null);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const artCache = new Map();
+  const loadImageOnce = (src, timeoutMs) => new Promise((resolve) => {
     const img = new Image();
-    const timer = setTimeout(() => { img.src = ''; resolve(null); }, 4000);
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return; done = true;
+      try { img.src = ''; } catch {}
+      console.log('[WRAP_ART] url=' + src + ' status=timeout');
+      resolve(null);
+    }, timeoutMs);
     img.crossOrigin = 'anonymous';
-    img.onload = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); resolve(null); };
-    img.src = url === '/logo.png' ? url : '/api/thumb?url=' + encodeURIComponent(url);
+    img.onload = () => {
+      if (done) return; done = true;
+      clearTimeout(timer);
+      console.log('[WRAP_ART] url=' + src + ' status=ok');
+      resolve(img);
+    };
+    img.onerror = () => {
+      if (done) return; done = true;
+      clearTimeout(timer);
+      console.log('[WRAP_ART] url=' + src + ' status=fail');
+      resolve(null);
+    };
+    img.src = src;
   });
+  const loadImage = async (url) => {
+    if (!url) return null;
+    const src = url === '/logo.png' ? url : '/api/thumb?url=' + encodeURIComponent(url);
+    if (artCache.has(src)) return artCache.get(src);
+    let img = await loadImageOnce(src, 6000);
+    if (!img) {
+      await sleep(100);
+      img = await loadImageOnce(src, 6000);
+    }
+    artCache.set(src, img);
+    return img;
+  };
   const drawFallbackCircle = (x, y, w, h, label, gradIdx) => {
     const g = WRAP_GRADS[gradIdx % WRAP_GRADS.length];
     ctx.save();
@@ -1482,7 +1511,7 @@ async function renderWrappedShareCard(snapshot) {
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.round(w * 0.34)}px system-ui, sans-serif`;
+    ctx.font = `900 ${Math.round(w * 0.5)}px system-ui, sans-serif`;
     ctx.fillText(initials(label), x + w / 2, y + h / 2);
     ctx.restore();
   };
@@ -1510,8 +1539,13 @@ async function renderWrappedShareCard(snapshot) {
     return value;
   };
   const logo = await loadImage('/logo.png');
-  const artistImage = artist && await loadImage(artist.thumbnail);
-  const songImages = await Promise.all(songs.map((song) => song && song.thumbnail ? loadImage(song.thumbnail) : null));
+  await sleep(100);
+  const artistImage = artist ? await loadImage(artist.thumbnail) : null;
+  const songImages = [];
+  for (const song of songs) {
+    await sleep(100);
+    songImages.push(song && song.thumbnail ? await loadImage(song.thumbnail) : null);
+  }
 
   ctx.save();
   ctx.beginPath();
@@ -2238,11 +2272,11 @@ function initAudio(){
         const pos = fmtMs(ev.positionMs);
         const dur = fmtMs(ev.durationMs);
         if (ev.status === 'attempting') {
-          showToast('Stream glitch at ' + pos + ' / ' + dur + ' — recovering…', 2500);
+          showToast('Stream glitch at ' + pos + ' / ' + dur + ' · recovering…', 2500);
         } else if (ev.status === 'recovered') {
-          showToast('Recovered at ' + pos + ' / ' + dur + ' — playback resumed', 2500);
+          showToast('Recovered at ' + pos + ' / ' + dur + ' · playback resumed', 2500);
         } else if (ev.status === 'failed') {
-          showToast('Recovery failed at ' + pos + ' / ' + dur + ' — ' + (ev.reason || 'unknown'), 5000);
+          showToast('Recovery failed at ' + pos + ' / ' + dur + ' · ' + (ev.reason || 'unknown'), 5000);
         }
         return;
       }
