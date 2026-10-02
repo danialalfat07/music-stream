@@ -1174,6 +1174,7 @@ app.get('/api/thumb', async (req, res) => {
       },
     });
     if (!r.ok) return res.status(502).end();
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader(
       'Content-Type',
       r.headers.get('content-type') || 'image/jpeg',

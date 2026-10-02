@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.64";
+const APP_VERSION = "2.3.65";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1080,6 +1080,50 @@ const WrappedX = {
     }, { passive: true });
     return m;
   },
+
+  // shared canvas preview modal (dataUrl + canvas + filename passed in)
+  wrappedSharePreviewShow(dataUrl, canvas, filename) {
+    const m = document.getElementById('wrapped-share-preview');
+    if (!m) {
+      const el = document.createElement('div');
+      el.id = 'wrapped-share-preview';
+      el.className = 'hidden';
+      el.innerHTML = '<div class="wsp-backdrop"></div><div class="wsp-card"><img id="wsp-img" /><div class="wsp-actions"><button id="wsp-cancel" class="pill-btn ghost">Batal</button><button id="wsp-share" class="pill-btn">Bagikan</button></div></div>';
+      document.body.appendChild(el);
+      el.querySelector('#wsp-cancel').addEventListener('click', () => {
+        document.getElementById('wrapped-share-preview').classList.add('hidden');
+      });
+    }
+    document.getElementById('wsp-img').src = dataUrl;
+    document.getElementById('wrapped-share-preview').classList.remove('hidden');
+    const shareBtn = document.getElementById('wsp-share');
+    // remove old listener to avoid double-binding
+    const newBtn = shareBtn.cloneNode(true);
+    shareBtn.parentNode.replaceChild(newBtn, shareBtn);
+    newBtn.addEventListener('click', async () => {
+      document.getElementById('wrapped-share-preview').classList.add('hidden');
+      try {
+        const res = await shareCanvasAsPng(canvas, filename);
+        window.__lastShareResult = res;
+        try { if (res.ok) toast('Recap shared'); else toast('Share failed'); } catch {}
+      } catch (e) {
+        try { toast('Share failed'); } catch {}
+      }
+    });
+  },
+
+  // render canvas + show preview modal for sharing
+  renderPreviewWithShare(snapshot) {
+    renderWrappedShareCard(snapshot).then(canvas => {
+      const filename = 'wrapped-' + (snapshot.month || 'x') + '.png';
+      const dataUrl = canvas.toDataURL('image/png');
+      this.wrappedSharePreviewShow(dataUrl, canvas, filename);
+    }).catch(err => {
+      console.error('Wrapped preview failed:', err);
+      try { toast('Failed to generate preview'); } catch {}
+    });
+  },
+
   openArchive() {
     try {
       this._mode = 'archive';
@@ -1395,13 +1439,13 @@ async function shareCanvasAsPng(canvas, filename) {
 }
 
 async function renderWrappedShareCard(snapshot) {
-  const W = 1080, H = 1920, R = 60;
+  const W = 1080, H = 1920, R = 70;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
   const s = snapshot || {};
   const artist = s.topArtists && s.topArtists[0];
-  const song = s.topSongs && s.topSongs[0];
+  const songs = Array.isArray(s.topSongs) ? s.topSongs.slice(0, 5) : [];
   const monthParts = String(s.month || '').split('-').map(Number);
   const monthTitle = monthParts.length === 2 && monthParts[0] && monthParts[1]
     ? new Date(monthParts[0], monthParts[1] - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()
@@ -1416,32 +1460,49 @@ async function renderWrappedShareCard(snapshot) {
   const loadImage = (url) => new Promise((resolve) => {
     if (!url) return resolve(null);
     const img = new Image();
-    const timer = setTimeout(() => { img.src = ''; resolve(null); }, 2000);
+    const timer = setTimeout(() => { img.src = ''; resolve(null); }, 4000);
     img.crossOrigin = 'anonymous';
     img.onload = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); resolve(null); };
     img.src = url === '/logo.png' ? url : '/api/thumb?url=' + encodeURIComponent(url);
   });
-  const drawFallback = (x, y, w, h, label, radius) => {
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  const drawFallbackCircle = (x, y, w, h, label, gradIdx) => {
+    const g = WRAP_GRADS[gradIdx % WRAP_GRADS.length];
+    ctx.save();
     ctx.beginPath();
-    ctx.roundRect(x, y, w, h, radius);
+    ctx.arc(x + w / 2, y + h / 2, w / 2, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(x + w / 2, y + h / 2, w * 0.1, x + w / 2, y + h / 2, w / 2);
+    grad.addColorStop(0, g[0]);
+    grad.addColorStop(1, g[1]);
+    ctx.fillStyle = grad;
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.round(Math.min(w, h) * 0.34)}px system-ui, sans-serif`;
+    ctx.font = `bold ${Math.round(w * 0.34)}px system-ui, sans-serif`;
     ctx.fillText(initials(label), x + w / 2, y + h / 2);
-    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   };
-  const drawImage = (img, x, y, w, h, radius, label) => {
+  const drawImageCircle = (img, x, y, w, h, label, gradIdx) => {
     ctx.save();
     ctx.beginPath();
-    ctx.roundRect(x, y, w, h, radius);
+    ctx.arc(x + w / 2, y + h / 2, w / 2, 0, Math.PI * 2);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
     ctx.clip();
     if (img) ctx.drawImage(img, x, y, w, h);
-    else drawFallback(x, y, w, h, label, radius);
+    else drawFallbackCircle(x, y, w, h, label, gradIdx);
     ctx.restore();
+  };
+  const drawRoundedRect = (x, y, w, h, radius, fillStyle) => {
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.fill();
   };
   const truncate = (text, maxWidth) => {
     let value = String(text || '');
@@ -1450,7 +1511,7 @@ async function renderWrappedShareCard(snapshot) {
   };
   const logo = await loadImage('/logo.png');
   const artistImage = artist && await loadImage(artist.thumbnail);
-  const songImage = song && await loadImage(song.thumbnail);
+  const songImages = await Promise.all(songs.map((song) => song && song.thumbnail ? loadImage(song.thumbnail) : null));
 
   ctx.save();
   ctx.beginPath();
@@ -1463,64 +1524,94 @@ async function renderWrappedShareCard(snapshot) {
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
-  if (logo) ctx.drawImage(logo, 430, 72, 64, 64);
+
+  // Header
+  if (logo) {
+    ctx.drawImage(logo, 100, 100, 80, 80);
+  } else {
+    drawFallbackCircle(100, 140, 80, 80, 'D', 0);
+  }
   ctx.textAlign = 'left';
-  ctx.font = 'bold 24px system-ui, sans-serif';
-  ctx.fillText('Dnialify Music Stream', 510, 116);
+  ctx.font = 'bold 36px system-ui, sans-serif';
+  ctx.fillText('Dnialify', 195, 148);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 28px system-ui, sans-serif';
-  ctx.letterSpacing = '5px';
-  ctx.fillText(monthTitle, 540, 235);
+  ctx.font = 'bold 34px system-ui, sans-serif';
+  ctx.letterSpacing = '6px';
+  ctx.globalAlpha = 0.9;
+  ctx.fillText(monthTitle, 540, 260);
   ctx.letterSpacing = '0px';
-  ctx.globalAlpha = 0.85;
-  ctx.font = '22px system-ui, sans-serif';
-  ctx.fillText('Your Month in Music', 540, 285);
   ctx.globalAlpha = 1;
 
+  // Hero artist
   if (artist) {
-    drawImage(artistImage, 340, 350, 400, 400, 200, artist.artist);
-    ctx.font = 'bold 56px system-ui, sans-serif';
-    ctx.fillText(truncate(artist.artist || '?', 880), 540, 830);
-    ctx.globalAlpha = 0.9;
-    ctx.font = '24px system-ui, sans-serif';
-    ctx.fillText(`${artist.count || 0} plays`, 540, 875);
-    ctx.globalAlpha = 1;
-  }
-
-  if (song) {
-    drawImage(songImage, 100, 960, 96, 96, 18, song.title);
-    ctx.textAlign = 'left';
-    ctx.font = 'bold 32px system-ui, sans-serif';
-    ctx.fillText(truncate(song.title || '?', 760), 230, 1002);
+    drawImageCircle(artistImage, 300, 340, 480, 480, artist.artist, (monthParts[1] || 1) % WRAP_GRADS.length);
+    ctx.font = 'bold 68px system-ui, sans-serif';
+    ctx.fillText(truncate(artist.artist || '?', 880), 540, 880);
     ctx.globalAlpha = 0.85;
-    ctx.font = '24px system-ui, sans-serif';
-    ctx.fillText(truncate(song.artist || '?', 760), 230, 1042);
+    ctx.font = '28px system-ui, sans-serif';
+    ctx.fillText(`${artist.count || 0} plays`, 540, 950);
     ctx.globalAlpha = 1;
-    ctx.textAlign = 'center';
   }
 
+  // Divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(180, 1000);
+  ctx.lineTo(900, 1000);
+  ctx.stroke();
+
+  // Top 5 songs
+  if (songs.length) {
+    ctx.font = 'bold 28px system-ui, sans-serif';
+    ctx.letterSpacing = '3px';
+    ctx.globalAlpha = 0.9;
+    ctx.fillText('TOP 5 SONGS', 540, 1080);
+    ctx.letterSpacing = '0px';
+    ctx.globalAlpha = 1;
+    songs.forEach((song, i) => {
+      const y = 1140 + i * 72;
+      const img = songImages[i];
+      drawImageCircle(img, 130, y, 60, 60, song.title, i);
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 28px system-ui, sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(truncate(song.title || '?', 600), 250, y + 28);
+      ctx.globalAlpha = 0.8;
+      ctx.font = '20px system-ui, sans-serif';
+      ctx.fillText(truncate(song.artist || '?', 600), 250, y + 55);
+      ctx.globalAlpha = 0.9;
+      ctx.font = 'bold 24px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${song.count || 0}x`, 920, y + 40);
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // Stat row
   const stats = [
     [String(s.plays || 0), 'songs played'],
     [fmtMin(s.minutes), 'listening time'],
     [String(s.streak || 0), 'day streak'],
   ];
   stats.forEach((stat, i) => {
-    const x = 70 + i * 320;
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.beginPath();
-    ctx.roundRect(x, 1210, 280, 150, 20);
-    ctx.fill();
+    const x = 90 + i * 300;
+    drawRoundedRect(x, 1560, 280, 160, 20, 'rgba(0,0,0,0.28)');
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 34px system-ui, sans-serif';
-    ctx.fillText(stat[0], x + 140, 1270);
+    ctx.font = 'bold 48px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(stat[0], x + 140, 1560 + 70);
     ctx.globalAlpha = 0.85;
-    ctx.font = '20px system-ui, sans-serif';
-    ctx.fillText(stat[1], x + 140, 1315);
+    ctx.font = '22px system-ui, sans-serif';
+    ctx.fillText(stat[1], x + 140, 1560 + 115);
     ctx.globalAlpha = 1;
   });
-  ctx.font = '18px system-ui, sans-serif';
+
+  // Footer
+  ctx.font = '20px system-ui, sans-serif';
   ctx.globalAlpha = 0.7;
-  ctx.fillText('dnialify-music-stream.vercel.app', 540, H - 90);
+  ctx.fillText('dnialify-music-stream.vercel.app', 540, 1820);
   ctx.restore();
   return c;
 }
@@ -1538,15 +1629,16 @@ async function shareWrapped(snapshot) {
   }
 }
 
-window.shareWrapped = shareWrapped;
 window.renderWrappedToCanvas = renderWrappedToCanvas;
+window.renderWrappedShareCard = renderWrappedShareCard;
 window.shareCanvasAsPng = shareCanvasAsPng;
 if (!window.__wrappedShareWired) {
   window.__wrappedShareWired = true;
   document.addEventListener('click', (ev) => {
     if (ev.target && ev.target.id === 'wrapped-share-btn') {
       const snap = window.__currentWrappedSnapshot;
-      if (snap) shareWrapped(snap);
+      if (!snap) return;
+      WrappedX.renderPreviewWithShare(snap);
     }
   });
 }
