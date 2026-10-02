@@ -1157,6 +1157,12 @@ app.get('/api/lyrics', async (req, res) => {
 });
 
 /* album-art proxy so the PiP canvas is not CORS-tainted */
+app.options('/api/thumb', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.status(204).end();
+});
 app.get('/api/thumb', async (req, res) => {
   try {
     const raw = String(req.query.url || '');
@@ -1175,6 +1181,8 @@ app.get('/api/thumb', async (req, res) => {
     });
     if (!r.ok) return res.status(502).end();
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader(
       'Content-Type',
       r.headers.get('content-type') || 'image/jpeg',

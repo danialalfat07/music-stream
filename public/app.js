@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.66";
+const APP_VERSION = "2.3.67";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1462,23 +1462,24 @@ async function renderWrappedShareCard(snapshot) {
   const loadImageOnce = (src, timeoutMs) => new Promise((resolve) => {
     const img = new Image();
     let done = false;
+    const t0 = Date.now();
     const timer = setTimeout(() => {
       if (done) return; done = true;
       try { img.src = ''; } catch {}
-      console.log('[WRAP_ART] url=' + src + ' status=timeout');
+      console.log('[WRAP_ART] url=' + src + ' status=timeout ms=' + (Date.now() - t0));
       resolve(null);
     }, timeoutMs);
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       if (done) return; done = true;
       clearTimeout(timer);
-      console.log('[WRAP_ART] url=' + src + ' status=ok');
+      console.log('[WRAP_ART] url=' + src + ' status=ok ms=' + (Date.now() - t0));
       resolve(img);
     };
     img.onerror = () => {
       if (done) return; done = true;
       clearTimeout(timer);
-      console.log('[WRAP_ART] url=' + src + ' status=fail');
+      console.log('[WRAP_ART] url=' + src + ' status=fail ms=' + (Date.now() - t0));
       resolve(null);
     };
     img.src = src;
