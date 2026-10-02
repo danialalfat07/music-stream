@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.63";
+const APP_VERSION = "2.3.64";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1394,46 +1394,137 @@ async function shareCanvasAsPng(canvas, filename) {
   catch (e) { return { ok: false, error: 'parse_fail', raw: raw }; }
 }
 
-function renderWrappedToCanvas(snapshot) {
-  return new Promise((resolve, reject) => {
-    try {
-      const W = 1080, H = 1920;
-      const c = document.createElement('canvas');
-      c.width = W; c.height = H;
-      const ctx = c.getContext('2d');
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, '#1DB954');
-      grad.addColorStop(1, '#0A8F3C');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 72px system-ui, sans-serif';
-      ctx.fillText('Recap', W/2, 200);
-      ctx.font = 'bold 96px system-ui, sans-serif';
-      ctx.fillText((snapshot.month || '').replace('-', ' / '), W/2, 340);
-      ctx.font = '48px system-ui, sans-serif';
-      ctx.fillText((snapshot.plays || 0) + ' plays', W/2, 520);
-      ctx.fillText((snapshot.minutes || 0) + ' minutes', W/2, 600);
-      if (snapshot.topArtists && snapshot.topArtists[0]) {
-        ctx.font = '36px system-ui, sans-serif';
-        ctx.fillText('Top Artist', W/2, 760);
-        ctx.font = 'bold 64px system-ui, sans-serif';
-        ctx.fillText(snapshot.topArtists[0].artist || '?', W/2, 840);
-      }
-      if (snapshot.topSongs && snapshot.topSongs[0]) {
-        ctx.font = '36px system-ui, sans-serif';
-        ctx.fillText('Top Song', W/2, 1000);
-        ctx.font = 'bold 56px system-ui, sans-serif';
-        ctx.fillText(snapshot.topSongs[0].title || '?', W/2, 1080);
-      }
-      ctx.font = '32px system-ui, sans-serif';
-      ctx.globalAlpha = 0.8;
-      ctx.fillText('Dnialify Music Stream', W/2, H - 120);
-      resolve(c);
-    } catch (e) { reject(e); }
+async function renderWrappedShareCard(snapshot) {
+  const W = 1080, H = 1920, R = 60;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const s = snapshot || {};
+  const artist = s.topArtists && s.topArtists[0];
+  const song = s.topSongs && s.topSongs[0];
+  const monthParts = String(s.month || '').split('-').map(Number);
+  const monthTitle = monthParts.length === 2 && monthParts[0] && monthParts[1]
+    ? new Date(monthParts[0], monthParts[1] - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()
+    : String(s.month || 'YOUR MONTH').toUpperCase();
+  const gradPair = WRAP_GRADS[(monthParts[1] || 1) % WRAP_GRADS.length];
+  const fmtMin = (mins) => {
+    const n = Number(mins) || 0, h = Math.floor(n / 60), m = n % 60;
+    return h ? `${h}h ${m}m` : `${m}m`;
+  };
+  const initials = (value) => String(value || '?').trim().split(/\s+/).slice(0, 2)
+    .map((part) => part[0]).join('').toUpperCase() || '?';
+  const loadImage = (url) => new Promise((resolve) => {
+    if (!url) return resolve(null);
+    const img = new Image();
+    const timer = setTimeout(() => { img.src = ''; resolve(null); }, 2000);
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = () => { clearTimeout(timer); resolve(null); };
+    img.src = url === '/logo.png' ? url : '/api/thumb?url=' + encodeURIComponent(url);
   });
+  const drawFallback = (x, y, w, h, label, radius) => {
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.round(Math.min(w, h) * 0.34)}px system-ui, sans-serif`;
+    ctx.fillText(initials(label), x + w / 2, y + h / 2);
+    ctx.textBaseline = 'alphabetic';
+  };
+  const drawImage = (img, x, y, w, h, radius, label) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.clip();
+    if (img) ctx.drawImage(img, x, y, w, h);
+    else drawFallback(x, y, w, h, label, radius);
+    ctx.restore();
+  };
+  const truncate = (text, maxWidth) => {
+    let value = String(text || '');
+    while (value.length > 1 && ctx.measureText(value).width > maxWidth) value = value.slice(0, -2) + '...';
+    return value;
+  };
+  const logo = await loadImage('/logo.png');
+  const artistImage = artist && await loadImage(artist.thumbnail);
+  const songImage = song && await loadImage(song.thumbnail);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(0, 0, W, H, R);
+  ctx.clip();
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, gradPair[0]);
+  bg.addColorStop(1, gradPair[1]);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  if (logo) ctx.drawImage(logo, 430, 72, 64, 64);
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 24px system-ui, sans-serif';
+  ctx.fillText('Dnialify Music Stream', 510, 116);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 28px system-ui, sans-serif';
+  ctx.letterSpacing = '5px';
+  ctx.fillText(monthTitle, 540, 235);
+  ctx.letterSpacing = '0px';
+  ctx.globalAlpha = 0.85;
+  ctx.font = '22px system-ui, sans-serif';
+  ctx.fillText('Your Month in Music', 540, 285);
+  ctx.globalAlpha = 1;
+
+  if (artist) {
+    drawImage(artistImage, 340, 350, 400, 400, 200, artist.artist);
+    ctx.font = 'bold 56px system-ui, sans-serif';
+    ctx.fillText(truncate(artist.artist || '?', 880), 540, 830);
+    ctx.globalAlpha = 0.9;
+    ctx.font = '24px system-ui, sans-serif';
+    ctx.fillText(`${artist.count || 0} plays`, 540, 875);
+    ctx.globalAlpha = 1;
+  }
+
+  if (song) {
+    drawImage(songImage, 100, 960, 96, 96, 18, song.title);
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.fillText(truncate(song.title || '?', 760), 230, 1002);
+    ctx.globalAlpha = 0.85;
+    ctx.font = '24px system-ui, sans-serif';
+    ctx.fillText(truncate(song.artist || '?', 760), 230, 1042);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center';
+  }
+
+  const stats = [
+    [String(s.plays || 0), 'songs played'],
+    [fmtMin(s.minutes), 'listening time'],
+    [String(s.streak || 0), 'day streak'],
+  ];
+  stats.forEach((stat, i) => {
+    const x = 70 + i * 320;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.roundRect(x, 1210, 280, 150, 20);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 34px system-ui, sans-serif';
+    ctx.fillText(stat[0], x + 140, 1270);
+    ctx.globalAlpha = 0.85;
+    ctx.font = '20px system-ui, sans-serif';
+    ctx.fillText(stat[1], x + 140, 1315);
+    ctx.globalAlpha = 1;
+  });
+  ctx.font = '18px system-ui, sans-serif';
+  ctx.globalAlpha = 0.7;
+  ctx.fillText('dnialify-music-stream.vercel.app', 540, H - 90);
+  ctx.restore();
+  return c;
 }
+const renderWrappedToCanvas = renderWrappedShareCard;
 
 async function shareWrapped(snapshot) {
   try {
