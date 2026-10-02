@@ -1471,5 +1471,81 @@ public class MainActivity extends BridgeActivity {
                 return "[]";
             }
         }
+
+        // ========== Native share bridge (Wrapped canvas PNG -> ACTION_SEND) ==========
+        @JavascriptInterface
+        public String canNativeShare() { return "{\"ok\":true,\"share\":true}"; }
+
+        @JavascriptInterface
+        public String sharePng(String base64, String filename, String title) {
+            try {
+                if (base64 == null || base64.isEmpty()) return "{\"ok\":false,\"error\":\"empty\"}";
+                String b64 = base64;
+                int comma = b64.indexOf(',');
+                if (b64.startsWith("data:") && comma >= 0) b64 = b64.substring(comma + 1);
+                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                if (bytes == null || bytes.length == 0) return "{\"ok\":false,\"error\":\"decode\"}";
+                String safe = (filename == null || filename.isEmpty()) ? "share.png" : filename.replaceAll("[^A-Za-z0-9._-]", "_");
+                if (!safe.endsWith(".png")) safe += ".png";
+                java.io.File dir = new java.io.File(MainActivity.this.getCacheDir(), "share");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File out = new java.io.File(dir, safe);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+                fos.write(bytes);
+                fos.flush();
+                fos.close();
+                android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                        MainActivity.this, MainActivity.this.getPackageName() + ".fileprovider", out);
+                android.content.Intent send = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                send.setType("image/png");
+                send.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+                if (title != null && !title.isEmpty()) send.putExtra(android.content.Intent.EXTRA_SUBJECT, title);
+                send.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                android.content.Intent chooser = android.content.Intent.createChooser(
+                        send, (title == null || title.isEmpty()) ? "Share" : title);
+                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                MainActivity.this.runOnUiThread(() -> {
+                    try { MainActivity.this.startActivity(chooser); }
+                    catch (Exception e) { Log.d(TAG_DIAG, "sharePng start err " + e); }
+                });
+                Log.d("DnialifyVisionOS", "sharePng bytes=" + bytes.length + " file=" + out.getAbsolutePath());
+                return "{\"ok\":true,\"bytes\":" + bytes.length + "}";
+            } catch (Exception e) {
+                Log.d(TAG_DIAG, "sharePng err " + e);
+                String msg = String.valueOf(e.getMessage()).replace("\"", "'");
+                return "{\"ok\":false,\"error\":\"" + msg + "\"}";
+            }
+        }
+
+        @JavascriptInterface
+        public String shareImage(String base64Png, String filename) {
+            try {
+                if (base64Png == null || base64Png.isEmpty())
+                    return "{\"ok\":false,\"error\":\"empty_base64\"}";
+                byte[] bytes = android.util.Base64.decode(base64Png, android.util.Base64.DEFAULT);
+                java.io.File dir = new java.io.File(MainActivity.this.getCacheDir(), "share");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File f = new java.io.File(dir, filename == null ? "share.png" : filename);
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+                    fos.write(bytes);
+                }
+                android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                    MainActivity.this, MainActivity.this.getPackageName() + ".fileprovider", f);
+                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                intent.setType("image/png");
+                intent.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+                intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                android.content.Intent chooser = android.content.Intent.createChooser(intent, "Share");
+                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                MainActivity.this.runOnUiThread(() -> {
+                    try { MainActivity.this.startActivity(chooser); }
+                    catch (Exception e) { Log.d(TAG_DIAG, "shareImage start err " + e); }
+                });
+                return "{\"ok\":true,\"size\":" + bytes.length + ",\"path\":\"" + f.getAbsolutePath() + "\"}";
+            } catch (Exception e) {
+                android.util.Log.e("ShareBridge", "failed: " + e.getMessage());
+                return "{\"ok\":false,\"error\":\"" + String.valueOf(e.getMessage()).replace("\"","'") + "\"}";
+            }
+        }
     }
 }

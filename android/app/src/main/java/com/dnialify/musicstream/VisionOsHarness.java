@@ -111,6 +111,7 @@ public final class VisionOsHarness {
             case "metadata": return put(results, "metadata", aMetadata(act));
             case "iframe": return aIframe(act, videoId);
             case "eval": return aEval(value);
+            case "eval-js": return aEvalJs(intent, value);
             case "web-offline": return aWebOffline(act);
             case "cache-probe": return aCacheProbe(act, videoId);
             case "loopback-probe": return aLoopbackProbe(act, videoId);
@@ -840,6 +841,33 @@ public final class VisionOsHarness {
         String show = String.valueOf(raw);
         if (show.length() > 500) show = show.substring(0, 500) + "...";
         hlog("[EVAL] result=" + show);
+        return raw != null;
+    }
+
+    /**
+     * eval-js diag action: evaluate --es expr "<js>" on MainActivity WebView and
+     * log the raw return value as JSON-friendly chunks. No screenshots, no taps.
+     */
+    static boolean aEvalJs(Intent intent, String value) {
+        if (!needMain()) return false;
+        String expr = null;
+        try { expr = intent.getStringExtra("expr"); } catch (Exception ignored) {}
+        if (expr == null || expr.isEmpty()) expr = value;
+        if (expr == null || expr.isEmpty()) {
+            hlog("[EVAL-JS] FAIL empty --es expr");
+            return false;
+        }
+        try { Thread.sleep(500); } catch (Exception ignored) {}
+        String raw = evalMain(expr, 20000);
+        String show = String.valueOf(raw);
+        if (show.length() <= 700) {
+            hlog("[EVAL-JS] result=" + show);
+        } else {
+            int parts = 0;
+            for (int i = 0; i < show.length(); i += 700) {
+                hlog("[EVAL-JS] part" + (parts++) + "=" + show.substring(i, Math.min(show.length(), i + 700)));
+            }
+        }
         return raw != null;
     }
 

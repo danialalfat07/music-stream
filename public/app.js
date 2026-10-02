@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.61";
+const APP_VERSION = "2.3.62";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1143,6 +1143,7 @@ const WrappedX = {
     this._ym = ym;
     this._idx = 0;
     this._cards = this.buildWrappedCards(snap, !!isLive);
+    try { window.__currentWrappedSnapshot = snap; } catch {}
     const m = this.ensureModal();
     m.classList.remove('hidden');
     this.renderDeck();
@@ -1156,7 +1157,6 @@ const WrappedX = {
     prog.innerHTML = this._cards.map((_, i) => `<span class="wseg${i === this._idx ? ' on' : ''}${i < this._idx ? ' done' : ''}"></span>`).join('');
     deck.innerHTML = this._cards[this._idx] || '';
     deck.firstElementChild?.classList.add('wslide');
-    $('#wrapped-share')?.addEventListener('click', () => this.shareWrapped());
     $('#wrapped-close2')?.addEventListener('click', () => this.closeWrapped());
     $('#wrapped-open-arch')?.addEventListener('click', () => this.openArchive());
   },
@@ -1233,7 +1233,7 @@ const WrappedX = {
       `<div class="wrapped-card" style="background:${g(5)}"><div class="wmonth">Peak hour</div><div class="wclock">◷</div><h1 class="wbig">${String(s.peakHour).padStart(2, '0')}:00</h1><div class="wsub">most active${s.peakDay ? ' · peak ' + esc(s.peakDay) : ''}${s.peakDate ? ' (' + esc(s.peakDate) + ')' : ''}</div><div class="wfoot">${esc(mn)}</div></div>`,
       `<div class="wrapped-card" style="background:${g(6)}"><div class="wmonth">Streak</div><div class="wclock">🔥</div><h1 class="wbig">${s.streak} day${s.streak === 1 ? '' : 's'}</h1><div class="wsub">in a row this month · ${s.playlistCount} playlists</div><div class="wfoot">${nd || 'Keep the streak alive'}</div></div>`,
       `<div class="wrapped-card" style="background:${g(7)}"><div class="wmonth">Skip vs finish</div><div class="wside"><div><div class="whuge sm">${sk}%</div><div class="wsub">skipped</div></div><div><div class="whuge sm">${cp}%</div><div class="wsub">completed</div></div></div><div class="wsub">Offline share: ${off}% · ${s.newDiscoveries.length} new finds</div><div class="wfoot">${esc(mn)}</div></div>`,
-      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button class="wbtn" id="wrapped-share">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
+      `<div class="wrapped-card" style="background:${g(8)}"><div class="wmonth">${esc(mn)} · done</div><h1 class="wbig">${s.plays} songs · ${esc(fmtMin(s.minutes))}</h1><div class="wsub">${ta ? 'Top: ' + esc(ta.artist) : ''}${ts ? ' — ' + esc(ts.title) : ''}</div>${topSec}<div class="wcta"><button id="wrapped-share-btn" class="pill-btn">Share</button><button class="wbtn ghost" id="wrapped-close2">Close</button></div><div class="wfoot"><button class="wlink" id="wrapped-open-arch">View all months</button></div></div>`,
     ];
   },
 async shareWrapped() {
@@ -1376,6 +1376,89 @@ window.NativeShare = {
 };
 function generateWrappedSnapshot(y, m) { return WrappedX.generateWrappedSnapshot(y, m); }
 function checkWrappedTrigger() { return WrappedX.checkWrappedTrigger(); }
+
+/* ================= wrapped canvas share (native bridge, reusable) ================= */
+async function shareCanvasAsPng(canvas, filename) {
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+  if (!blob) throw new Error('canvas_to_blob_null');
+  const base64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onloadend = () => res(String(r.result).split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+  if (!window.NativePlayback || !NativePlayback.shareImage)
+    throw new Error('native_bridge_missing');
+  const raw = NativePlayback.shareImage(base64, filename);
+  try { return JSON.parse(raw || '{}'); }
+  catch (e) { return { ok: false, error: 'parse_fail', raw: raw }; }
+}
+
+function renderWrappedToCanvas(snapshot) {
+  return new Promise((resolve, reject) => {
+    try {
+      const W = 1080, H = 1920;
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#1DB954');
+      grad.addColorStop(1, '#0A8F3C');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 72px system-ui, sans-serif';
+      ctx.fillText('Recap', W/2, 200);
+      ctx.font = 'bold 96px system-ui, sans-serif';
+      ctx.fillText((snapshot.month || '').replace('-', ' / '), W/2, 340);
+      ctx.font = '48px system-ui, sans-serif';
+      ctx.fillText((snapshot.plays || 0) + ' plays', W/2, 520);
+      ctx.fillText((snapshot.minutes || 0) + ' minutes', W/2, 600);
+      if (snapshot.topArtists && snapshot.topArtists[0]) {
+        ctx.font = '36px system-ui, sans-serif';
+        ctx.fillText('Top Artist', W/2, 760);
+        ctx.font = 'bold 64px system-ui, sans-serif';
+        ctx.fillText(snapshot.topArtists[0].artist || '?', W/2, 840);
+      }
+      if (snapshot.topSongs && snapshot.topSongs[0]) {
+        ctx.font = '36px system-ui, sans-serif';
+        ctx.fillText('Top Song', W/2, 1000);
+        ctx.font = 'bold 56px system-ui, sans-serif';
+        ctx.fillText(snapshot.topSongs[0].title || '?', W/2, 1080);
+      }
+      ctx.font = '32px system-ui, sans-serif';
+      ctx.globalAlpha = 0.8;
+      ctx.fillText('Dnialify Music Stream', W/2, H - 120);
+      resolve(c);
+    } catch (e) { reject(e); }
+  });
+}
+
+async function shareWrapped(snapshot) {
+  try {
+    const canvas = await renderWrappedToCanvas(snapshot);
+    const res = await shareCanvasAsPng(canvas, 'wrapped-' + (snapshot.month || 'x') + '.png');
+    window.__lastShareResult = res;
+    return res;
+  } catch (e) {
+    window.__lastShareResult = { ok: false, error: e.message };
+    return window.__lastShareResult;
+  }
+}
+
+window.shareWrapped = shareWrapped;
+window.renderWrappedToCanvas = renderWrappedToCanvas;
+window.shareCanvasAsPng = shareCanvasAsPng;
+if (!window.__wrappedShareWired) {
+  window.__wrappedShareWired = true;
+  document.addEventListener('click', (ev) => {
+    if (ev.target && ev.target.id === 'wrapped-share-btn') {
+      const snap = window.__currentWrappedSnapshot;
+      if (snap) shareWrapped(snap);
+    }
+  });
+}
 
 /* ================= versioning - website vs user data (separated) ================= */
 // Website assets live in CacheStorage: dnialify-assets-vX
