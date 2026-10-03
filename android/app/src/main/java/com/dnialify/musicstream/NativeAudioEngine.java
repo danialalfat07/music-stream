@@ -978,6 +978,16 @@ public final class NativeAudioEngine {
                 dur = durationMs > 0 ? durationMs : callbackDuration;
             }
             long epsilon = 3000;
+            // Complete-file EOS is the real end even if metadata durationMs
+            // overshoots (audio streams often run shorter than video
+            // lengthSeconds): misclassifying it as premature routes to
+            // firePrematureError, whose ERROR state never auto-nexts, so the
+            // queue stops dead. Incomplete files keep the tight epsilon.
+            boolean fileComplete = false;
+            try {
+                fileComplete = SongCache.isFull(videoId);
+            } catch (Exception ignored) {}
+            if (fileComplete) epsilon = 15000;
             if (dur > 0 && pos >= dur - epsilon) {
                 // Genuine end
                 Log.d(TAG, "[ENGINE] Genuine onCompletion: pos=" + pos + " dur=" + dur);
