@@ -92,6 +92,8 @@ public final class NativeAudioEngine {
     private boolean capTested = false; // one-shot LoudnessEnhancer cap probe
     private int enhancerCapMb = -1; // measured device gain ceiling, -1 = unknown
     private long lastDiagTickLog;
+    private int lastProgressMs = -1;      // watchdog: last changed currentMs
+    private long lastProgressWallMs = 0;  // watchdog: wall clock of that change
     private PowerManager.WakeLock wakeLock;
     private boolean wakeLockHeld = false;
 
@@ -160,6 +162,8 @@ public final class NativeAudioEngine {
             setStateLocked(State.RESOLVING);
             windowChunk = -1;
             windowEnd = -1;
+            lastProgressMs = -1;
+            lastProgressWallMs = 0;
         }
         // track change: cancel old window, never stack fills.
         // FULL jobs ("Download offline") survive: writer runs to COMPLETE.
@@ -1397,6 +1401,41 @@ public final class NativeAudioEngine {
                     }
                 }
             } catch (Exception ignored) {}
+            // Stall watchdog: frozen position while PLAYING with an unfilled
+            // window means the writer died unnoticed (lost wakeup survived).
+            // Re-drive setWindow (idempotent on same chunk) instead of waiting
+            // up to 90s for the LSS hold timeout. Anti-spam: clock resets on
+            // every fire. Skipped for complete offline files (not a writer
+            // problem) and whenever the window is already filled.
+            long nowWall = System.currentTimeMillis();
+            if (currentMs != lastProgressMs) {
+                lastProgressMs = currentMs;
+                lastProgressWallMs = nowWall;
+            } else if (nowWall - lastProgressWallMs >= 3000) {
+                boolean offlineComplete = false;
+                try {
+                    offlineComplete = source == Source.CACHED_AUDIO
+                            && appCtx != null && SongCache.isComplete(appCtx, videoId);
+                } catch (Exception ignored) {}
+                if (!offlineComplete && windowEnd > 0 && appCtx != null
+                        && lastTotal > 0 && durationMs > 0) {
+                    long have = 0;
+                    try {
+                        java.io.File pf = SongCache.partFile(appCtx, videoId);
+                        if (pf.isFile()) have = pf.length();
+                    } catch (Exception ignored) {}
+                    if (have < Math.min(windowEnd, lastTotal)) {
+                        nlog("[WATCHDOG] playback stall at=" + currentMs
+                                + " frozen=" + ((nowWall - lastProgressWallMs) / 1000)
+                                + "s isDownloading=" + SongCache.isDownloading(videoId)
+                                + " have=" + have + " windowEnd=" + windowEnd
+                                + " videoId=" + videoId);
+                        setWindow(videoId, lastUrl, lastTotal, currentMs,
+                                durationMs, appCtx);
+                    }
+                }
+                lastProgressWallMs = nowWall;
+            }
             // notification progress (throttled: service updates cheap)
             try {
                 if (appCtx != null) {
