@@ -296,6 +296,18 @@ public final class SongCache {
         return RUNNING.contains(videoId);
     }
 
+    /** Record status for diagnostics: DOWNLOADING/PAUSED/FAILED/COMPLETE/QUEUED/NONE. */
+    public static String getStatus(Context c, String videoId) {
+        try {
+            JSONObject r = getRecord(c, videoId);
+            if (r == null) return ST_NONE;
+            String s = r.optString("cacheStatus", "");
+            return s.isEmpty() ? ST_NONE : s;
+        } catch (Exception e) {
+            return ST_NONE;
+        }
+    }
+
     /**
      * True when RUNNING is held by an older generation than the current one:
      * the holder was pause-invalidated and is draining CANCEL, so a restart

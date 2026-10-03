@@ -187,7 +187,9 @@ public class LocalStreamServer extends NanoHTTPD {
                 if (have != lastLoggedHave) {
                     lastLoggedHave = have;
                     Log.d(TAG, "[LSS] file size now=" + have + " expectedTotal="
-                            + track.total + " writerState=" + (isComplete ? "COMPLETE" : "RUNNING_OR_PAUSED")
+                            + track.total + " writerState=" + (isComplete ? "COMPLETE"
+                                    : (SongCache.isDownloading(track.videoId) ? "RUNNING" : "NOT_RUNNING"))
+                            + " record=" + SongCache.getStatus(appCtx, track.videoId)
                             + " path=" + source.getName());
                 }
                 if (pos < have) {
