@@ -60,6 +60,21 @@ public final class SongCache {
     private static final java.util.Set<String> RUNNING =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
     /**
+     * Writer generation: bumped on every pauseDownload so a stale RUNNING
+     * flag (doomed writer still draining CANCEL inside a blocking fetch)
+     * is distinguishable from a live writer. Monotonic per videoId.
+     * Dormant until setWindow learns to read it: no behavior change alone.
+     */
+    private static final java.util.Map<String, Long> DWN_GEN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<String, Long> RUNNING_GEN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static long curGen(String videoId) {
+        Long g = videoId == null ? null : DWN_GEN.get(videoId);
+        return g == null ? 0L : g;
+    }
+    /**
      * Explicit full-download jobs ("Download offline"). Flagged ids are exempt
      * from the engine chunk-window cap and from stop/track-change pauses, so the
      * writer runs to COMPLETE whether the song is playing or stopped.
@@ -264,14 +279,44 @@ public final class SongCache {
         }
     }
 
-    public static void pauseDownload(String videoId) {
-        CANCEL.put(videoId, true);
-        Log.d(TAG, "[SONG] pause requested videoId=" + videoId);
+    public static long pauseDownload(String videoId) {
+        long g = 0L;
+        if (videoId != null && !videoId.isEmpty()) {
+            // Atomic bump: concurrent pausers never lose an increment and a
+            // stale RUNNING flag can never pass as the live generation.
+            g = DWN_GEN.merge(videoId, 1L, Long::sum);
+            CANCEL.put(videoId, true);
+        }
+        Log.d(TAG, "[SONG] pause requested videoId=" + videoId + " gen=" + g);
+        return g;
     }
 
     /** True while a writer thread owns this videoId (duplicate-job guard). */
     public static boolean isDownloading(String videoId) {
         return RUNNING.contains(videoId);
+    }
+
+    /**
+     * True when RUNNING is held by an older generation than the current one:
+     * the holder was pause-invalidated and is draining CANCEL, so a restart
+     * queued now cannot rival it (it exits on its own).
+     */
+    public static boolean isStaleWriter(String videoId) {
+        if (videoId == null || !RUNNING.contains(videoId)) return false;
+        Long holder = RUNNING_GEN.get(videoId);
+        long cur = curGen(videoId);
+        return holder == null || holder.longValue() != cur;
+    }
+
+    /** Generation captured by the current RUNNING holder (-1 when none). */
+    public static long writerGen(String videoId) {
+        Long h = videoId == null ? null : RUNNING_GEN.get(videoId);
+        return h == null ? -1L : h;
+    }
+
+    /** Current (post-pause) generation for this videoId. */
+    public static long currentGen(String videoId) {
+        return curGen(videoId);
     }
 
     public static synchronized int countComplete(Context ctx) {
@@ -345,10 +390,19 @@ public final class SongCache {
             Log.d(TAG, "[SONG] download SKIP already running videoId=" + videoId);
             return;
         }
+        // Capture the generation this writer serves: a later pauseDownload
+        // invalidates it, letting setWindow tell stale RUNNING apart from live.
+        final long myGen = curGen(videoId);
+        RUNNING_GEN.put(videoId, myGen);
         try {
             downloadInner(c, videoId, url, total);
         } finally {
-            RUNNING.remove(videoId);
+            // Only release RUNNING for our own generation: never clear a
+            // successor's flag if one took over meanwhile.
+            Long holder = RUNNING_GEN.get(videoId);
+            if (holder != null && holder.longValue() == myGen) {
+                RUNNING.remove(videoId);
+            }
         }
     }
 
