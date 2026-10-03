@@ -798,6 +798,20 @@ public final class NativeAudioEngine {
             nlog("[CACHE] window fetch videoId=" + vid + " chunk=" + windowChunk
                     + " end=" + windowEnd);
             new Thread(() -> SongCache.download(fc, vid, url, total)).start();
+        } else if (SongCache.isDownloading(vid)) {
+            // Generation-aware skip: a stale RUNNING flag (doomed writer still
+            // draining CANCEL) must not suppress the restart. Queue it on the
+            // dying thread instead of starting a rival writer now: concurrent
+            // appends to the same .part would interleave out of order.
+            if (SongCache.isStaleWriter(vid)) {
+                SongCache.requestRestart(vid);
+                nlog("[WINDOW] restart-queued reason=gen-mismatch videoId=" + vid
+                        + " holderGen=" + SongCache.writerGen(vid)
+                        + " curGen=" + SongCache.currentGen(vid));
+            } else {
+                nlog("[WINDOW] skip reason=still-running videoId=" + vid
+                        + " gen=" + SongCache.writerGen(vid));
+            }
         }
     }
 

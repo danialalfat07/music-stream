@@ -319,6 +319,20 @@ public final class SongCache {
         return curGen(videoId);
     }
 
+    /**
+     * Queued writer restarts. Set by setWindow when it finds a stale (doomed)
+     * RUNNING holder; consumed by the dying writer thread on exit, which
+     * spawns its own successor. Two writers therefore never append the same
+     * .part concurrently: the successor starts only after the predecessor
+     * released RUNNING with its stream already closed.
+     */
+    private static final java.util.Set<String> RESTART_REQ =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public static void requestRestart(String videoId) {
+        if (videoId != null && !videoId.isEmpty()) RESTART_REQ.add(videoId);
+    }
+
     public static synchronized int countComplete(Context ctx) {
         try {
             File dir = dir(ctx);
@@ -402,6 +416,20 @@ public final class SongCache {
             Long holder = RUNNING_GEN.get(videoId);
             if (holder != null && holder.longValue() == myGen) {
                 RUNNING.remove(videoId);
+            }
+            // Dying-thread successor: if setWindow queued a restart while we
+            // were draining CANCEL, spawn it now. Our stream is closed and
+            // RUNNING is released above, so no concurrent .part append.
+            // Single-shot (request is consumed): no restart loop.
+            if (videoId != null && RESTART_REQ.remove(videoId)) {
+                boolean done = false;
+                try { done = isComplete(c, videoId); } catch (Exception ignored) {}
+                if (!done) {
+                    Log.d(TAG, "[SONG] restart-queued videoId=" + videoId
+                            + " gen=" + curGen(videoId));
+                    final Context fc = c;
+                    new Thread(() -> download(fc, videoId, url, total)).start();
+                }
             }
         }
     }
