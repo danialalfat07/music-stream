@@ -251,7 +251,8 @@ public final class VisionOsResolver {
                 formatCount);
     }
 
-    private static synchronized String refreshVisitor() throws ResolverException {
+    /** Package-visible for SongCache 403 ladder (rotate VD before re-resolve). */
+    static synchronized String refreshVisitor() throws ResolverException {
         cachedVisitorData = null;
         visitorFetchedAt = 0;
         return getVisitorData(true);

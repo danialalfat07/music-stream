@@ -7,6 +7,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -43,8 +44,11 @@ public final class SongCache {
 
     private static final int CHUNK = 102400;
     static final int TIMEOUT_MS = 20000;
-    /** Chunk recovery guards: 3 same-URL tries x 3 URL generations = 9 max. */
+    /** Chunk recovery guards: 403 -> 1 fast same-URL retry + 2 fresh-visitorData
+     * URL refreshes; network errors -> 3 same-URL tries x 3 URL generations = 9 max. */
     private static final int SAME_URL_RETRIES = 3;
+    /** Max consecutive same-URL failures on 403 before refresh (1 retry, then refresh). */
+    private static final int SAME_URL_RETRIES_403 = 1;
     private static final int MAX_URL_REFRESHES = 2;
     private static final int MAX_CHUNK_ATTEMPTS = 9;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
@@ -393,11 +397,13 @@ public final class SongCache {
                 // Bounded retries (3x, backoff) survive throttling RSTs on big files.
                 long want = end - received + 1;
                 byte[] cbuf = new byte[(int) want];
-                // 2-path recovery per chunk (max 9 attempts: 3 same-URL x 3 URL
-                // generations). Path A: 403 (expired URL) retries same URL 3x,
-                // then re-resolves a fresh URL. Path B: 401 or LOGIN_REQUIRED
-                // body refreshes immediately. Path C: network errors retry same
-                // URL 3x, then refresh. Unknown HTTP statuses fail fast.
+                // 2-path recovery per chunk. Path A: 403 retries same URL 1x
+                // (fast, no long sleep: covers transient RST/short-read), then
+                // re-resolves with a ROTATED visitorData, up to MAX_URL_REFRESHES
+                // generations (same-VD refresh cannot fix identity-caused 403s).
+                // Path B: 401 or LOGIN_REQUIRED body refreshes immediately
+                // (unchanged). Path C: network errors retry same URL 3x, then
+                // refresh (unchanged). Unknown HTTP statuses fail fast.
                 String curUrl = url;
                 Exception lastErr = null;
                 int lastStatus = -1;
@@ -444,12 +450,13 @@ public final class SongCache {
                     }
                     if (cr.status == 403) {
                         sameUrlFails++;
-                        if (sameUrlFails >= SAME_URL_RETRIES) {
+                        if (sameUrlFails > SAME_URL_RETRIES_403) {
                             if (refreshes >= MAX_URL_REFRESHES) break;
-                            Log.d(TAG, "[CACHE] 403 x3 videoId=" + videoId
-                                    + " at=" + received + " refreshing URL");
+                            Log.d(TAG, "[CACHE] 403 x" + sameUrlFails + " videoId=" + videoId
+                                    + " at=" + received + " refreshing URL with fresh visitorData"
+                                    + " refresh=" + (refreshes + 1) + "/" + MAX_URL_REFRESHES);
                             try {
-                                curUrl = refreshStreamUrl(videoId);
+                                curUrl = refreshStreamUrlFreshVd(videoId);
                             } catch (Exception re) {
                                 lastErr = re;
                                 break;
@@ -459,7 +466,7 @@ public final class SongCache {
                         } else {
                             Log.d(TAG, "[CACHE] 403 attempt " + sameUrlFails
                                     + " videoId=" + videoId + " at=" + received
-                                    + " retrying same URL");
+                                    + " fast retry same URL (1x, no long sleep)");
                         }
                         continue;
                     }
@@ -485,6 +492,9 @@ public final class SongCache {
                     }
                 }
                 if (!ok) {
+                    Log.d(TAG, "[CACHE] chunk FAILED videoId=" + videoId + " at=" + received
+                            + " attempts=" + attempt + " status=" + lastStatus
+                            + " action=fallback-iFrame");
                     throw new Exception("chunk failed after " + attempt + " attempts at "
                             + received + " status=" + lastStatus + ": " + lastErr);
                 }
@@ -867,5 +877,45 @@ public final class SongCache {
         }
         Log.d(TAG, "[CACHE] URL refreshed videoId=" + videoId + " itag=" + r.itag);
         return r.url;
+    }
+
+    /**
+     * Fresh stream URL with a ROTATED visitorData (403 ladder refreshes).
+     * Plain refreshStreamUrl() reuses the session-cached visitorData, which
+     * cannot fix identity-caused 403s; this rotates first via
+     * VisionOsResolver.refreshVisitor(), then re-resolves. Logs old-vs-new
+     * visitorData hashes for production 403 analysis. Refresh budget unchanged
+     * (caller caps at MAX_URL_REFRESHES); iFrame fallback unchanged.
+     */
+    static String refreshStreamUrlFreshVd(String videoId) throws Exception {
+        String oldVd = null;
+        try {
+            oldVd = VisionOsResolver.getVisitorData(false);
+        } catch (Exception ignored) {}
+        String newVd = VisionOsResolver.refreshVisitor();
+        Log.d(TAG, "[CACHE] visitorData rotated videoId=" + videoId
+                + " old=" + vdHash8(oldVd) + " new=" + vdHash8(newVd));
+        VisionOsResolver.Result r = VisionOsResolver.resolve(videoId);
+        if (r == null || r.url == null || r.url.isEmpty()) {
+            throw new Exception("re-resolve returned empty url");
+        }
+        Log.d(TAG, "[CACHE] URL refreshed (fresh visitorData) videoId=" + videoId + " itag=" + r.itag);
+        return r.url;
+    }
+
+    /** First 8 hex chars of SHA-256, for visitorData rotation logging. */
+    static String vdHash8(String vd) {
+        try {
+            if (vd == null) return "null";
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] h = md.digest(vd.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 4 && i < h.length; i++) {
+                sb.append(String.format(Locale.US, "%02x", h[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "hashfail";
+        }
     }
 }
