@@ -2300,8 +2300,19 @@ function initAudio(){
         return;
       }
       if (ev.state === 'ERROR' && Player.nativeActive) {
-        // classified fallback: same track, metadata/lyrics/queue untouched.
+        // Near-end ERROR (>90% played) is most likely an EOS race: the native
+        // guard suppresses the ENDED transition when state already flipped to
+        // ERROR (stall timeout / FAILED record near the end). Treat it as a
+        // natural end so the queue ADVANCES instead of replaying same track.
+        const _ec = Number(ev.currentTime || 0), _ed = Number(ev.duration || 0);
+        if (_ed > 0 && _ec / _ed > 0.9) {
+          try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[FALLBACK] near-end ERROR treated as ENDED reason=' + (ev.reason || '?') + ' pos=' + _ec + ' dur=' + _ed + ' videoId=' + (ev.videoId || '?')); } catch {}
+          nextTrack(true);
+          return;
+        }
+        // Mid-track ERROR: classified fallback, same track, metadata/lyrics/queue untouched.
         // BUGFIX 2.2.7: surface the real reason, never fail silently.
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[FALLBACK] mid-track ERROR replay-same reason=' + (ev.reason || '?') + ' pos=' + _ec + ' dur=' + _ed + ' videoId=' + (ev.videoId || '?')); } catch {}
         Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
         Player.nativeActive = false;
         try { if (window.NativePlayback && NativePlayback.nativeStop) NativePlayback.nativeStop(); } catch {}
@@ -3447,6 +3458,7 @@ function nextTrack(auto) {
   }
   if (Player.repeat === 2 && auto) {
     // Engine B first: restart natively, never wake legacy Engine A underneath it
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[REPEAT_ONE] restart videoId=' + (Player.current && Player.current.videoId || '?') + ' index=' + Player.index); } catch {}
     if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) { try { NativePlayback.nativeSeek(0); } catch {} return; }
     if(Player.native){ window.NativePlayback.seek(0); window.NativePlayback.play(Player.audioUrl, Player.current.title, Player.current.artist || '', Player.current.thumbnail || ''); return; }
     if(Player.useAudio && Player.audio && Player.audio.src){ Player.audio.currentTime=0; Player.audio.play().catch(()=>{}); return; }

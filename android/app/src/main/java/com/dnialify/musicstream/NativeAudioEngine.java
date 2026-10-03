@@ -985,7 +985,12 @@ public final class NativeAudioEngine {
             // queue stops dead. Incomplete files keep the tight epsilon.
             boolean fileComplete = false;
             try {
-                fileComplete = SongCache.isFull(videoId);
+                // isComplete = record COMPLETE + file present + size match.
+                // (isFull is only the explicit "Download offline" job flag,
+                // so it stays false for regular VisionOS playback.)
+                // onCompletion has no Context param; appCtx is set in play().
+                // Null appCtx -> keep the tight epsilon (fail-safe).
+                if (appCtx != null) fileComplete = SongCache.isComplete(appCtx, videoId);
             } catch (Exception ignored) {}
             if (fileComplete) epsilon = 15000;
             if (dur > 0 && pos >= dur - epsilon) {
@@ -1002,6 +1007,12 @@ public final class NativeAudioEngine {
                                 + " writerState=" + writerState(videoId) + " bufferPos=n/a");
                         setStateLocked(State.ENDED);
                         nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+                    } else {
+                        // Genuine position but a racing ERROR (stall timeout /
+                        // FAILED record) already won: ENDED is suppressed and
+                        // only pushAll below carries the ERROR downstream.
+                        nlog("[ENGINE] genuine-suppressed state=ERROR reason=" + failReason
+                                + " pos=" + pos + " dur=" + dur + " videoId=" + videoId);
                     }
                 }
                 pushAll();
