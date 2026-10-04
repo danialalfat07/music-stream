@@ -74,6 +74,10 @@ public final class NativeAudioEngine {
     private int consecutiveRecoveryCount = 0;
     private static final long RECOVERY_DEBOUNCE_MS = 5000;
     private static final int MAX_CONSECUTIVE_RECOVERIES = 3;
+    private static final int SAME_SPOT_GIVE_UP = 4;
+    // Byte-stall give-up: same-spot premature hits while byte data remains.
+    // First 3 get recovery+resume chances; the 4th accepts EOS (bounded,
+    // never an infinite stop-resume loop on unparseable clusters).
     private String lastRecoveryStatus = ""; // "", "attempting", "recovered", "failed"
     private long lastPrematurePosMs = -1;   // anti-loop: last premature EOF position
     private int lastPrematureSameCount = 0; // anti-loop: consecutive same-spot count
@@ -1124,12 +1128,8 @@ public final class NativeAudioEngine {
                 fireGenuineEnd(p, pos, dur);
                 return;
             }
-            // Anti-loop: a premature EOF repeating at the same spot (+-1000ms)
-            // is deterministic (metadata-duration overshoot), not a transient
-            // glitch — recovery would just replay stop-resume. On the 2nd
-            // consecutive same-spot hit, treat as genuine EOS instead. The
-            // 1st hit still gets its fair recovery chance.
-            boolean sameSpotEnd = false;
+            // Same-spot count (shared by anti-loop and byte-stall give-up).
+            // A repeat at +-1000ms is deterministic, not a transient glitch.
             int sameSpotCount = 0;
             synchronized (lock) {
                 if (lastPrematurePosMs >= 0 && Math.abs(pos - lastPrematurePosMs) <= 1000) {
@@ -1139,9 +1139,59 @@ public final class NativeAudioEngine {
                     lastPrematureSameCount = 1;
                 }
                 sameSpotCount = lastPrematureSameCount;
-                sameSpotEnd = sameSpotCount >= 2;
             }
-            if (sameSpotEnd) {
+            boolean byteRangeAvailable = consumedBytes > 0 && availableBytes > 0;
+            if (byteRangeAvailable && !byteEos) {
+                // FASE 2: byte-range says data remains — its premature verdict
+                // outranks anti-loop. Skipping here would drop a song that has
+                // not finished (LmzirvMDOP4 @62%).
+                if (sameSpotCount >= SAME_SPOT_GIVE_UP) {
+                    Log.d(TAG, "[ENGINE] byte-stall give-up x" + sameSpotCount
+                            + " at pos=" + pos + ": treating as genuine EOS");
+                    fireGenuineEnd(p, pos, dur);
+                    return;
+                }
+                nlog("[ENGINE] byte-range premature wins, anti-loop skipped"
+                        + " pos=" + pos + " sameSpot=x" + sameSpotCount);
+                // FASE 3: resume an idle writer so the starving reader gets
+                // more bytes (quota already served its purpose). Guarded:
+                // incomplete record, idle writer, known url/total, same gen.
+                // Falls through to normal premature recovery below.
+                try {
+                    String resumeUrl;
+                    long resumeTotal;
+                    int resumeGen;
+                    synchronized (lock) {
+                        resumeUrl = lastUrl;
+                        resumeTotal = lastTotal;
+                        resumeGen = playGen;
+                    }
+                    boolean incomplete = true;
+                    if (appCtx != null) {
+                        try {
+                            org.json.JSONObject rec = SongCache.getRecord(appCtx, videoId);
+                            incomplete = rec == null
+                                    || !SongCache.ST_COMPLETE.equals(rec.optString("cacheStatus", ""));
+                        } catch (Exception ignored) {}
+                    }
+                    boolean sameGen;
+                    synchronized (lock) {
+                        sameGen = (resumeGen == playGen);
+                    }
+                    if (incomplete && sameGen && resumeUrl != null && !resumeUrl.isEmpty()
+                            && resumeTotal > 0 && appCtx != null
+                            && !SongCache.isDownloading(videoId)) {
+                        nlog("[CACHE] premature-resume videoId=" + videoId
+                                + " have=" + availableBytes + " total=" + resumeTotal);
+                        final android.content.Context fc = appCtx;
+                        final String fu = resumeUrl;
+                        final long ft = resumeTotal;
+                        new Thread(() -> SongCache.download(fc, videoId, fu, ft)).start();
+                    }
+                } catch (Exception ignored) {}
+            } else if (sameSpotCount >= 2) {
+                // Byte data unavailable: original anti-loop (durEos fallback
+                // cases). 1st hit keeps its fair recovery chance.
                 Log.d(TAG, "[ENGINE] same-spot premature x" + sameSpotCount
                         + " at pos=" + pos + ": treating as genuine EOS");
                 fireGenuineEnd(p, pos, dur);
