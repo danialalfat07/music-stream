@@ -39,6 +39,12 @@ public class LocalStreamServer extends NanoHTTPD {
     }
 
     private final Map<String, Track> tracks = new ConcurrentHashMap<>();
+    /**
+     * High-water mark of bytes served per videoId (Opsi A consumedBytes).
+     * Max-merged: seeks open new streams from lower offsets and must never
+     * regress the mark. Read by the engine at onCompletion; -1 when unknown.
+     */
+    private final Map<String, Long> served = new ConcurrentHashMap<>();
 
     public LocalStreamServer(Context c) {
         super(0); // port 0 = OS picks a free port
@@ -52,11 +58,19 @@ public class LocalStreamServer extends NanoHTTPD {
     public void register(String videoId, String path, long total) {
         if (videoId == null || videoId.isEmpty() || path == null) return;
         tracks.put(videoId, new Track(videoId, path, total));
+        served.put(videoId, 0L);
     }
 
     public void unregister(String videoId) {
         if (videoId == null) return;
         tracks.remove(videoId);
+        served.remove(videoId);
+    }
+
+    /** Bytes served so far for videoId, or -1 when nothing served yet. */
+    public long servedBytes(String videoId) {
+        Long v = videoId == null ? null : served.get(videoId);
+        return v == null ? -1L : v;
     }
 
     @Override
@@ -202,6 +216,7 @@ public class LocalStreamServer extends NanoHTTPD {
                         int n = raf.read(buf, off, (int) Math.min(want, SERVE_BUF));
                         if (n < 0) return -1;
                         pos += n;
+                        served.merge(track.videoId, pos, Math::max);
                         return n;
                     } catch (IOException e) {
                         throw e;

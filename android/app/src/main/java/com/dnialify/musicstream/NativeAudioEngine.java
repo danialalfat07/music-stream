@@ -1063,6 +1063,39 @@ public final class NativeAudioEngine {
                     effDur = mpDur;
                 }
             } catch (Exception ignored) {}
+            // Byte-range primary: EOF with everything available already
+            // consumed means the audible data is exhausted, whatever metadata
+            // claims. consumed = LSS served mark (A); else linear byte
+            // estimate from pos (B). Anti-loop below stays as safety net.
+            long consumedBytes = -1;
+            String consumedSrc = "none";
+            try {
+                if (streamServer != null) {
+                    long served = streamServer.servedBytes(videoId);
+                    if (served > 0) {
+                        consumedBytes = served;
+                        consumedSrc = "lss";
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (consumedBytes <= 0 && pos >= 0 && dur > 0 && lastTotal > 0) {
+                consumedBytes = lastTotal * (long) pos / dur;
+                if (consumedBytes > 0) consumedSrc = "estimate";
+            }
+            long availableBytes = -1;
+            try {
+                if (appCtx != null) availableBytes = SongCache.localBytes(appCtx, videoId);
+            } catch (Exception ignored) {}
+            long byteThreshold = availableBytes > 0 ? availableBytes - SongCache.chunkBytes() : -1;
+            boolean byteEos = SongCache.isByteRangeEos(consumedBytes, availableBytes,
+                    SongCache.chunkBytes());
+            nlog("[ENGINE] byte-range EOS: consumed=" + consumedBytes + "(" + consumedSrc + ")"
+                    + " available=" + availableBytes + " threshold=" + byteThreshold
+                    + " verdict=" + (byteEos ? "genuine" : "premature"));
+            if (byteEos) {
+                fireGenuineEnd(p, pos, dur);
+                return;
+            }
             if (effDur > 0 && pos >= effDur - epsilon) {
                 // Genuine end
                 Log.d(TAG, "[ENGINE] Genuine onCompletion: pos=" + pos + " dur=" + dur);

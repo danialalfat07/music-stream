@@ -790,6 +790,20 @@ public final class SongCache {
         return localBytes(c, videoId) >= needEnd;
     }
 
+    /** Production range-chunk size (bytes). Exposed for EOS classification. */
+    static int chunkBytes() {
+        return CHUNK;
+    }
+
+    /**
+     * Pure byte-range EOS verdict, no Android dependencies (unit-testable):
+     * genuine when everything available has been consumed (within 1 chunk),
+     * i.e. the audible data is exhausted regardless of metadata duration.
+     */
+    static boolean isByteRangeEos(long consumed, long available, long chunk) {
+        return available > 0 && consumed > 0 && consumed >= available - chunk;
+    }
+
     /**
      * Stable playback snapshot: copies available prefix [0, needEnd) to
      * <id>.play.webm so MediaPlayer never reads a file the writer is
