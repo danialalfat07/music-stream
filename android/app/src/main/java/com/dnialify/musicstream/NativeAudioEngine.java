@@ -140,6 +140,15 @@ public final class NativeAudioEngine {
 
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
+        play(c, vid, t, ar, art, 0);
+    }
+
+    /**
+     * BUG B: startMs resume offset in ms, preserved across ENGINE_SWITCH
+     * (explicit user seek otherwise lost). 0 = from start. Threaded through
+     * resolve into setWindow/startPathAt; MediaPlayer seeks after prepare.
+     */
+    public void play(Context c, String vid, String t, String ar, String art, int startMs) {
         final int gen;
         final String prevVid;
         synchronized (lock) {
@@ -147,7 +156,7 @@ public final class NativeAudioEngine {
             stopLocked("replay");
             playGen++;
             gen = playGen;
-            pendingStartMs = 0;
+            pendingStartMs = Math.max(0, startMs);
             lastTotal = -1;
             lastCache = "";
             appCtx = c.getApplicationContext();
@@ -175,7 +184,8 @@ public final class NativeAudioEngine {
                 && !SongCache.isFull(prevVid)) {
             SongCache.pauseDownload(prevVid);
         }
-        nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen);
+        nlog("[NATIVE_CMD] play videoId=" + videoId + " gen=" + gen
+                + " startMs=" + pendingStartMs);
         pushEvent("sourceChanged", null);
         // metadata persisted at START (never wait for audio to finish)
         try {
@@ -709,11 +719,18 @@ public final class NativeAudioEngine {
             playFile = live.getAbsolutePath();
         }
         nlog("[CACHE] prefix ready videoId=" + vid + " bytes=" + live.length());
+        // BUG B: carry the ENGINE_SWITCH resume offset into the window and
+        // the prepare-seek (startPathAt would otherwise reset it to 0).
+        // Clamped to metadata duration; onPrepared clamps again vs actual.
+        final int startAt;
         synchronized (lock) {
             if (gen != playGen) return;
-            setWindow(vid, url, total, 0, (int) r.durationMs, ac);
+            int durCap = r.durationMs > 0 && r.durationMs < Integer.MAX_VALUE
+                    ? (int) r.durationMs : Integer.MAX_VALUE;
+            startAt = Math.max(0, Math.min(pendingStartMs, durCap));
+            setWindow(vid, url, total, startAt, (int) r.durationMs, ac);
         }
-        startPathAt(live.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, 0);
+        startPathAt(live.getAbsolutePath(), Source.CACHED_AUDIO, ac, gen, startAt);
     }
 
     /**

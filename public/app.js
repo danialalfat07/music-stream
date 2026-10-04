@@ -3135,6 +3135,38 @@ const OfflineLib = {
 
 // Phase 8 Engine B handoff (top-level: called by startCurrent for cached/VisionOS tracks).
 function startNativeTrack(s, loadId) {
+  // BUG B: preserve an explicit user seek across ENGINE_SWITCH. Capture the
+  // WebView position BEFORE stopping the engines (after stop it reads 0).
+  // Same-video only, else a tap on a new song would inherit the old position:
+  // YT is verified by video_id (same guard as onStateChange); audio src is
+  // opaque so it additionally requires a matching duration window.
+  // Native->native handoffs (next/prev) intentionally start the new track at 0
+  // (web engines were already stopped/reset there, so both read 0 anyway).
+  let _resumeSec = 0;
+  try {
+    const _vid = s.videoId, _dur = Number(s.duration || 0);
+    let _ytPlayingOther = false;
+    try {
+      if (Player.yt && Player.ready && Player.yt.getPlayerState
+          && Player.yt.getCurrentTime
+          && Player.yt.getPlayerState() === YT.PlayerState.PLAYING) {
+        const _vd = Player.yt.getVideoData && Player.yt.getVideoData();
+        if (_vd && _vd.video_id === _vid) _resumeSec = Player.yt.getCurrentTime() || 0;
+        else _ytPlayingOther = true;
+      }
+    } catch {}
+    if (!(_resumeSec > 0)) {
+      try {
+        if (!_ytPlayingOther && Player.audio && !Player.audio.paused
+            && isFinite(Player.audio.currentTime) && Player.audio.currentTime > 0
+            && isFinite(Player.audio.duration) && Player.audio.duration > 0 && _dur > 0
+            && Math.abs(Player.audio.duration - _dur) < 5) {
+          _resumeSec = Player.audio.currentTime;
+        }
+      } catch {}
+    }
+    if (!(_resumeSec > 1 && (!_dur || _resumeSec < _dur - 2))) _resumeSec = 0;
+  } catch { _resumeSec = 0; }
   // explicit handoff: stop WebView engines first, confirm, then start native
   let ytStopped = true, audioStopped = true;
   try { if (Player.yt && Player.ready) { Player.yt.pauseVideo(); try { Player.yt.stopVideo(); } catch {} } } catch { ytStopped = false; }
@@ -3167,10 +3199,14 @@ function startNativeTrack(s, loadId) {
     if (window.NativePlayback && NativePlayback.diagLog)
       NativePlayback.diagLog('[ENGINE_SWITCH] from=WEBVIEW to=NATIVE oldYtStopped=' + ytStopped + ' oldAudioStopped=' + audioStopped + ' videoId=' + s.videoId);
     if (window.NativePlayback && NativePlayback.diagLog)
-      NativePlayback.diagLog('[NATIVE_START] request videoId=' + s.videoId + ' t=' + Date.now());
+      NativePlayback.diagLog('[NATIVE_START] request videoId=' + s.videoId + ' t=' + Date.now() + ' resumeSec=' + _resumeSec);
   } catch {}
   try {
-    NativePlayback.nativePlay(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '');
+    if (_resumeSec > 0 && window.NativePlayback && NativePlayback.nativePlayAt) {
+      NativePlayback.nativePlayAt(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '', _resumeSec);
+    } else {
+      NativePlayback.nativePlay(s.videoId, displayTitle(s.title) || s.title || 'Dnialify', s.artist || s.subtitle || '', s.thumbnail || '');
+    }
   } catch (e) {
     // BUGFIX 2.2.7: never fail silently - log the real reason before retry.
     try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[NATIVE_START] FAIL videoId=' + s.videoId + ' err=' + (e && e.message || e)); } catch {}

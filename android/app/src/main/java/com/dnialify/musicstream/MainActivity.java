@@ -1152,6 +1152,28 @@ public class MainActivity extends BridgeActivity {
             NativeAudioEngine.get().play(MainActivity.this, videoId, title, artist, artwork);
         }
 
+        /**
+         * BUG B: nativePlay with resume offset (seconds, fractional). Preserves
+         * an explicit user seek across ENGINE_SWITCH. Separate name (not an
+         * overload): WebView bridge overload resolution is unreliable.
+         * Non-positive/non-finite input falls back to 0 (from start).
+         */
+        @JavascriptInterface
+        public void nativePlayAt(String videoId, String title, String artist, String artwork,
+                double startSeconds) {
+            int startMs = 0;
+            try {
+                if (startSeconds > 0 && !Double.isNaN(startSeconds)
+                        && !Double.isInfinite(startSeconds)) {
+                    double ms = startSeconds * 1000.0;
+                    startMs = ms >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) ms;
+                }
+            } catch (Exception ignored) {}
+            Log.d("DnialifyVisionOS",
+                    "[NATIVE_CMD] play videoId=" + videoId + " startMs=" + startMs);
+            NativeAudioEngine.get().play(MainActivity.this, videoId, title, artist, artwork, startMs);
+        }
+
         @JavascriptInterface
         public void nativePause() { NativeAudioEngine.get().pause(); }
 
