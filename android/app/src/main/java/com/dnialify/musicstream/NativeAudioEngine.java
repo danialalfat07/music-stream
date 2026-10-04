@@ -75,6 +75,8 @@ public final class NativeAudioEngine {
     private static final long RECOVERY_DEBOUNCE_MS = 5000;
     private static final int MAX_CONSECUTIVE_RECOVERIES = 3;
     private String lastRecoveryStatus = ""; // "", "attempting", "recovered", "failed"
+    private long lastPrematurePosMs = -1;   // anti-loop: last premature EOF position
+    private int lastPrematureSameCount = 0; // anti-loop: consecutive same-spot count
     private boolean recoveryPrepared = false; // one-shot hard-recovery prepare signal, guarded by lock
     private int appVolumePercent = 100; // app volume 0..300, multiplies hardware volume
     private LoudnessEnhancer boostEnhancer; // unity-gain boost, attached to mp session
@@ -159,6 +161,8 @@ public final class NativeAudioEngine {
             consecutiveRecoveryCount = 0;
             lastRecoveryAttemptMs = 0;
             lastRecoveryStatus = "";
+            lastPrematurePosMs = -1;
+            lastPrematureSameCount = 0;
             setStateLocked(State.RESOLVING);
             windowChunk = -1;
             windowEnd = -1;
@@ -1061,6 +1065,29 @@ public final class NativeAudioEngine {
             if (effDur > 0 && pos >= effDur - epsilon) {
                 // Genuine end
                 Log.d(TAG, "[ENGINE] Genuine onCompletion: pos=" + pos + " dur=" + dur);
+                fireGenuineEnd(p, pos, dur);
+                return;
+            }
+            // Anti-loop: a premature EOF repeating at the same spot (+-1000ms)
+            // is deterministic (metadata-duration overshoot), not a transient
+            // glitch — recovery would just replay stop-resume. On the 2nd
+            // consecutive same-spot hit, treat as genuine EOS instead. The
+            // 1st hit still gets its fair recovery chance.
+            boolean sameSpotEnd = false;
+            int sameSpotCount = 0;
+            synchronized (lock) {
+                if (lastPrematurePosMs >= 0 && Math.abs(pos - lastPrematurePosMs) <= 1000) {
+                    lastPrematureSameCount++;
+                } else {
+                    lastPrematurePosMs = pos;
+                    lastPrematureSameCount = 1;
+                }
+                sameSpotCount = lastPrematureSameCount;
+                sameSpotEnd = sameSpotCount >= 2;
+            }
+            if (sameSpotEnd) {
+                Log.d(TAG, "[ENGINE] same-spot premature x" + sameSpotCount
+                        + " at pos=" + pos + ": treating as genuine EOS");
                 fireGenuineEnd(p, pos, dur);
                 return;
             }
