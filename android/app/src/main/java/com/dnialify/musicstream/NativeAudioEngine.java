@@ -943,6 +943,30 @@ public final class NativeAudioEngine {
         pushAll();
     }
 
+    /** Shared genuine-EOS path: mark ENDED (unless an ERROR already won) and push. */
+    private void fireGenuineEnd(android.media.MediaPlayer p, long pos, long dur) {
+        synchronized (lock) {
+            try {
+                currentMs = p.getDuration();
+            } catch (Exception ignored) {}
+            if (state != State.ERROR) {
+                nlog("[AUTONEXT_DIAG] ENDED fired. reason=MediaPlayer.onCompletion"
+                        + " currentMs=" + currentMs + " durationMs=" + durationMs
+                        + " state=" + state + " videoId=" + videoId
+                        + " writerState=" + writerState(videoId) + " bufferPos=n/a");
+                setStateLocked(State.ENDED);
+                nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
+            } else {
+                // Genuine position but a racing ERROR (stall timeout /
+                // FAILED record) already won: ENDED is suppressed and
+                // only pushAll below carries the ERROR downstream.
+                nlog("[ENGINE] genuine-suppressed state=ERROR reason=" + failReason
+                        + " pos=" + pos + " dur=" + dur + " videoId=" + videoId);
+            }
+        }
+        pushAll();
+    }
+
     private void prepareLocked() {
         releaseLocked();
         mp = new MediaPlayer();
@@ -985,29 +1009,6 @@ public final class NativeAudioEngine {
             }
             pushAll();
         });
-    /** Shared genuine-EOS path: mark ENDED (unless an ERROR already won) and push. */
-    private void fireGenuineEnd(android.media.MediaPlayer p, long pos, long dur) {
-        synchronized (lock) {
-            try {
-                currentMs = p.getDuration();
-            } catch (Exception ignored) {}
-            if (state != State.ERROR) {
-                nlog("[AUTONEXT_DIAG] ENDED fired. reason=MediaPlayer.onCompletion"
-                        + " currentMs=" + currentMs + " durationMs=" + durationMs
-                        + " state=" + state + " videoId=" + videoId
-                        + " writerState=" + writerState(videoId) + " bufferPos=n/a");
-                setStateLocked(State.ENDED);
-                nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId);
-            } else {
-                // Genuine position but a racing ERROR (stall timeout /
-                // FAILED record) already won: ENDED is suppressed and
-                // only pushAll below carries the ERROR downstream.
-                nlog("[ENGINE] genuine-suppressed state=ERROR reason=" + failReason
-                        + " pos=" + pos + " dur=" + dur + " videoId=" + videoId);
-            }
-        }
-        pushAll();
-    }
 
         mp.setOnCompletionListener(p -> {
             long pos;
