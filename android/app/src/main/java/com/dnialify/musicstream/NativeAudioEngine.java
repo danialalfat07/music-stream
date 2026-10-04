@@ -1087,7 +1087,12 @@ public final class NativeAudioEngine {
                 if (appCtx != null) availableBytes = SongCache.localBytes(appCtx, videoId);
             } catch (Exception ignored) {}
             long byteThreshold = availableBytes > 0 ? availableBytes - SongCache.chunkBytes() : -1;
-            boolean byteEos = SongCache.isByteRangeEos(consumedBytes, availableBytes,
+            // BUG A guard: byte-exhaustion only proves EOS when no more data
+            // can ever arrive. A PAUSED/partial file starving the reader is
+            // a buffer underrun (writer idle at quota or stalled) — premature,
+            // giving download+recovery a chance instead of auto-skipping.
+            // (fileComplete already returned genuine above via Fix A.)
+            boolean byteEos = fileComplete && SongCache.isByteRangeEos(consumedBytes, availableBytes,
                     SongCache.chunkBytes());
             nlog("[ENGINE] byte-range EOS: consumed=" + consumedBytes + "(" + consumedSrc + ")"
                     + " available=" + availableBytes + " threshold=" + byteThreshold
