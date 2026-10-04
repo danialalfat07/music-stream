@@ -1035,7 +1035,30 @@ public final class NativeAudioEngine {
                 if (appCtx != null) fileComplete = SongCache.isComplete(appCtx, videoId);
             } catch (Exception ignored) {}
             if (fileComplete) epsilon = 15000;
-            if (dur > 0 && pos >= dur - epsilon) {
+            // Fix A: a COMPLETE file hitting EOF ended for real (audio
+            // exhausted), whatever the metadata-duration skew. Epsilon
+            // widening cannot cover tens-of-seconds overshoot, so skip the
+            // premature path entirely for complete files.
+            if (fileComplete) {
+                Log.d(TAG, "[ENGINE] complete-file EOS genuine pos=" + pos + " dur=" + dur);
+                fireGenuineEnd(p, pos, dur);
+                return;
+            }
+            // Fix B (defensive): bound classification by the player's own
+            // duration reading. If the container declares the full video
+            // length while the audio ends early, getDuration() at EOF can
+            // reflect the shorter reality — classify against the smaller
+            // value. Guarded against <= 0 (header not ready).
+            long effDur = dur;
+            try {
+                int mpDur = p.getDuration();
+                if (mpDur > 0 && (long) mpDur < effDur - 5000) {
+                    Log.d(TAG, "[ENGINE] mp duration shorter, using mpDur=" + mpDur
+                            + " vs dur=" + effDur);
+                    effDur = mpDur;
+                }
+            } catch (Exception ignored) {}
+            if (effDur > 0 && pos >= effDur - epsilon) {
                 // Genuine end
                 Log.d(TAG, "[ENGINE] Genuine onCompletion: pos=" + pos + " dur=" + dur);
                 fireGenuineEnd(p, pos, dur);
