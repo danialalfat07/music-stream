@@ -14,6 +14,11 @@ import android.os.PowerManager;
 import java.util.HashMap;
 import java.util.Map;
 import org.json.JSONObject;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 
 /**
  * Phase 8 - ENGINE B (NATIVE playback). Single source of truth for native audio.
@@ -45,6 +50,12 @@ public final class NativeAudioEngine {
 
     private final Object lock = new Object();
     private MediaPlayer mp;
+
+    // Socket 3: Exo backend (VisionOS). Player tunggal dari ExoPlayerHolder,
+    // tidak pernah new Builder di sini. mp path (iframe/cached) tak tersentuh.
+    private boolean exoMode = false;
+    private ExoPlayer exoPlayer;
+    private boolean exoListenerAttached = false;
     private State state = State.IDLE;
     private Source source = Source.NONE;
     private String videoId = "";
@@ -148,6 +159,7 @@ public final class NativeAudioEngine {
             synchronized (lock) {
                 prevVid = videoId;
                 stopLocked("replay");
+                stopExoLocked();
                 playGen++;
                 gen = playGen;
                 pendingStartMs = 0;
@@ -189,6 +201,7 @@ public final class NativeAudioEngine {
         synchronized (lock) {
             prevVid = videoId;
             stopLocked("replay");
+            stopExoLocked();
             playGen++;
             gen = playGen;
             pendingStartMs = 0;
@@ -234,6 +247,21 @@ public final class NativeAudioEngine {
 
     public void pause() {
         synchronized (lock) {
+            if (exoMode && exoPlayer != null) {
+                final ExoPlayer exo = exoPlayer;
+                timer.post(() -> {
+                    try {
+                        exo.pause();
+                    } catch (Exception e) {
+                        synchronized (lock) {
+                            failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo pause threw " + e);
+                        }
+                        pushAll();
+                    }
+                });
+                nlog("[NATIVE_CMD] pause videoId=" + videoId + " engine=EXO");
+                return;
+            }
             if (mp != null && state == State.PLAYING) {
                 try {
                     mp.pause();
@@ -251,6 +279,21 @@ public final class NativeAudioEngine {
 
     public void resume() {
         synchronized (lock) {
+            if (exoMode && exoPlayer != null) {
+                final ExoPlayer exo = exoPlayer;
+                timer.post(() -> {
+                    try {
+                        exo.play();
+                    } catch (Exception e) {
+                        synchronized (lock) {
+                            failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo resume threw " + e);
+                        }
+                        pushAll();
+                    }
+                });
+                nlog("[NATIVE_CMD] resume videoId=" + videoId + " engine=EXO");
+                return;
+            }
             if (mp != null && state == State.PAUSED) {
                 try {
                     mp.start();
@@ -270,6 +313,22 @@ public final class NativeAudioEngine {
         // Proxy serves any Range: uncached regions hold (spinner), never EOF.
         // No refill dance: one direct seek, server waits for the bytes.
         synchronized (lock) {
+            if (exoMode && exoPlayer != null) {
+                final ExoPlayer exo = exoPlayer;
+                final int ms = Math.max(0, seconds * 1000);
+                timer.post(() -> {
+                    try {
+                        exo.seekTo(ms);
+                    } catch (Exception e) {
+                        synchronized (lock) {
+                            failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo seek threw " + e);
+                        }
+                        pushAll();
+                    }
+                });
+                nlog("[NATIVE_CMD] seek=" + seconds + ".000 exo videoId=" + videoId);
+                return;
+            }
             if (mp == null || (state != State.PLAYING && state != State.PAUSED)) return;
             int ms = Math.max(0, seconds * 1000);
             if (durationMs > 0) ms = Math.min(ms, durationMs);
@@ -291,6 +350,10 @@ public final class NativeAudioEngine {
         final String vid;
         synchronized (lock) {
             vid = videoId;
+            if (exoMode && exoPlayer != null) {
+                stopExoLocked();
+                nlog("[NATIVE_CMD] stop why=" + why + " videoId=" + vid + " engine=EXO");
+            }
             stopLocked(why != null ? why : "stop");
             windowChunk = -1;
             windowEnd = -1;
@@ -663,6 +726,7 @@ public final class NativeAudioEngine {
         } catch (VisionOsResolver.ResolverException e) {
             synchronized (lock) {
                 if (gen != playGen) return;
+                stopExoLocked();
                 failLocked(e.reason != null ? e.reason
                         : VisionOsResolver.R_RESOLVER_FAIL,
                         e.stage + " " + e.getMessage());
@@ -674,9 +738,159 @@ public final class NativeAudioEngine {
             if (gen != playGen) return;
             setStateLocked(State.IDLE);
         }
-        nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=PENDING"
-                + " itag=" + r.itag);
-        pushEvent("enginePending", null);
+        startExoItem(vid, r, gen);
+    }
+
+    /** Socket 3: mainkan URL resolve via ExoPlayer tunggal. No MediaSession.
+     *  ExoPlayer wajib diakses di main thread: resolve jalan di worker,
+     *  wiring dipost ke timer (main). */
+    private void startExoItem(String vid, VisionOsResolver.Result r, int gen) {
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        timer.post(() -> startExoItemMain(vid, r, gen));
+    }
+
+    private void startExoItemMain(String vid, VisionOsResolver.Result r, int gen) {
+        final ExoPlayer exo;
+        synchronized (lock) {
+            if (gen != playGen) return;
+            exoMode = true;
+            try {
+                exo = ExoPlayerHolder.getInstance(appCtx).getPlayer();
+            } catch (Exception e) {
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo holder " + e);
+                pushAll();
+                return;
+            }
+            exoPlayer = exo;
+            attachExoListenerLocked(exo);
+        }
+        try {
+            MediaMetadata md = new MediaMetadata.Builder()
+                    .setTitle(r.title != null && !r.title.isEmpty() ? r.title : title)
+                    .setArtist(r.author != null && !r.author.isEmpty() ? r.author : artist)
+                    .setArtworkUri((r.thumbnail != null && !r.thumbnail.isEmpty())
+                            ? Uri.parse(r.thumbnail) : null)
+                    .build();
+            MediaItem.Builder ib = new MediaItem.Builder()
+                    .setUri(r.url)
+                    .setMediaMetadata(md);
+            if (r.durationMs > 0) {
+                ib.setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
+                        .setEndPositionMs(r.durationMs)
+                        .build());
+            }
+            exo.setMediaItem(ib.build());
+            exo.prepare();
+            exo.play();
+        } catch (Exception e) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo start " + e);
+            }
+            pushAll();
+            return;
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+            setStateLocked(State.BUFFERING);
+            currentMs = 0;
+        }
+        nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=EXO host=" + r.host
+                + " playerHash=" + System.identityHashCode(exo));
+        pushAll();
+        startExoTicker();
+    }
+
+    private void attachExoListenerLocked(final ExoPlayer exo) {
+        if (exoListenerAttached) return;
+        exoListenerAttached = true;
+        exo.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int st) {
+                synchronized (lock) {
+                    if (exoPlayer != exo) return;
+                    if (st == Player.STATE_BUFFERING) {
+                        setStateLocked(State.BUFFERING);
+                        pushAll();
+                    } else if (st == Player.STATE_ENDED) {
+                        try { currentMs = (int) exo.getCurrentPosition(); }
+                        catch (Exception ignored) {}
+                        setStateLocked(State.ENDED);
+                        stopExoTicker();
+                        nlog("[NATIVE_STATE] state=ENDED videoId=" + videoId + " engine=EXO");
+                        pushAll();
+                    }
+                }
+            }
+
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                synchronized (lock) {
+                    if (exoPlayer != exo) return;
+                    if (isPlaying) {
+                        setStateLocked(State.PLAYING);
+                        nlog("[NATIVE_STATE] state=PLAYING videoId=" + videoId + " engine=EXO");
+                    } else if (state == State.PLAYING) {
+                        setStateLocked(State.PAUSED);
+                        nlog("[NATIVE_STATE] state=PAUSED videoId=" + videoId + " engine=EXO");
+                    } else {
+                        return;
+                    }
+                    pushAll();
+                }
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                String msg = error != null ? String.valueOf(error.getMessage()) : "?";
+                synchronized (lock) {
+                    if (exoPlayer != exo) return;
+                    stopExoTicker();
+                    failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo error " + msg);
+                }
+                pushAll();
+            }
+        });
+    }
+
+    private final Runnable exoTicker = new Runnable() {
+        @Override public void run() {
+            timer.removeCallbacks(this);
+            boolean keep = false;
+            synchronized (lock) {
+                if (exoMode && exoPlayer != null) {
+                    try { currentMs = (int) exoPlayer.getCurrentPosition(); }
+                    catch (Exception ignored) {}
+                    pushEvent("timeUpdate", null);
+                    keep = true;
+                }
+            }
+            if (keep) timer.postDelayed(this, 500);
+        }
+    };
+
+    private void startExoTicker() {
+        timer.removeCallbacks(exoTicker);
+        timer.postDelayed(exoTicker, 500);
+    }
+
+    private void stopExoTicker() {
+        timer.removeCallbacks(exoTicker);
+    }
+
+    /** Hentikan audio Exo saat ganti track/gagal. Player tetap (reuse). */
+    private void stopExoLocked() {
+        if (exoPlayer != null) {
+            final ExoPlayer exo = exoPlayer;
+            timer.post(() -> {
+                try { exo.stop(); } catch (Exception ignored) {}
+                try { exo.clearMediaItems(); } catch (Exception ignored) {}
+            });
+        }
+        stopExoTicker();
+        exoMode = false;
     }
 
     private void resolveAndStart(Context c, String vid, int gen) {
