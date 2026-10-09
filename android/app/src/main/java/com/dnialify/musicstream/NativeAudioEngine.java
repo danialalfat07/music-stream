@@ -136,6 +136,23 @@ public final class NativeAudioEngine {
 
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
+        // PROTOTYPE: VisionOS unhooked dari MediaPlayer. Mode dibaca sekali
+        // di sini; semua mp.* hanya terjangkau via resolveAndStart di bawah.
+        // IFRAME (cached COMPLETE via _playCached) pakai jalur existing.
+        int mode = StreamSettings.MODE_VISIONOS;
+        try { mode = StreamSettings.getStreamMode(c); } catch (Exception ignored) {}
+        if (mode == StreamSettings.MODE_VISIONOS) {
+            synchronized (lock) {
+                videoId = vid != null ? vid : "";
+                title = t != null ? t : "";
+                artist = ar != null ? ar : "";
+                artwork = art != null ? art : "";
+                setStateLocked(State.IDLE);
+            }
+            nlog("[NATIVE_CMD] play videoId=" + videoId + " mode=VISIONOS engine=PENDING");
+            pushEvent("enginePending", null);
+            return;
+        }
         final int gen;
         final String prevVid;
         synchronized (lock) {
