@@ -73,8 +73,22 @@ public class PlaybackService extends Service {
     }
 
     private static void start(Context context, String action) {
-        ContextCompat.startForegroundService(context,
-                new Intent(context, PlaybackService.class).setAction(action));
+        safeStart(context, new Intent(context, PlaybackService.class).setAction(action));
+    }
+
+    /** Background-safe service start: live instance -> FGS start; else plain
+     *  startService (foreground) or skip (background, nothing to control).
+     *  Never throws ForegroundServiceStartNotAllowedException. */
+    private static void safeStart(Context context, Intent intent) {
+        try {
+            if (instance != null) {
+                ContextCompat.startForegroundService(context, intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (Exception e) {
+            Log.d("PlaybackService", "safeStart skipped: " + e);
+        }
     }
 
     public static void updateNotificationStatic(Context context, String title, String artist) {
@@ -87,7 +101,7 @@ public class PlaybackService extends Service {
         }
         Intent intent = new Intent(context, PlaybackService.class).setAction("updateNotification")
                 .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist);
-        ContextCompat.startForegroundService(context, intent);
+        safeStart(context, intent);
     }
 
     public static void updateWebViewState(Context context, String title, String artist,
@@ -104,7 +118,7 @@ public class PlaybackService extends Service {
                 .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
                 .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
                 .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
-        ContextCompat.startForegroundService(context, intent);
+        safeStart(context, intent);
     }
 
     public static void updateLyricsStatic(Context context, String previous, String current, String next) {
@@ -119,7 +133,7 @@ public class PlaybackService extends Service {
         }
         Intent intent = new Intent(context, PlaybackService.class).setAction("webViewLyrics")
                 .putExtra("current", cur);
-        ContextCompat.startForegroundService(context, intent);
+        safeStart(context, intent);
     }
 
     // Phase 8 Engine B: native-driven notification. While native engine active,
@@ -157,7 +171,7 @@ public class PlaybackService extends Service {
                 .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
                 .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
                 .putExtra("positionMs", positionMs).putExtra("durationMs", durationMs);
-        ContextCompat.startForegroundService(context, intent);
+        safeStart(context, intent);
     }
 
     /** Native engine released (stop/switch to iFrame): clear native-owned state. */
@@ -210,7 +224,7 @@ public class PlaybackService extends Service {
         catch (Exception ignored) {}
     }
     public static void seek(Context context, double seconds) {
-        ContextCompat.startForegroundService(context, new Intent(context, PlaybackService.class)
+        safeStart(context, new Intent(context, PlaybackService.class)
                 .setAction("seek").putExtra("seconds", seconds));
     }
     public static boolean isPlaying() { return instance != null && instance.playing; }

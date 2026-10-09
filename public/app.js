@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.68";
+const APP_VERSION = "2.3.69";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1262,7 +1262,7 @@ function initAudio(){
         Player.nativeActive = true;
       }
       // FASE C prototype: track sukses → reset skip berturut-turut.
-      if (ev.state === 'PLAYING') Player.skipStreak = 0;
+      if (ev.state === 'PLAYING') { Player.skipStreak = 0; Player._skipCountedFor = null; }
       if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS') {
         try { window.setPlayMethod('Menghubungkan…'); } catch {}
       } else if (Player.nativeActive) {
@@ -1334,7 +1334,13 @@ function initAudio(){
       if (ev.state === 'ERROR' && Player.nativeActive) {
         // FASE C prototype: no iframe fallback. Skip track instead.
         // BUGFIX 2.2.7: surface the real reason, never fail silently.
-        Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
+        // Dedup: 1 native failure emits 2 ERROR events (trackFailed +
+        // playbackStateChanged). Count once per videoId.
+        const failedVid = ev.videoId || (Player.current && Player.current.videoId);
+        if (Player._skipCountedFor === failedVid) return;
+        if (Player.current && failedVid && failedVid !== Player.current.videoId) return;
+        Player._skipCountedFor = failedVid;
+        Player._nativeFailed = failedVid;
         Player.nativeActive = false;
         try { if (window.NativePlayback && NativePlayback.nativeStop) NativePlayback.nativeStop(); } catch {}
         try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[SKIP] reason=' + (ev.reason || '?') + ' action=skip videoId=' + Player._nativeFailed); } catch {}
