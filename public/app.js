@@ -1261,6 +1261,8 @@ function initAudio(){
       if (ev.state === 'PLAYING' || ev.state === 'PAUSED' || ev.state === 'BUFFERING' || ev.state === 'SEEKING') {
         Player.nativeActive = true;
       }
+      // FASE C prototype: track sukses → reset skip berturut-turut.
+      if (ev.state === 'PLAYING') Player.skipStreak = 0;
       if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS') {
         try { window.setPlayMethod('Menghubungkan…'); } catch {}
       } else if (Player.nativeActive) {
@@ -1330,14 +1332,20 @@ function initAudio(){
         return;
       }
       if (ev.state === 'ERROR' && Player.nativeActive) {
-        // classified fallback: same track, metadata/lyrics/queue untouched.
+        // FASE C prototype: no iframe fallback. Skip track instead.
         // BUGFIX 2.2.7: surface the real reason, never fail silently.
         Player._nativeFailed = ev.videoId || (Player.current && Player.current.videoId);
         Player.nativeActive = false;
         try { if (window.NativePlayback && NativePlayback.nativeStop) NativePlayback.nativeStop(); } catch {}
-        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[FALLBACK] reason=' + (ev.reason || '?') + ' action=iFrame videoId=' + Player._nativeFailed); } catch {}
-        try { toast('Native error (' + (ev.reason || '?') + '), trying iFrame…'); } catch {}
-        startCurrent();
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[SKIP] reason=' + (ev.reason || '?') + ' action=skip videoId=' + Player._nativeFailed); } catch {}
+        Player.skipStreak = (Player.skipStreak || 0) + 1;
+        if (Player.skipStreak >= 2) {
+          try { toast('Jaringan bermasalah. Coba lagi nanti.'); } catch {}
+          Player.cued = true;
+          return;
+        }
+        try { toast('Track gagal. Skip...'); } catch {}
+        nextTrack(true);
       }
     } catch {}
   };

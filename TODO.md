@@ -72,7 +72,12 @@
 - [x] C4 `failLocked` action `iFrame`→`skip`.
 - [ ] C5 BLOCKED: konflik B1 vs TEST C (bawah).
 
-## KONFLIK B1 vs TEST C (putusan user)
+## B-revisi — DONE commit `3422ce5`, build PASS (device putus, TEST C tunggu)
+- `play()` VISIONOS → `resolveOnly()` worker: resolve (+L1 dalam resolver),
+  sukses → IDLE + PENDING + `enginePending`; gagal → `failLocked` (skip) +
+  `trackFailed` + ERROR event → JS C2 skip. MP nol. L2/L3 mati (no playback).
+- C2/C3/C4 tetap (JS skip + streak + action=skip). TEST C via harness intent
+  (`native-play xxxxxxxxxxx`) + CDP/logcat, no bridge perlu.
 - B1: VISIONOS → PENDING + return. Resolve mati, recovery mati, error nihil
   → C2 skip tak pernah trigger. TEST C (invalid id → 3 retry → skip) mustahil.
 - Opsi B-revisi: VISIONOS tetap resolve + L1/L2/L3, tapi JANGAN start MP;
