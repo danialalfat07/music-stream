@@ -27,6 +27,25 @@ public class PlaybackService extends Service {
     private static final String EXTRA_ARTWORK = "artwork";
 
     private static PlaybackService instance;
+    /** Socket 3.5: VisionOS audionya Exo; notif legacy 1001 jangan dipublish
+     *  agar tak jadi zombie bertombol mati. IFRAME tak berubah. */
+    private static boolean suppressLegacyNotif(Context context) {
+        try {
+            return context != null
+                    && StreamSettings.getStreamMode(context) == StreamSettings.MODE_VISIONOS;
+        } catch (Exception ignored) { return false; }
+    }
+
+    private static void cancelLegacyNotif(Context context) {
+        try {
+            NotificationManager nm = (NotificationManager) context.getSystemService(
+                    Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(NOTIFICATION_ID);
+        } catch (Exception ignored) {}
+        try { if (instance != null) instance.stopSelf(); } catch (Exception ignored) {}
+        Log.d("PlaybackService", "legacy notif suppressed (VISIONOS mode)");
+    }
+
     private MediaSessionCompat mediaSession;
     private String title = "Dnialify Music Stream";
     private String artist = "MusicStream";
@@ -42,6 +61,7 @@ public class PlaybackService extends Service {
     private long lastSeekMs = 0;
 
     public static void arm(Context context) {
+        if (suppressLegacyNotif(context)) { cancelLegacyNotif(context); return; }
         if (instance != null) {
             // Resume path: clear swipe/stop flags before the guard so a
             // dismissed notification can be re-posted on next play.
@@ -58,6 +78,7 @@ public class PlaybackService extends Service {
     }
 
     public static void updateNotificationStatic(Context context, String title, String artist) {
+        if (suppressLegacyNotif(context)) { cancelLegacyNotif(context); return; }
         if (instance != null) {
             if (title != null) instance.title = title;
             if (artist != null) instance.artist = artist;
@@ -71,6 +92,7 @@ public class PlaybackService extends Service {
 
     public static void updateWebViewState(Context context, String title, String artist,
             String artwork, boolean playing, long positionMs, long durationMs) {
+        if (suppressLegacyNotif(context)) { cancelLegacyNotif(context); return; }
         if (instance != null) {
             Intent state = new Intent().putExtra(EXTRA_TITLE, title).putExtra(EXTRA_ARTIST, artist)
                     .putExtra(EXTRA_ARTWORK, artwork).putExtra("isPlaying", playing)
@@ -87,6 +109,7 @@ public class PlaybackService extends Service {
 
     public static void updateLyricsStatic(Context context, String previous, String current, String next) {
         String cur = current == null ? "" : current;
+        if (suppressLegacyNotif(context)) { cancelLegacyNotif(context); return; }
         if (instance != null) {
             if (instance.isStopped) return;
             instance.currentLyric = cur;
@@ -106,6 +129,7 @@ public class PlaybackService extends Service {
             String artwork, boolean playing, long positionMs, long durationMs) {
         Log.d("PlaybackService", "nativeProgress playing=" + playing
                 + " title=" + title + " hasInstance=" + (instance != null));
+        if (suppressLegacyNotif(context)) { cancelLegacyNotif(context); return; }
         if (instance != null) {
             // Native resume after a prior stop/swipe: a real PLAYING report must
             // clear the dead flags, otherwise this returns silently and the
@@ -405,6 +429,15 @@ public class PlaybackService extends Service {
     private void publishNotification() {
         Log.d("PlaybackService", "publishNotification playing=" + playing
                 + " isStopped=" + isStopped + " dismissedPaused=" + dismissedPaused);
+        if (suppressLegacyNotif(this)) {
+            try {
+                NotificationManager manager = getSystemService(NotificationManager.class);
+                if (manager != null) manager.cancel(NOTIFICATION_ID);
+            } catch (Exception ignored) {}
+            try { stopSelf(); } catch (Exception ignored) {}
+            Log.d("PlaybackService", "legacy notif suppressed (VISIONOS mode)");
+            return;
+        }
         if (isStopped) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (playing) healPlayingNotification(manager);
@@ -475,6 +508,12 @@ public class PlaybackService extends Service {
                 + (intent != null ? intent.getAction() : "null") + " startId=" + startId);
         if (intent == null) return START_STICKY;
         String action = intent.getAction();
+        // Socket 3.5: intent apa pun (termasuk tombol notif basi) tidak boleh
+        // menghidupkan notif legacy dalam mode VISIONOS.
+        if (suppressLegacyNotif(this) && !"stop".equals(action) && !"dismiss".equals(action)) {
+            cancelLegacyNotif(this);
+            return START_NOT_STICKY;
+        }
         // Any non-stop entry must hold foreground immediately: a fresh start
         // via startForegroundService crashes if startForeground() lags >5s.
         if (!"stop".equals(action) && !"dismiss".equals(action)) {
