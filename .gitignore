@@ -23,3 +23,4 @@ ci-monitor.log
 release/
 app-debug.apk
 
+.vercel
