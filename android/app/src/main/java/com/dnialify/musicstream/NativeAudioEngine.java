@@ -1137,6 +1137,9 @@ public final class NativeAudioEngine {
         failMessage = msg;
         nlog("[FALLBACK] START reason=" + reason + " msg=" + msg
                 + " videoId=" + videoId + " action=iFrame");
+        // PROTOTYPE bridge: explicit gagal event untuk JS (FASE C: skip,
+        // bukan iframe). ERROR state + pushAll existing tetap (FASE C ubah).
+        try { pushEvent("trackFailed", null); } catch (Exception ignored) {}
     }
 
     /** Terminal error for unrecovered premature completion: ERROR so JS never auto-nexts. */
