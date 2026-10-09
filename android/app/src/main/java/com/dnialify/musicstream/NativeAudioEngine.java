@@ -136,21 +136,52 @@ public final class NativeAudioEngine {
 
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
-        // PROTOTYPE: VisionOS unhooked dari MediaPlayer. Mode dibaca sekali
-        // di sini; semua mp.* hanya terjangkau via resolveAndStart di bawah.
+        // PROTOTYPE B-revisi: VisionOS resolve-only, no MediaPlayer. Mode
+        // dibaca sekali di sini; semua mp.* hanya terjangkau via
+        // resolveAndStart (jalur IFRAME/cached di bawah).
         // IFRAME (cached COMPLETE via _playCached) pakai jalur existing.
         int mode = StreamSettings.MODE_VISIONOS;
         try { mode = StreamSettings.getStreamMode(c); } catch (Exception ignored) {}
         if (mode == StreamSettings.MODE_VISIONOS) {
+            final int gen;
+            final String prevVid;
             synchronized (lock) {
+                prevVid = videoId;
+                stopLocked("replay");
+                playGen++;
+                gen = playGen;
+                pendingStartMs = 0;
+                lastTotal = -1;
+                lastCache = "";
+                appCtx = c.getApplicationContext();
                 videoId = vid != null ? vid : "";
                 title = t != null ? t : "";
                 artist = ar != null ? ar : "";
                 artwork = art != null ? art : "";
-                setStateLocked(State.IDLE);
+                failReason = null;
+                failMessage = null;
+                setStateLocked(State.RESOLVING);
+                windowChunk = -1;
+                windowEnd = -1;
             }
-            nlog("[NATIVE_CMD] play videoId=" + videoId + " mode=VISIONOS engine=PENDING");
-            pushEvent("enginePending", null);
+            if (prevVid != null && !prevVid.isEmpty() && !prevVid.equals(vid)
+                    && !SongCache.isFull(prevVid)) {
+                SongCache.pauseDownload(prevVid);
+            }
+            nlog("[NATIVE_CMD] play videoId=" + videoId + " mode=VISIONOS resolve-only gen=" + gen);
+            pushEvent("sourceChanged", null);
+            try {
+                JSONObject meta = new JSONObject();
+                meta.put("videoId", videoId);
+                meta.put("title", title);
+                meta.put("artist", artist);
+                meta.put("artworkUrl", artwork);
+                meta.put("source", "VISIONOS");
+                SongCache.ensureMeta(c.getApplicationContext(), meta);
+            } catch (Exception ignored) {}
+            final Context ac = c.getApplicationContext();
+            final String v = vid;
+            new Thread(() -> resolveOnly(ac, v, gen)).start();
             return;
         }
         final int gen;
@@ -621,6 +652,32 @@ public final class NativeAudioEngine {
     }
 
     // ---------- internals ----------
+
+    /** PROTOTYPE B-revisi: resolve URL VisionOS saja (L1 di dalam resolver).
+     *  Sukses -> PENDING diam. Gagal -> failLocked (skip) + trackFailed.
+     *  L2/L3 tidak dijalankan (butuh playback). Tidak menyentuh mp. */
+    private void resolveOnly(Context c, String vid, int gen) {
+        VisionOsResolver.Result r;
+        try {
+            r = VisionOsResolver.resolve(vid);
+        } catch (VisionOsResolver.ResolverException e) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(e.reason != null ? e.reason
+                        : VisionOsResolver.R_RESOLVER_FAIL,
+                        e.stage + " " + e.getMessage());
+            }
+            pushAll();
+            return;
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+            setStateLocked(State.IDLE);
+        }
+        nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=PENDING"
+                + " itag=" + r.itag);
+        pushEvent("enginePending", null);
+    }
 
     private void resolveAndStart(Context c, String vid, int gen) {
         // 1. cache HIT? record COMPLETE + file valid (repairs stale COMPLETE)
@@ -1136,7 +1193,7 @@ public final class NativeAudioEngine {
         failReason = reason;
         failMessage = msg;
         nlog("[FALLBACK] START reason=" + reason + " msg=" + msg
-                + " videoId=" + videoId + " action=iFrame");
+                + " videoId=" + videoId + " action=skip");
         // PROTOTYPE bridge: explicit gagal event untuk JS (FASE C: skip,
         // bukan iframe). ERROR state + pushAll existing tetap (FASE C ubah).
         try { pushEvent("trackFailed", null); } catch (Exception ignored) {}

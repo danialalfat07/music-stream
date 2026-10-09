@@ -65,11 +65,20 @@
 - Tanya: mode check di NAE tiap `play()` cukup, atau guard per-call juga
   (pause/resume/seek/recovery pakai mp yang tak pernah start → no-op aman)?
 
-## FASE C — Skip logic (TUNGGU APPROVE)
-- [ ] C1 pertahankan L1+L2+L3 (no ubah).
-- [ ] C2 `app.js:1332-1341` → toast + `nextTrack(true)`, no iframe.
-  (N3 :2190-2197 ikut dimatikan? Tanya.)
-- [ ] C3 `Player.skipStreak`, >=2 → pause + toast jaringan. Commit terpisah.
+## FASE C — edits DONE (belum commit, belum test)
+- [x] C1 L1/L2/L3 + SongCache/PlaybackService/VisionOsResolver: diff nol.
+- [x] C2 `app.js` N2 → skip + skipStreak (log `action=skip`).
+- [x] C3 reset `skipStreak=0` saat PLAYING.
+- [x] C4 `failLocked` action `iFrame`→`skip`.
+- [ ] C5 BLOCKED: konflik B1 vs TEST C (bawah).
+
+## KONFLIK B1 vs TEST C (putusan user)
+- B1: VISIONOS → PENDING + return. Resolve mati, recovery mati, error nihil
+  → C2 skip tak pernah trigger. TEST C (invalid id → 3 retry → skip) mustahil.
+- Opsi B-revisi: VISIONOS tetap resolve + L1/L2/L3, tapi JANGAN start MP;
+  triple-fail → `failLocked` → JS skip. Tetap diam (no mp).
+- TEST C executable via harness intent (`native-play xxxxxxxxxxx`, no bridge)
+  + CDP/logcat. C2/C3/C4 tak perlu ubah.
 
 ## TEST A — iframe background: PASS (11:51-11:54, commit 8e4f984)
 - `startCurrent()` via CDP → iframe path (`nativePlay` undefined → YT).
