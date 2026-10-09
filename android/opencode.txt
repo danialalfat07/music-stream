@@ -1,0 +1,348 @@
+﻿TUGAS: Fix 4 bug notification ExoPlayer (artwork, seek, pause, queue race),
+build APK, adb install, dan copy APK ke sdcard. Buat TODO list dulu sebelum
+ngerjain.
+
+ATURAN:
+- JANGAN minta konfirmasi. Kerjakan sampai selesai.
+- JANGAN ubah file di luar yang disebut. Legacy PlaybackService.java,
+  LocalStreamServer.java, SongCache.java, GrowingFileDataSource.java,
+  NativeAudioEngine.java (kecuali poin Q4), VisionOs* TIDAK DISENTUH.
+- Setiap fix = commit terpisah. Pesan commit jelas.
+- Kalau ada ambiguity, pilih opsi paling minimal & paling aman (reversible).
+- Log semua command yang dijalankan + output penting ke
+  /tmp/dnialify-fix-<timestamp>.log
+
+============================================================
+TODO LIST (buat file TODO.md di root, tulis semua task ini)
+============================================================
+[ ] F1. Fix artwork notif: getCurrentLargeIcon trigger load + callback
+[ ] F2. Fix artwork notif: loadArtwork set artworkLoadedUrl setelah success
+[ ] F3. Fix artwork notif: setArtworkData pakai PICTURE_TYPE_FRONT_COVER
+[ ] F4. Fix artwork notif: hapus setPlaylistMetadata yang tidak dibaca notif
+[ ] F5. Fix seek: plumbing duration ke MediaItem + notif seekbar
+[ ] F6. Fix pause: aktifkan onUpdateNotification boolean startInForeground
+[ ] F7. Fix pause: onMediaButtonEvent baca dari player.isPlaying() bukan NAE
+[ ] F8. Fix queue race: sync queue sebelum startExoUrl di nativePlay
+[ ] B1. Build: ./gradlew assembleDebug
+[ ] B2. adb install -r app-debug.apk
+[ ] B3. Copy APK ke /sdcard/Download/Dnialify/dnialify-<version>.apk
+[ ] B4. Verifikasi: file ada + size + version
+============================================================
+
+============================================================
+FIX 1-4: ARTWORK (PlaybackMediaSessionService.java)
+============================================================
+
+File: android/app/src/main/java/com/dnialify/musicstream/PlaybackMediaSessionService.java
+
+--- F1: getCurrentLargeIcon (baris ~200-207) ---
+
+SEBELUM:
+    @Override public Bitmap getCurrentLargeIcon(Player p,
+            PlayerNotificationManager.BitmapCallback callback) {
+        if (artworkBitmap != null) return artworkBitmap;
+        return null;
+    }
+
+SESUDAH:
+    @Override public Bitmap getCurrentLargeIcon(Player p,
+            PlayerNotificationManager.BitmapCallback callback) {
+        if (artworkBitmap != null) return artworkBitmap;
+        // lazy: kalau belum loaded, trigger load + simpan callback untuk
+        // refresh begitu bitmap siap. Tanpa ini notif blanked permanen.
+        if (metadataArtwork != null && !metadataArtwork.isEmpty()
+                && !metadataArtwork.equals(artworkLoadedUrl)) {
+            loadArtwork(metadataArtwork, callback);
+        }
+        return null;
+    }
+
+--- F2: loadArtwork (baris ~230-245) ---
+
+SEBELUM:
+    private void loadArtwork(String url) {
+        if (url == null || url.isEmpty() || url.equals(artworkLoadedUrl)) return;
+        artworkLoadedUrl = url;
+        new Thread(() -> {
+            try {
+                Bitmap loaded = BitmapFactory.decodeStream(new java.net.URL(url).openStream());
+                if (loaded == null) return;
+                artworkBitmap = loaded;
+                if (notifications != null) notifications.invalidate();
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+SESUDAH (tambah overload dgn callback + pindah set loadedUrl ke success):
+    private void loadArtwork(String url) {
+        loadArtwork(url, null);
+    }
+
+    private void loadArtwork(String url, PlayerNotificationManager.BitmapCallback callback) {
+        if (url == null || url.isEmpty() || url.equals(artworkLoadedUrl)) return;
+        new Thread(() -> {
+            try {
+                Bitmap loaded = BitmapFactory.decodeStream(new java.net.URL(url).openStream());
+                if (loaded == null) {
+                    Log.w("PlaybackMediaSession", "artwork decode null url=" + url);
+                    return;  // tidak set artworkLoadedUrl -> boleh retry
+                }
+                artworkBitmap = loaded;
+                artworkLoadedUrl = url;   // <-- pindah ke sini, setelah sukses
+                if (notifications != null) notifications.invalidate();
+                if (callback != null) callback.onBitmapLoaded(loaded);
+            } catch (Exception e) {
+                Log.w("PlaybackMediaSession", "artwork load fail url=" + url + " err=" + e);
+            }
+        }).start();
+    }
+
+--- F3: setArtworkData pictureType (baris ~223-230 di setMetadata) ---
+
+SEBELUM:
+        player.setPlaylistMetadata(new MediaMetadata.Builder()
+                .setTitle(metadataTitle)
+                .setArtist(metadataArtist)
+                .setArtworkData(artworkBitmap == null ? null : bitmapBytes(artworkBitmap),
+                        0)
+                .build());
+
+SESUDAH: ganti angka 0 jadi PICTURE_TYPE_FRONT_COVER:
+        player.setPlaylistMetadata(new MediaMetadata.Builder()
+                .setTitle(metadataTitle)
+                .setArtist(metadataArtist)
+                .setArtworkData(artworkBitmap == null ? null : bitmapBytes(artworkBitmap),
+                        MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build());
+
+--- F4: hapus setPlaylistMetadata (karena notif tidak baca dari sana) ---
+
+GANTI seluruh blok setPlaylistMetadata di setMetadata dengan:
+        // PlayerNotificationManager baca dari MediaDescriptionAdapter
+        // (getCurrentContentTitle/Text/LargeIcon), BUKAN dari
+        // setPlaylistMetadata. Jadi baris setPlaylistMetadata dihapus:
+        // title/artist sudah diambil via titleOf()/artistOf(), artwork via
+        // getCurrentLargeIcon(). Pastikan field metadataTitle/metadataArtist
+        // ter-update (sudah di atas).
+
+============================================================
+FIX 5: SEEK (PlaybackMediaSessionService.java + ExoPlaybackEngine.java)
+============================================================
+
+Root cause: MediaItem tidak punya duration -> player.getDuration() =
+C.TIME_UNSET -> notif seekbar durasi -1 -> seek dipaksa posisi 0.
+
+--- F5a: ExoPlaybackEngine.startHttpsItem ---
+
+File: android/app/src/main/java/com/dnialify/musicstream/ExoPlaybackEngine.java
+Baris ~500-520 (di dalam startHttpsItem):
+
+CARI loop yang bikin MediaItem list, ganti jadi:
+
+        for (String id : ids) {
+            if (id == null || id.isEmpty()) continue;
+            MediaItem.Builder b = new MediaItem.Builder()
+                    .setUri(Uri.parse("https://resolve/" + id))
+                    .setCustomCacheKey(id);
+            // title/artist dari queue mirror supaya MediaMetadata present
+            String tTitle = "", tArtist = "", tArt = "";
+            long tDurMs = 0;
+            if (queueMirror != null && !queueMirror.isEmpty()) {
+                for (TrackRef tr : queueMirror) {
+                    if (id.equals(tr.id)) {
+                        tTitle = tr.title;
+                        tArtist = tr.artist;
+                        tArt = tr.art;
+                        break;
+                    }
+                }
+            }
+            MediaMetadata md = new MediaMetadata.Builder()
+                    .setTitle(tTitle.isEmpty() ? id : tTitle)
+                    .setArtist(tArtist)
+                    .setArtworkUri(tArt.isEmpty() ? null : Uri.parse(tArt))
+                    .setIsPlayable(true)
+                    .setIsBrowsable(false)
+                    .build();
+            b.setMediaMetadata(md);
+            items.add(b.build());
+        }
+
+CATATAN: `queueMirror` dan `TrackRef` sudah ada di NativeAudioEngine.java,
+BUKAN di ExoPlaybackEngine. Jadi solusi paling minimal:
+
+OPSI A (paling aman): tambah parameter `List<String> titles,
+List<String> artists, List<String> arts` ke `play(...)` di
+ExoPlaybackEngine, isi dari NAE, kemudian di loop di atas pakai
+titles.get(i) / artists.get(i) / arts.get(i) bukan queueMirror.
+
+OPSI B (kalau A terlalu invasif): biarkan MediaItem tanpa metadata,
+tapi di PlaybackMediaSessionService.setMetadata, saat player.getDuration()
+== C.TIME_UNSET, panggil:
+    player.setMediaItem(player.getCurrentMediaItem()
+        .buildUpon()
+        .setMediaMetadata(new MediaMetadata.Builder()
+            .setTitle(metadataTitle)
+            .setArtist(metadataArtist)
+            .build())
+        .build());
+Ini kurang bersih karena setMediaItem akan reset posisi kalau tidak hati-hati.
+JANGAN pakai OPSI B kalau tidak yakin. Default: OPSI A.
+
+--- F5b: PlaybackMediaSessionService.setMetadata ---
+
+Di akhir setMetadata(...), tambah:
+        // force notif refresh seekbar karena durasi mungkin baru diketahui
+        if (player.getDuration() == androidx.media3.common.C.TIME_UNSET
+                && durationMs > 0) {
+            Log.d("PlaybackMediaSession",
+                "duration unset from player, metadata durMs=" + durationMs);
+        }
+        notifications.invalidate();
+
+============================================================
+FIX 6-7: PAUSE (PlaybackMediaSessionService.java)
+============================================================
+
+--- F6: onUpdateNotification no-op override ---
+
+Baris ~260-270. SEBELUM:
+    @Override public void onUpdateNotification(MediaSession session) {
+    }
+    @Override public void onUpdateNotification(MediaSession session,
+            boolean startInForeground) {
+    }
+
+SESUDAH: hapus override yang `boolean startInForeground`, sisakan:
+    @Override public void onUpdateNotification(MediaSession session) {
+        // sengaja kosong: PlayerNotificationManager (id 1002) yang publish.
+        // Yang boolean startInForeground dihapus supaya tidak blokir
+        // self-foreground MediaSessionService.
+    }
+
+Dan JANGAN override method dengan parameter boolean (hapus samasekali).
+
+--- F7: onMediaButtonEvent baca player state, bukan NAE state ---
+
+Baris ~130-145. SEBELUM:
+                    case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                        try {
+                            String st = engine.getState().optString("state", "");
+                            if ("PLAYING".equals(st)) engine.pause();
+                            else engine.resume();
+                        } catch (Exception ignored) {}
+                        return true;
+
+SESUDAH:
+                    case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                        // baca dari player yang benar-benar audible, bukan NAE
+                        // state machine (bisa stale setelah control dari notif).
+                        try {
+                            boolean playing = player != null && player.isPlaying();
+                            if (playing) {
+                                engine.pause();
+                            } else {
+                                engine.resume();
+                            }
+                        } catch (Exception ignored) {}
+                        return true;
+
+Lakukan hal sama untuk KEYCODE_MEDIA_PAUSE / KEYCODE_MEDIA_PLAY
+(baca player.isPlaying() dulu, baru panggil engine.pause/resume).
+
+============================================================
+FIX 8: QUEUE RACE (NativeAudioEngine.java)
+============================================================
+
+File: android/app/src/main/java/com/dnialify/musicstream/NativeAudioEngine.java
+Baris ~515-545 (startExoUrl):
+
+MASALAH: JS panggil nativeSetQueue() lalu nativePlay() lewat dua bridge call
+berurutan. Tidak ada jaminan atomic. Kalau nativePlay sampe duluan, queue
+kosong -> ids.size()==1 -> setMediaSource(single) -> next/prev notif hilang.
+
+SOLUSI: di setQueue() (baris ~485-515), kalau state == IDLE/RESOLVING
+(belum playing), TETAP simpan queue. Tambah flag `queueReady`. Di startExoUrl,
+kalau queueReady false DAN ada pending ids dari metadata (dari setQueue yang
+belum sampe), tunggu max 500ms:
+
+Di startExoUrl, SEBELUM build ids list, tambah:
+
+        // tunggu queue mirror max 500ms (JS bridge bisa race)
+        long waitStart = System.currentTimeMillis();
+        while (queue.isEmpty() && System.currentTimeMillis() - waitStart < 500) {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+        }
+
+CATATAN: startExoUrl dipanggil dari main thread. Thread.sleep di main
+thread akan ANR kalau >5s. 500ms masih aman, tapi lebih baik pindah
+wait ke thread resolveAndStart yang sudah worker thread. Cek lagi
+alur: resolveAndStart worker -> main.post(startExoUrl). Kalau begitu,
+pindah wait ke resolveAndStart sebelum main.post.
+
+ALTERNATIF LEBIH BERSIH: bikin satu bridge call nativePlayWithQueue(
+videoId, title, artist, artwork, queueJson, currentIndex, startSeconds)
+yang set queue + play dalam satu @JavascriptInterface method, sehingga
+tidak ada race. Update MainActivity.PlaybackBridge + public/app.js
+(nativePlayAt diganti nativePlayAtWithQueue). Kalau opsi ini dipilih,
+pastikan public/app.js sudah update panggilan dan tidak break fallback.
+
+PILIH yang paling minimal. Default: tunggu 500ms di worker thread
+resolveAndStart sebelum panggil startExoUrl.
+
+============================================================
+BUILD, INSTALL, COPY
+============================================================
+
+--- B1: Build ---
+cd android
+./gradlew assembleDebug --offline
+(atau tanpa --offline kalau ada dependency baru)
+Cek output: android/app/build/outputs/apk/debug/app-debug.apk
+Kalau gagal, tampilkan error + stop.
+
+--- B2: adb install ---
+adb devices  (pastikan ada device)
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+Kalau INSTALL_FAILED_UPDATE_INCOMPATIBLE, tampilkan error + JANGAN
+uninstall otomatis. Lapor ke user dulu.
+
+--- B3: Copy ke sdcard ---
+Baca versionName dari:
+  cd android && ./gradlew -q :app:printVersionName
+  (kalau task tidak ada, baca dari build.gradle computedVersionName,
+   fallback ke package.json webVersion)
+Format: 2.3.5-build.<RUN_NUM> atau 2.3.5
+
+adb shell mkdir -p /sdcard/Download/Dnialify
+adb push android/app/build/outputs/apk/debug/app-debug.apk \
+    /sdcard/Download/Dnialify/dnialify-<versionName>.apk
+
+GANTI <versionName> dengan versi aktual, contoh:
+  /sdcard/Download/Dnialify/dnialify-2.3.5-build.42.apk
+
+--- B4: Verifikasi ---
+adb shell ls -la /sdcard/Download/Dnialify/
+adb shell md5sum /sdcard/Download/Dnialify/dnialify-<versionName>.apk
+md5sum android/app/build/outputs/apk/debug/app-debug.apk
+(Pastikan MD5 sama)
+
+============================================================
+SETELAH SELESAI
+============================================================
+
+Print ringkasan:
+1. TODO.md - centang semua task
+2. Daftar commit hash + pesan
+3. Path APK lokal + path di sdcard + version
+4. Test device manual yang HARUS dijalankan user:
+   T1. Play lagu, cek artwork muncul di notif (tunggu 3 detik)
+   T2. Drag seekbar notif ke tengah, pastikan tidak balik ke 0
+   T3. Pause dari notif, tunggu 10 detik, play balik - state konsisten
+   T4. Play queue 3 lagu, pastikan tombol next di notif ada
+   T5. Kunci layar, tap pause, unlock, cek state
+5. Kalau ada test yang gagal, tulis log command untuk debug:
+   adb logcat -s DnialifyVisionOS:V PlaybackMediaSession:V
+   adb shell dumpsys notification --noredact | grep -A5 "1002"
+
+MULAI SEKARANG.
