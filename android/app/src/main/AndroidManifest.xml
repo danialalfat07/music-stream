@@ -22,6 +22,18 @@
             </intent-filter>
         </service>
 
+        <!-- Socket 4: MediaSession + notif 1002 untuk ExoPlayer tunggal. -->
+        <service
+            android:name=".ExoMediaSessionService"
+            android:enabled="true"
+            android:exported="true"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
         <!-- Phase 8 diag only: native stream settings dialog (no launcher icon). -->
         <activity
             android:name=".StreamSettingsActivity"

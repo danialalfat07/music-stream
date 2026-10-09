@@ -801,6 +801,18 @@ public final class NativeAudioEngine {
                 + " playerHash=" + System.identityHashCode(exo));
         pushAll();
         startExoTicker();
+        // Socket 4: session service untuk notif 1002 (guard VISIONOS implisit:
+        // jalur ini cuma dari play() VISIONOS).
+        try {
+            if (appCtx != null) {
+                android.content.Intent svc = new android.content.Intent(
+                        appCtx, ExoMediaSessionService.class);
+                androidx.core.content.ContextCompat.startForegroundService(appCtx, svc);
+                nlog("[NATIVE_CMD] session service started engine=EXO");
+            }
+        } catch (Exception e) {
+            nlog("[NATIVE_CMD] session service start FAIL " + e);
+        }
     }
 
     private void attachExoListenerLocked(final ExoPlayer exo) {
@@ -847,7 +859,7 @@ public final class NativeAudioEngine {
                 String msg = error != null ? String.valueOf(error.getMessage()) : "?";
                 synchronized (lock) {
                     if (exoPlayer != exo) return;
-                    stopExoTicker();
+                    stopExoLocked();
                     failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo error " + msg);
                 }
                 pushAll();
@@ -880,7 +892,8 @@ public final class NativeAudioEngine {
         timer.removeCallbacks(exoTicker);
     }
 
-    /** Hentikan audio Exo saat ganti track/gagal. Player tetap (reuse). */
+    /** Hentikan audio Exo saat ganti track/gagal. Player tetap (reuse).
+     *  Service session ikut berhenti (notif 1002 hilang). */
     private void stopExoLocked() {
         if (exoPlayer != null) {
             final ExoPlayer exo = exoPlayer;
@@ -891,6 +904,11 @@ public final class NativeAudioEngine {
         }
         stopExoTicker();
         exoMode = false;
+        try {
+            if (appCtx != null) {
+                appCtx.stopService(new android.content.Intent(appCtx, ExoMediaSessionService.class));
+            }
+        } catch (Exception ignored) {}
     }
 
     private void resolveAndStart(Context c, String vid, int gen) {
