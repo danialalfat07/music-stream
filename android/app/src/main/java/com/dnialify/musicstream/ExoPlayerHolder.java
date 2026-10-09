@@ -3,7 +3,9 @@ package com.dnialify.musicstream;
 import android.content.Context;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 
 /**
  * Socket 2 (FASE 2): single shared ExoPlayer instance.
@@ -14,6 +16,11 @@ import androidx.media3.exoplayer.ExoPlayer;
 public final class ExoPlayerHolder {
 
     private static final String TAG = "ExoPlayerHolder";
+
+    /** Sama dengan resolver/SongCache/MediaPlayer legacy: googlevideo 403
+     *  tanpa UA ini (socket-3-fix). */
+    private static final String VISIONOS_UA =
+            "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
 
     private static ExoPlayerHolder instance;
 
@@ -29,6 +36,8 @@ public final class ExoPlayerHolder {
         player = new ExoPlayer.Builder(appContext)
                 .setAudioAttributes(attrs, true)
                 .setHandleAudioBecomingNoisy(true)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(
+                        new DefaultHttpDataSource.Factory().setUserAgent(VISIONOS_UA)))
                 .build();
         android.util.Log.d(TAG, "holder created, single ExoPlayer owned");
     }
