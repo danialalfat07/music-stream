@@ -2287,6 +2287,7 @@ function onTrackChanged(s) {
 // Dipanggil tiap queue/track berubah. NAE filter mode + videoId sendiri
 // (getStreamMode bridge flaky, jangan gate di sini).
 function pushQueueWindow() {
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('PUSH_ENTER q=' + ((Player.queue || []).length)); } catch {}
   try {
     if (!Player.queue || !Player.queue.length) return;
     try {
