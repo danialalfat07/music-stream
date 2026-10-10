@@ -2643,9 +2643,15 @@ function togglePlay() {
   if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeState) {
     try {
       const st = JSON.parse(NativePlayback.nativeState());
-      if (st && st.state === 'PLAYING') NativePlayback.nativePause();
-      else if (st && st.state === 'PAUSED') NativePlayback.nativeResume();
-      else if (Player.current) startCurrent();
+      const s = (st && st.state) || '';
+      if (s === 'PAUSED') {
+        NativePlayback.nativeResume();
+        try { if (Player.native) { Player.native.state = 'PLAYING'; renderPlayButtons(); } } catch {}
+      } else if (s === 'PLAYING' || s === 'BUFFERING' || s === 'SEEKING') {
+        // Pause berlaku juga saat buffering/seeking (bukan restart).
+        NativePlayback.nativePause();
+        try { if (Player.native) { Player.native.state = 'PAUSED'; renderPlayButtons(); } } catch {}
+      } else if (Player.current) startCurrent();
     } catch {}
     return;
   }
