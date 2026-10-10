@@ -2287,27 +2287,33 @@ function onTrackChanged(s) {
 // Dipanggil tiap queue/track berubah. NAE filter mode + videoId sendiri
 // (getStreamMode bridge flaky, jangan gate di sini).
 function pushQueueWindow() {
-  const L = (m) => { try { NativePlayback && NativePlayback.diagLog && NativePlayback.diagLog(m); } catch(e) {} };
-  L('T1_enter');
-  try { L('T2_q=' + ((Player && Player.queue) ? Player.queue.length : 'NULL')); } catch(e) { L('T2_ERR:' + e.message); return; }
-  if (!Player || !Player.queue || !Player.queue.length) { L('T3_early_return_empty'); return; }
-  L('T4_q_ok=' + Player.queue.length);
-  try { L('T5_idx=' + Player.index); } catch(e) { L('T5_ERR:' + e.message); return; }
-  try { L('T6_hasBridge=' + !!(window.NativePlayback && window.NativePlayback.nativeSetQueueWindow)); } catch(e) { L('T6_ERR:' + e.message); return; }
-  if (!(window.NativePlayback && window.NativePlayback.nativeSetQueueWindow)) { L('T7_nobridge_return'); return; }
   try {
+    if (!Player.queue || !Player.queue.length) return;
+    try {
+      if (window.NativePlayback && NativePlayback.diagLog) {
+        NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
+          + ' hasBridge=' + (!!NativePlayback.nativeSetQueueWindow));
+      }
+    } catch {}
+    if (!(window.NativePlayback && NativePlayback.nativeSetQueueWindow)) return;
     const idx = Player.index;
-    if (idx < 0 || idx >= Player.queue.length) { L('T8_idx_invalid=' + idx); return; }
+    if (idx < 0 || idx >= Player.queue.length) return;
     const start = Math.max(0, idx - 1);
     const end = Math.min(Player.queue.length, idx + 3);
     const window = Player.queue.slice(start, end).map((q) => ({
-      videoId: q.videoId || '', title: q.title || '', artist: q.artist || q.subtitle || '',
-      thumbnail: q.thumbnail || '', duration: Number(q.duration || 0), _user: !!q._user
+      videoId: q.videoId || '',
+      title: q.title || '',
+      artist: q.artist || q.subtitle || '',
+      thumbnail: q.thumbnail || '',
+      duration: Number(q.duration || 0),
+      _user: !!q._user,
     }));
-    L('T9_window_len=' + window.length);
-    NativePlayback.nativeSetQueueWindow(JSON.stringify({ items: window, currentIndex: idx - start }));
-    L('T10_sent');
-  } catch(e) { L('T10_ERR:' + e.message + ' @' + (e.stack||'').slice(0,200)); }
+    if (!window.length || !window[idx - start] || !window[idx - start].videoId) return;
+    const payload = JSON.stringify({ items: window, currentIndex: idx - start });
+    if (window.NativePlayback && NativePlayback.nativeSetQueueWindow) {
+      NativePlayback.nativeSetQueueWindow(payload);
+    }
+  } catch {}
 }
 function startCurrent() {
   if (_isClosed) return;
