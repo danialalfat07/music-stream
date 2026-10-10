@@ -1731,6 +1731,7 @@ window.onYouTubeIframeAPIReady = () => {
 
 async function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[TRACE_01] playSong enter videoId=' + song.videoId); } catch {}
   // mandatory version check before any play - uses cache/no-store fetch with 5min cooldown
   try {
     const ok = await ensureAppVersionBeforePlay();
@@ -2184,6 +2185,7 @@ const OfflineLib = {
 
 // Phase 8 Engine B handoff (top-level: called by startCurrent for cached/VisionOS tracks).
 function startNativeTrack(s, loadId) {
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[TRACE_03] startNativeTrack enter videoId=' + (s && s.videoId)); } catch {}
   // explicit handoff: stop WebView engines first, confirm, then start native
   let ytStopped = true, audioStopped = true;
   try { if (Player.yt && Player.ready) { Player.yt.pauseVideo(); try { Player.yt.stopVideo(); } catch {} } } catch { ytStopped = false; }
@@ -2291,51 +2293,41 @@ function onTrackChanged(s) {
   try { refreshSourceLabel(); } catch {}
 }
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
-// Idempotent: aman dipanggil kapan saja. NAE filter mode + videoId sendiri.
-// Approach A: push final selalu SETELAH single settle (event PLAYING).
-// Dedupe: key konten window + debounce 10s (hindari resolve storm).
+// Delay fix: audio boleh start dulu, window push DITUNDA 1000ms agar single
+// settle dulu (deterministik last-writer). TRACE_XX di tiap titik.
 function pushQueueWindow() {
-  try {
-    if (!Player.queue || !Player.queue.length) {
-      try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_EMPTY] qlen=0'); } catch {}
-      return;
-    }
-    const idx = Player.index;
-    if (idx < 0 || idx >= Player.queue.length) return;
-    const start = Math.max(0, idx - 1);
-    const end = Math.min(Player.queue.length, idx + 3);
-    const window = Player.queue.slice(start, end).map((q) => ({
-      videoId: q.videoId || '',
-      title: q.title || '',
-      artist: q.artist || q.subtitle || '',
-      thumbnail: q.thumbnail || '',
-      duration: Number(q.duration || 0),
-      _user: !!q._user,
-    }));
-    if (!window.length || !window[idx - start] || !window[idx - start].videoId) return;
-    const wkey = (Player.loadId || 0) + '|' + window.map((w) => w.videoId).join(',') + '|' + (idx - start);
-    const now = Date.now();
-    if (Player._lastWindowKey === wkey && now - (Player._lastWindowAt || 0) < 10000) {
-      try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_DUP] skip key=' + wkey); } catch {}
-      return;
-    }
-    Player._lastWindowKey = wkey;
-    Player._lastWindowAt = now;
+  const L = (m) => { try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog(m); } catch(e) {} };
+  L('[TRACE_04] pushQueueWindow enter q=' + ((Player && Player.queue) ? Player.queue.length : 'NULL'));
+  setTimeout(() => {
     try {
-      if (window.NativePlayback && NativePlayback.diagLog) {
-        NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
-          + ' hasBridge=' + (!!NativePlayback.nativeSetQueueWindow));
-      }
-    } catch {}
-    if (!(window.NativePlayback && NativePlayback.nativeSetQueueWindow)) return;
-    const payload = JSON.stringify({ items: window, currentIndex: idx - start });
-    if (window.NativePlayback && NativePlayback.nativeSetQueueWindow) {
-      NativePlayback.nativeSetQueueWindow(payload);
-    }
-  } catch {}
+      if (!Player.queue || !Player.queue.length) { L('[TRACE_EMPTY] qlen=0'); return; }
+      const idx = Player.index;
+      if (idx < 0 || idx >= Player.queue.length) { L('[TRACE_IDX] invalid idx=' + idx); return; }
+      const start = Math.max(0, idx - 1);
+      const end = Math.min(Player.queue.length, idx + 3);
+      const window = Player.queue.slice(start, end).map((q) => ({
+        videoId: q.videoId || '',
+        title: q.title || '',
+        artist: q.artist || q.subtitle || '',
+        thumbnail: q.thumbnail || '',
+        duration: Number(q.duration || 0),
+        _user: !!q._user,
+      }));
+      if (!window.length || !window[idx - start] || !window[idx - start].videoId) { L('[TRACE_NOWIN] empty'); return; }
+      const wkey = (Player.loadId || 0) + '|' + window.map((w) => w.videoId).join(',') + '|' + (idx - start);
+      const now = Date.now();
+      if (Player._lastWindowKey === wkey && now - (Player._lastWindowAt || 0) < 10000) { L('[TRACE_DUP] skip'); return; }
+      Player._lastWindowKey = wkey;
+      Player._lastWindowAt = now;
+      L('[TRACE_05] bridge call nativeSetQueueWindow n=' + window.length + ' cur=' + (idx - start));
+      NativePlayback.nativeSetQueueWindow(JSON.stringify({ items: window, currentIndex: idx - start }));
+      L('[TRACE_05B] bridge returned');
+    } catch(e) { L('[TRACE_ERR] ' + (e && e.message)); }
+  }, 1000);
 }
 function startCurrent() {
   if (_isClosed) return;
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[TRACE_02] startCurrent enter'); } catch {}
   Player.cued = false;
   Player.pending = null;
   const s = Player.current;
