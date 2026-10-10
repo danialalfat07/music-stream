@@ -1320,6 +1320,11 @@ function initAudio(){
         nextTrack(true);
         return;
       }
+      if (ev.state === 'PLAYING' && Player.nativeActive) {
+        // Socket 5 Approach A: single sudah settle (Exo playing).
+        // Push window SEKARANG = deterministik last-writer. Dedupe di push.
+        try { pushQueueWindow(); } catch {}
+      }
       if (ev.state === 'ERROR') {
         // Premature-completion failure: never auto-next, never retry blindly.
         if (ev.reason === 'PREMATURE_COMPLETION') {
@@ -2194,7 +2199,7 @@ function startNativeTrack(s, loadId) {
   Player.useAudio = false;
   Player.nativeActive = true;
   Player._nativeFailed = null;
-  try { pushQueueWindow(); } catch {}
+  // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
   // BUGFIX 2.2.7: optimistic reset so playbar starts at 0:00 immediately on click
   // (engine always starts cached tracks at 0; icon follows on PLAYING event).
   // Never fake PLAYING: mirror starts at BUFFERING, never a terminal Ready state.
@@ -2287,19 +2292,14 @@ function onTrackChanged(s) {
 }
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
 // Idempotent: aman dipanggil kapan saja. NAE filter mode + videoId sendiri.
+// Approach A: push final selalu SETELAH single settle (event PLAYING).
+// Dedupe: key konten window + debounce 10s (hindari resolve storm).
 function pushQueueWindow() {
   try {
     if (!Player.queue || !Player.queue.length) {
       try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_EMPTY] qlen=0'); } catch {}
       return;
     }
-    try {
-      if (window.NativePlayback && NativePlayback.diagLog) {
-        NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
-          + ' hasBridge=' + (!!NativePlayback.nativeSetQueueWindow));
-      }
-    } catch {}
-    if (!(window.NativePlayback && NativePlayback.nativeSetQueueWindow)) return;
     const idx = Player.index;
     if (idx < 0 || idx >= Player.queue.length) return;
     const start = Math.max(0, idx - 1);
@@ -2313,6 +2313,21 @@ function pushQueueWindow() {
       _user: !!q._user,
     }));
     if (!window.length || !window[idx - start] || !window[idx - start].videoId) return;
+    const wkey = (Player.loadId || 0) + '|' + window.map((w) => w.videoId).join(',') + '|' + (idx - start);
+    const now = Date.now();
+    if (Player._lastWindowKey === wkey && now - (Player._lastWindowAt || 0) < 10000) {
+      try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_DUP] skip key=' + wkey); } catch {}
+      return;
+    }
+    Player._lastWindowKey = wkey;
+    Player._lastWindowAt = now;
+    try {
+      if (window.NativePlayback && NativePlayback.diagLog) {
+        NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
+          + ' hasBridge=' + (!!NativePlayback.nativeSetQueueWindow));
+      }
+    } catch {}
+    if (!(window.NativePlayback && NativePlayback.nativeSetQueueWindow)) return;
     const payload = JSON.stringify({ items: window, currentIndex: idx - start });
     if (window.NativePlayback && NativePlayback.nativeSetQueueWindow) {
       NativePlayback.nativeSetQueueWindow(payload);
@@ -2328,7 +2343,8 @@ function startCurrent() {
   const loadId = ++Player.loadId;
   Player.loadStartedAt = Date.now();
   Player._fallbackTried = null;
-  pushQueueWindow();
+  // Socket 5 Approach A: TIDAK push di sini (single belum settle).
+  // Push deterministik di event PLAYING + akhir fetchQueue + mutasi queue.
   // Phase 8 Engine B: VisionOS mode -> native engine (WebView = orchestrator only).
   // Cached COMPLETE always native (never iFrame). Desktop/no-bridge untouched.
   if (Player._nativeFailed !== s.videoId
@@ -2562,7 +2578,7 @@ function nextTrack(auto) {
     else return;
   }
   Player.index = ni;
-  pushQueueWindow();
+  // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
   startCurrent();
 }
 function prevTrack() {
@@ -2582,7 +2598,7 @@ function prevTrack() {
   }
   if (Player.index > 0) {
     Player.index--;
-    pushQueueWindow();
+    // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
     startCurrent();
   } else if (wasNative) {
     startCurrent(); // native restart-from-0 (ghost yt.seekTo would silence it)
