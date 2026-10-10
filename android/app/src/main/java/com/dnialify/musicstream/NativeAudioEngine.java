@@ -57,6 +57,8 @@ public final class NativeAudioEngine {
     private boolean exoMode = false;
     private ExoPlayer exoPlayer;
     private boolean exoListenerAttached = false;
+    private int lastResolverDurationMs = 0;
+    private int lastWindowDurationMs = 0;
     // Socket 5: window timeline (JS owner). Seq guard: window basi dibuang.
     private int windowSeq = 0;
     private boolean windowApplying = false;
@@ -747,6 +749,8 @@ public final class NativeAudioEngine {
         }
         synchronized (lock) {
             if (gen != playGen) return;
+            lastResolverDurationMs = r.durationMs > 0
+                    ? (int) Math.min(r.durationMs, Integer.MAX_VALUE) : 0;
             setStateLocked(State.IDLE);
         }
         startExoItem(vid, r, gen);
@@ -776,6 +780,8 @@ public final class NativeAudioEngine {
             }
             exoPlayer = exo;
             attachExoListenerLocked(exo);
+            durationMs = r.durationMs > 0
+                    ? (int) Math.min(r.durationMs, Integer.MAX_VALUE) : 0;
         }
         try {
             MediaMetadata md = new MediaMetadata.Builder()
@@ -906,6 +912,15 @@ public final class NativeAudioEngine {
                 if (exoMode && exoPlayer != null) {
                     try { currentMs = (int) exoPlayer.getCurrentPosition(); }
                     catch (Exception ignored) {}
+                    long playerDurationMs = 0;
+                    try { playerDurationMs = exoPlayer.getDuration(); } catch (Exception ignored) {}
+                    if (playerDurationMs > 0 && playerDurationMs <= Integer.MAX_VALUE) {
+                        durationMs = (int) playerDurationMs;
+                    } else if (lastResolverDurationMs > 0) {
+                        durationMs = lastResolverDurationMs;
+                    } else if (lastWindowDurationMs > 0) {
+                        durationMs = lastWindowDurationMs;
+                    }
                     pushEvent("timeUpdate", null);
                     keep = true;
                 }
@@ -1060,9 +1075,13 @@ public final class NativeAudioEngine {
             }
         }
         final java.util.List<MediaItem> items = new java.util.ArrayList<>();
+        int resolvedCurrentDurationMs = 0;
         for (int i = 0; i < vids.size(); i++) {
             VisionOsResolver.Result r = results.get(i);
             if (r == null || r.url == null || r.url.isEmpty()) continue;
+            if (i == curIdx && r.durationMs > 0) {
+                resolvedCurrentDurationMs = (int) Math.min(r.durationMs, Integer.MAX_VALUE);
+            }
             MediaMetadata md = new MediaMetadata.Builder()
                     .setTitle(titles.get(i).isEmpty() ? r.title : titles.get(i))
                     .setArtist(artists.get(i).isEmpty() ? r.author : artists.get(i))
@@ -1109,6 +1128,11 @@ public final class NativeAudioEngine {
             }
             adjIdx = okVids.indexOf(cv);
             if (adjIdx < 0) return;
+        }
+        synchronized (lock) {
+            if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return;
+            lastWindowDurationMs = resolvedCurrentDurationMs;
+            if (lastWindowDurationMs > 0) durationMs = lastWindowDurationMs;
         }
         final java.util.List<MediaItem> fItems = items;
         final int fIdx = adjIdx;
