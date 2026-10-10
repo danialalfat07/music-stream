@@ -2319,7 +2319,7 @@ function pushIfDirty(context) {
     try { pushQueueWindow(); } catch(e) {}
     queueDirty = false;
     try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PUSH_DIRTY] ctx=' + context); } catch(e) {}
-  }, 500);
+  }, 1000);
 }
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
 // TRACE_XX di tiap titik. Delay dimiliki pushIfDirty; body ini langsung.
