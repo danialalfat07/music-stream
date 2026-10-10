@@ -241,6 +241,13 @@ public class PlaybackService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        // FC guard: VisionOS pakai Exo, service legacy tak boleh init. Stop
+        // segera (tanpa startForeground) agar tak kena NotAllowed/Timeout.
+        if (suppressLegacyNotif(this)) {
+            Log.d("PlaybackService", "onCreate suppressed (VISIONOS mode), stopping");
+            try { stopSelf(); } catch (Exception ignored) {}
+            return;
+        }
         instance = this;
         createChannel();
         mediaSession = new MediaSessionCompat(this, "MusicStreamSession");
@@ -265,7 +272,13 @@ public class PlaybackService extends Service {
             }
         });
         mediaSession.setActive(true);
-        startForeground(NOTIFICATION_ID, buildNotification());
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification());
+        } catch (Exception e) {
+            Log.w("PlaybackService", "onCreate startForeground failed, stopping: " + e);
+            try { stopSelf(); } catch (Exception ignored) {}
+            return;
+        }
     }
 
     private void createChannel() {
