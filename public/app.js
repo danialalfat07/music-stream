@@ -1903,6 +1903,7 @@ function restoreQueue() {
   });
   const sp = $('#np-speed span');
   if (sp) sp.textContent = Player.speed + '×';
+  try { pushQueueWindow(); } catch {}
   return true;
 }
 function moveQueued(i, dir) {
@@ -2193,6 +2194,7 @@ function startNativeTrack(s, loadId) {
   Player.useAudio = false;
   Player.nativeActive = true;
   Player._nativeFailed = null;
+  try { pushQueueWindow(); } catch {}
   // BUGFIX 2.2.7: optimistic reset so playbar starts at 0:00 immediately on click
   // (engine always starts cached tracks at 0; icon follows on PLAYING event).
   // Never fake PLAYING: mirror starts at BUFFERING, never a terminal Ready state.
@@ -2284,11 +2286,22 @@ function onTrackChanged(s) {
   try { refreshSourceLabel(); } catch {}
 }
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
-// Dipanggil tiap queue/track berubah. NAE filter mode + videoId sendiri
-// (getStreamMode bridge flaky, jangan gate di sini).
+// Idempotent: aman dipanggil kapan saja. NAE filter mode + videoId sendiri.
 function pushQueueWindow() {
   try {
-    if (!Player.queue || !Player.queue.length) return;
+    if (window.NativePlayback && NativePlayback.getStreamMode) {
+      try {
+        const m = NativePlayback.getStreamMode();
+        if (typeof m === 'number' && m !== 1) {
+          try { NativePlayback.diagLog('[WINDOW_SKIP] mode=' + m); } catch {}
+          return;
+        }
+      } catch {}
+    }
+    if (!Player.queue || !Player.queue.length) {
+      try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_EMPTY] qlen=0'); } catch {}
+      return;
+    }
     try {
       if (window.NativePlayback && NativePlayback.diagLog) {
         NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
@@ -2507,6 +2520,7 @@ async function fetchQueue(song) {
   } finally {
     if (loadId === Player.loadId) Player._queueFetching = false;
   }
+  try { pushQueueWindow(); } catch {}
 }
 
 function nextTrack(auto) {
