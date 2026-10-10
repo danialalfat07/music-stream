@@ -1320,11 +1320,8 @@ function initAudio(){
         nextTrack(true);
         return;
       }
-      if (ev.state === 'PLAYING' && Player.nativeActive) {
-        // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
-        // Push window SEKARANG = deterministik last-writer (dirty-gated).
-        try { pushIfDirty('playing'); } catch {}
-      }
+      // Socket 5 dirty: mid-play = NOL push (bahkan saat dirty).
+      // Window hanya di transisi (start/next/prev/auto).
       if (ev.state === 'ERROR') {
         // Premature-completion failure: never auto-next, never retry blindly.
         if (ev.reason === 'PREMATURE_COMPLETION') {
@@ -7000,6 +6997,7 @@ $('#mini-repeat').addEventListener('click', (e) => {
   $('#np-repeat').classList.toggle('on', on);
   $('#np-repeat').innerHTML = ic;
   persistQueue();
+  try { markDirty(); } catch {}
   toast(['Repeat off', 'Repeat all', 'Repeat one'][Player.repeat]);
 });
 /* click-to-seek on the bar */
