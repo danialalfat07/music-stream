@@ -1321,9 +1321,9 @@ function initAudio(){
         return;
       }
       if (ev.state === 'PLAYING' && Player.nativeActive) {
-        // Socket 5 Approach A: single sudah settle (Exo playing).
-        // Push window SEKARANG = deterministik last-writer. Dedupe di push.
-        try { pushQueueWindow(); } catch {}
+        // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
+        // Push window SEKARANG = deterministik last-writer (dirty-gated).
+        try { pushIfDirty('playing'); } catch {}
       }
       if (ev.state === 'ERROR') {
         // Premature-completion failure: never auto-next, never retry blindly.
@@ -1784,20 +1784,20 @@ function queueSong(song, playNext = false) {
     toast('Added to your queue');
   }
   renderQueue();
-  pushQueueWindow();
+  try { markDirty(); } catch {}
 }
 function removeQueued(i) {
   if (i === Player.index || i < 0 || i >= Player.queue.length) return;
   if (i < Player.index) Player.index--;
   Player.queue.splice(i, 1);
   renderQueue();
-  pushQueueWindow();
+  try { markDirty(); } catch {}
 }
 function clearUserQueue() {
   Player.queue = Player.queue.filter((q, i) => i <= Player.index || !q._user);
   renderQueue();
   toast('Queue cleared');
-  pushQueueWindow();
+  try { markDirty(); } catch {}
 }
 function scrambleRadioQueue() {
   const indices = [];
@@ -1820,7 +1820,7 @@ function scrambleRadioQueue() {
   });
   renderQueue();
   toast('Radio queue scrambled');
-  pushQueueWindow();
+  try { markDirty(); } catch {}
 }
 function removeRadioQueued(i) {
   if (i === Player.index || i < 0 || i >= Player.queue.length) return;
@@ -1828,7 +1828,7 @@ function removeRadioQueued(i) {
   Player.queue.splice(i, 1);
   renderQueue();
   toast('Removed from radio');
-  pushQueueWindow();
+  try { markDirty(); } catch {}
 }
 function slimSong(s) {
   if (!s || !s.videoId) return null;
@@ -1909,7 +1909,6 @@ function restoreQueue() {
   });
   const sp = $('#np-speed span');
   if (sp) sp.textContent = Player.speed + '×';
-  try { pushQueueWindow(); } catch {}
   return true;
 }
 function moveQueued(i, dir) {
@@ -1924,7 +1923,7 @@ function moveQueueItem(from, to) {
   const [item] = Player.queue.splice(from, 1);
   Player.queue.splice(to, 0, item);
   renderQueue();
-  pushQueueWindow();
+  try { markDirty(); } catch {}
   return true;
 }
 const QueueDrag = { pending: null, active: null, bound: false };
@@ -2201,7 +2200,9 @@ function startNativeTrack(s, loadId) {
   Player.useAudio = false;
   Player.nativeActive = true;
   Player._nativeFailed = null;
-  // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
+  // Socket 5 dirty: transisi = dirty, push via pushIfDirty (delay 500ms).
+  try { markDirty(); } catch {}
+  try { pushIfDirty('start'); } catch {}
   // BUGFIX 2.2.7: optimistic reset so playbar starts at 0:00 immediately on click
   // (engine always starts cached tracks at 0; icon follows on PLAYING event).
   // Never fake PLAYING: mirror starts at BUFFERING, never a terminal Ready state.
@@ -2305,15 +2306,31 @@ function parseDurationSec(d) {
   for (const p of parts) sec = sec * 60 + p;
   return sec > 0 ? sec : 0;
 }
+// Socket 5 dirty-flag: push HANYA saat dirty + transisi. Mid-play nol push.
+// Delay 500ms (settle), dedupe key konten tetap sebagai lapis kedua.
+let queueDirty = false;
+function markDirty() {
+  queueDirty = true;
+  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[DIRTY_SET]'); } catch(e) {}
+}
+function pushIfDirty(context) {
+  if (!queueDirty) {
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[SKIP_NOT_DIRTY] ctx=' + context); } catch(e) {}
+    return;
+  }
+  setTimeout(() => {
+    try { pushQueueWindow(); } catch(e) {}
+    queueDirty = false;
+    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[PUSH_DIRTY] ctx=' + context); } catch(e) {}
+  }, 500);
+}
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
-// Delay fix: audio boleh start dulu, window push DITUNDA 1000ms agar single
-// settle dulu (deterministik last-writer). TRACE_XX di tiap titik.
+// TRACE_XX di tiap titik. Delay dimiliki pushIfDirty; body ini langsung.
 function pushQueueWindow() {
   const L = (m) => { try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog(m); } catch(e) {} };
   L('[TRACE_04] pushQueueWindow enter q=' + ((Player && Player.queue) ? Player.queue.length : 'NULL'));
-  setTimeout(() => {
-    try {
-      if (!Player.queue || !Player.queue.length) { L('[TRACE_EMPTY] qlen=0'); return; }
+  try {
+    if (!Player.queue || !Player.queue.length) { L('[TRACE_EMPTY] qlen=0'); return; }
       const idx = Player.index;
       if (idx < 0 || idx >= Player.queue.length) { L('[TRACE_IDX] invalid idx=' + idx); return; }
       const start = Math.max(0, idx - 1);
@@ -2335,8 +2352,7 @@ function pushQueueWindow() {
       L('[TRACE_05] bridge call nativeSetQueueWindow n=' + window.length + ' cur=' + (idx - start));
       NativePlayback.nativeSetQueueWindow(JSON.stringify({ items: window, currentIndex: idx - start }));
       L('[TRACE_05B] bridge returned');
-    } catch(e) { L('[TRACE_ERR] ' + (e && e.message)); }
-  }, 1000);
+  } catch(e) { L('[TRACE_ERR] ' + (e && e.message)); }
 }
 function startCurrent() {
   if (_isClosed) return;
@@ -2523,7 +2539,7 @@ async function fetchQueue(song) {
       Player.queue = [current, ...userUpcoming, ...radio].filter(Boolean);
       Player.index = 0;
       renderQueue();
-      pushQueueWindow();
+      try { markDirty(); } catch {}
     }
     if (!Player.lyrics.synced && !Player.lyrics.plain)
       loadLyrics(Player.current, { silent: true });
@@ -2532,7 +2548,7 @@ async function fetchQueue(song) {
   } finally {
     if (loadId === Player.loadId) Player._queueFetching = false;
   }
-  try { pushQueueWindow(); } catch {}
+  try { markDirty(); } catch {}
 }
 
 function nextTrack(auto) {
@@ -2583,7 +2599,9 @@ function nextTrack(auto) {
     else return;
   }
   Player.index = ni;
-  // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
+  // Socket 5 dirty: transisi = dirty, push via pushIfDirty (delay 500ms).
+  try { markDirty(); } catch {}
+  try { pushIfDirty('next'); } catch {}
   startCurrent();
 }
 function prevTrack() {
@@ -2603,7 +2621,9 @@ function prevTrack() {
   }
   if (Player.index > 0) {
     Player.index--;
-    // Socket 5 Approach A: TIDAK push di sini, tunggu PLAYING (single settle).
+    // Socket 5 dirty: transisi = dirty, push via pushIfDirty (delay 500ms).
+    try { markDirty(); } catch {}
+    try { pushIfDirty('prev'); } catch {}
     startCurrent();
   } else if (wasNative) {
     startCurrent(); // native restart-from-0 (ghost yt.seekTo would silence it)
@@ -6967,6 +6987,7 @@ $('#mini-shuffle').addEventListener('click', (e) => {
   Player.shuffle = !Player.shuffle;
   $('#mini-shuffle').classList.toggle('on', Player.shuffle);
   $('#np-shuffle').classList.toggle('on', Player.shuffle);
+  try { markDirty(); } catch {}
   toast(Player.shuffle ? 'Shuffle on' : 'Shuffle off');
 });
 $('#mini-repeat').addEventListener('click', (e) => {
@@ -7174,6 +7195,7 @@ $('#np-shuffle').addEventListener('click', function () {
   this.classList.toggle('on', Player.shuffle);
   $('#mini-shuffle').classList.toggle('on', Player.shuffle);
   persistQueue();
+  try { markDirty(); } catch {}
   toast(Player.shuffle ? 'Shuffle on' : 'Shuffle off');
 });
 $('#np-repeat').addEventListener('click', function () {
@@ -7185,6 +7207,7 @@ $('#np-repeat').addEventListener('click', function () {
   $('#mini-repeat').classList.toggle('on', on);
   $('#mini-repeat').innerHTML = ic;
   persistQueue();
+  try { markDirty(); } catch {}
   toast(['Repeat off', 'Repeat all', 'Repeat one'][Player.repeat]);
 });
 $('#np-speed').addEventListener('click', cycleSpeed);
