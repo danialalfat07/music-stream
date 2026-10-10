@@ -2289,15 +2289,6 @@ function onTrackChanged(s) {
 // Idempotent: aman dipanggil kapan saja. NAE filter mode + videoId sendiri.
 function pushQueueWindow() {
   try {
-    if (window.NativePlayback && NativePlayback.getStreamMode) {
-      try {
-        const m = NativePlayback.getStreamMode();
-        if (typeof m === 'number' && m !== 1) {
-          try { NativePlayback.diagLog('[WINDOW_SKIP] mode=' + m); } catch {}
-          return;
-        }
-      } catch {}
-    }
     if (!Player.queue || !Player.queue.length) {
       try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[WINDOW_EMPTY] qlen=0'); } catch {}
       return;
