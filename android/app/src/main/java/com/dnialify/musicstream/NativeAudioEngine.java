@@ -1074,12 +1074,27 @@ public final class NativeAudioEngine {
             MediaItem.Builder ib = new MediaItem.Builder()
                     .setUri(r.url)
                     .setMediaMetadata(md);
-            long dd = durs.get(i) > 0 ? (long) (durs.get(i) * 1000) : r.durationMs;
+            // Socket 5.2 clip fix (C): resolver ms otoritatif + bounded 1 jam.
+            // durs JS campur format; abaikan yang aneh, tanpa clip = durasi natural.
+            long dd = 0;
+            String ddSrc = "none";
+            if (r.durationMs > 0 && r.durationMs <= 3600L * 1000L) {
+                dd = r.durationMs;
+                ddSrc = "resolver";
+            } else {
+                double ds = durs.get(i);
+                long cand = ds > 0 ? (long) (ds * 1000) : 0;
+                if (cand > 0 && cand <= 3600L * 1000L) {
+                    dd = cand;
+                    ddSrc = "js";
+                }
+            }
             if (dd > 0) {
                 ib.setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
                         .setEndPositionMs(dd)
                         .build());
             }
+            nlog("[EXO_SOCKET5] window item " + i + " dd=" + dd + " src=" + ddSrc);
             items.add(ib.build());
         }
         // Hitung ulang index current setelah drop item gagal.

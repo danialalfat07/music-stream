@@ -2292,6 +2292,19 @@ function onTrackChanged(s) {
   try { paintDlLayer(); } catch {}
   try { refreshSourceLabel(); } catch {}
 }
+// Socket 5.2 clip fix (A): normalisasi durasi campur ("M:SS", detik-number)
+// ke DETIK-number. Selain itu -> 0 (native fallback resolver).
+function parseDurationSec(d) {
+  if (typeof d === 'number' && isFinite(d)) return d > 0 ? d : 0;
+  const t = String(d == null ? '' : d).trim();
+  if (!t) return 0;
+  if (/^\d+(\.\d+)?$/.test(t)) { const n = Number(t); return n > 0 ? n : 0; }
+  const parts = t.split(':').map((x) => Number(x));
+  if (!parts.length || parts.some((x) => !isFinite(x) || x < 0)) return 0;
+  let sec = 0;
+  for (const p of parts) sec = sec * 60 + p;
+  return sec > 0 ? sec : 0;
+}
 // Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
 // Delay fix: audio boleh start dulu, window push DITUNDA 1000ms agar single
 // settle dulu (deterministik last-writer). TRACE_XX di tiap titik.
@@ -2305,14 +2318,14 @@ function pushQueueWindow() {
       if (idx < 0 || idx >= Player.queue.length) { L('[TRACE_IDX] invalid idx=' + idx); return; }
       const start = Math.max(0, idx - 1);
       const end = Math.min(Player.queue.length, idx + 3);
-      const window = Player.queue.slice(start, end).map((q) => ({
-        videoId: q.videoId || '',
-        title: q.title || '',
-        artist: q.artist || q.subtitle || '',
-        thumbnail: q.thumbnail || '',
-        duration: Number(q.duration || 0),
-        _user: !!q._user,
-      }));
+    const window = Player.queue.slice(start, end).map((q) => ({
+      videoId: q.videoId || '',
+      title: q.title || '',
+      artist: q.artist || q.subtitle || '',
+      thumbnail: q.thumbnail || '',
+      duration: parseDurationSec(q.duration),
+      _user: !!q._user
+    }));
       if (!window.length || !window[idx - start] || !window[idx - start].videoId) { L('[TRACE_NOWIN] empty'); return; }
       const wkey = (Player.loadId || 0) + '|' + window.map((w) => w.videoId).join(',') + '|' + (idx - start);
       const now = Date.now();
