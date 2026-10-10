@@ -1166,6 +1166,19 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void nativeStop() { NativeAudioEngine.get().stop("web"); }
 
+        /**
+         * Socket 5: JS owner queue, native cermin window
+         * {items:[{videoId,title,artist,thumbnail,duration}], currentIndex}.
+         */
+        @JavascriptInterface
+        public void nativeSetQueueWindow(String windowJson) {
+            try {
+                Log.d("DnialifyVisionOS", "[NATIVE_CMD] setQueueWindow len="
+                        + (windowJson == null ? 0 : windowJson.length()));
+            } catch (Exception ignored) {}
+            NativeAudioEngine.get().setQueueWindow(windowJson);
+        }
+
         @JavascriptInterface
         public void nativeVolume(double value) {
             NativeAudioEngine.get().setVolumePercent((int) Math.round(value));

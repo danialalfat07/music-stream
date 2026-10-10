@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.69";
+const APP_VERSION = "2.3.73";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1313,6 +1313,13 @@ function initAudio(){
         }
         return;
       }
+      if (ev.event === 'autoAdvance' && Player.nativeActive) {
+        // Socket 5: Exo auto-advance di-intercept (pause). JS owner:
+        // ganti track + push window baru.
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[AUTONEXT] exo autoAdvance videoId=' + (ev.videoId || '?')); } catch {}
+        nextTrack(true);
+        return;
+      }
       if (ev.state === 'ERROR') {
         // Premature-completion failure: never auto-next, never retry blindly.
         if (ev.reason === 'PREMATURE_COMPLETION') {
@@ -1771,17 +1778,20 @@ function queueSong(song, playNext = false) {
     toast('Added to your queue');
   }
   renderQueue();
+  pushQueueWindow();
 }
 function removeQueued(i) {
   if (i === Player.index || i < 0 || i >= Player.queue.length) return;
   if (i < Player.index) Player.index--;
   Player.queue.splice(i, 1);
   renderQueue();
+  pushQueueWindow();
 }
 function clearUserQueue() {
   Player.queue = Player.queue.filter((q, i) => i <= Player.index || !q._user);
   renderQueue();
   toast('Queue cleared');
+  pushQueueWindow();
 }
 function scrambleRadioQueue() {
   const indices = [];
@@ -1804,6 +1814,7 @@ function scrambleRadioQueue() {
   });
   renderQueue();
   toast('Radio queue scrambled');
+  pushQueueWindow();
 }
 function removeRadioQueued(i) {
   if (i === Player.index || i < 0 || i >= Player.queue.length) return;
@@ -1811,6 +1822,7 @@ function removeRadioQueued(i) {
   Player.queue.splice(i, 1);
   renderQueue();
   toast('Removed from radio');
+  pushQueueWindow();
 }
 function slimSong(s) {
   if (!s || !s.videoId) return null;
@@ -1905,6 +1917,7 @@ function moveQueueItem(from, to) {
   const [item] = Player.queue.splice(from, 1);
   Player.queue.splice(to, 0, item);
   renderQueue();
+  pushQueueWindow();
   return true;
 }
 const QueueDrag = { pending: null, active: null, bound: false };
@@ -2270,6 +2283,38 @@ function onTrackChanged(s) {
   try { paintDlLayer(); } catch {}
   try { refreshSourceLabel(); } catch {}
 }
+// Socket 5: JS owner queue, native cermin window [prev, current, next1, next2].
+// Dipanggil tiap queue/track berubah. NAE filter mode + videoId sendiri
+// (getStreamMode bridge flaky, jangan gate di sini).
+function pushQueueWindow() {
+  try {
+    if (!Player.queue || !Player.queue.length) return;
+    try {
+      if (window.NativePlayback && NativePlayback.diagLog) {
+        NativePlayback.diagLog('[WINDOW] qlen=' + Player.queue.length + ' idx=' + Player.index
+          + ' hasBridge=' + (!!NativePlayback.nativeSetQueueWindow));
+      }
+    } catch {}
+    if (!(window.NativePlayback && NativePlayback.nativeSetQueueWindow)) return;
+    const idx = Player.index;
+    if (idx < 0 || idx >= Player.queue.length) return;
+    const start = Math.max(0, idx - 1);
+    const end = Math.min(Player.queue.length, idx + 3);
+    const window = Player.queue.slice(start, end).map((q) => ({
+      videoId: q.videoId || '',
+      title: q.title || '',
+      artist: q.artist || q.subtitle || '',
+      thumbnail: q.thumbnail || '',
+      duration: Number(q.duration || 0),
+      _user: !!q._user,
+    }));
+    if (!window.length || !window[idx - start] || !window[idx - start].videoId) return;
+    const payload = JSON.stringify({ items: window, currentIndex: idx - start });
+    if (window.NativePlayback && NativePlayback.nativeSetQueueWindow) {
+      NativePlayback.nativeSetQueueWindow(payload);
+    }
+  } catch {}
+}
 function startCurrent() {
   if (_isClosed) return;
   Player.cued = false;
@@ -2279,6 +2324,7 @@ function startCurrent() {
   const loadId = ++Player.loadId;
   Player.loadStartedAt = Date.now();
   Player._fallbackTried = null;
+  pushQueueWindow();
   // Phase 8 Engine B: VisionOS mode -> native engine (WebView = orchestrator only).
   // Cached COMPLETE always native (never iFrame). Desktop/no-bridge untouched.
   if (Player._nativeFailed !== s.videoId
@@ -2452,6 +2498,7 @@ async function fetchQueue(song) {
       Player.queue = [current, ...userUpcoming, ...radio].filter(Boolean);
       Player.index = 0;
       renderQueue();
+      pushQueueWindow();
     }
     if (!Player.lyrics.synced && !Player.lyrics.plain)
       loadLyrics(Player.current, { silent: true });
@@ -2510,6 +2557,7 @@ function nextTrack(auto) {
     else return;
   }
   Player.index = ni;
+  pushQueueWindow();
   startCurrent();
 }
 function prevTrack() {
@@ -2529,6 +2577,7 @@ function prevTrack() {
   }
   if (Player.index > 0) {
     Player.index--;
+    pushQueueWindow();
     startCurrent();
   } else if (wasNative) {
     startCurrent(); // native restart-from-0 (ghost yt.seekTo would silence it)

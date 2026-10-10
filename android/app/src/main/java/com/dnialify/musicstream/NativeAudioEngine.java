@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import java.util.HashMap;
 import java.util.Map;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
@@ -56,6 +57,16 @@ public final class NativeAudioEngine {
     private boolean exoMode = false;
     private ExoPlayer exoPlayer;
     private boolean exoListenerAttached = false;
+    // Socket 5: window timeline (JS owner). Seq guard: window basi dibuang.
+    private int windowSeq = 0;
+    private boolean windowApplying = false;
+    // Window terakhir (pending): diterapkan saat videoId cocok + exo siap.
+    private java.util.List<String> pendVids;
+    private java.util.List<String> pendTitles;
+    private java.util.List<String> pendArtists;
+    private java.util.List<String> pendThumbs;
+    private java.util.List<Double> pendDurs;
+    private int pendIdx = -1;
     private State state = State.IDLE;
     private Source source = Source.NONE;
     private String videoId = "";
@@ -813,6 +824,8 @@ public final class NativeAudioEngine {
         } catch (Exception e) {
             nlog("[NATIVE_CMD] session service start FAIL " + e);
         }
+        // Socket 5: upgrade ke timeline window bila sudah ada push.
+        tryApplyWindow();
     }
 
     private void attachExoListenerLocked(final ExoPlayer exo) {
@@ -852,6 +865,24 @@ public final class NativeAudioEngine {
                     }
                     pushAll();
                 }
+            }
+
+            @Override
+            public void onMediaItemTransition(
+                    androidx.media3.common.MediaItem mediaItem, int reason) {
+                // Socket 5: Exo dilarang auto-advance sendiri. Pause, kasih
+                // ke JS (nextTrack -> window baru). Abaikan saat apply window.
+                boolean intercept = false;
+                synchronized (lock) {
+                    if (exoPlayer != exo || windowApplying) return;
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        intercept = true;
+                    }
+                }
+                if (!intercept) return;
+                nlog("[EXO_SOCKET5] auto-advance intercepted videoId=" + videoId);
+                try { exo.pause(); } catch (Exception ignored) {}
+                pushEvent("autoAdvance", null);
             }
 
             @Override
@@ -909,6 +940,202 @@ public final class NativeAudioEngine {
                 appCtx.stopService(new android.content.Intent(appCtx, ExoMediaSessionService.class));
             }
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * Socket 5: JS owner queue, native cermin window
+     * {items:[{videoId,title,artist,thumbnail,duration}], currentIndex}.
+     * URL di-resolve di sini (JS tak punya URL). Timeline multi-item bikin
+     * tombol prev/next default muncul + gate framework lolos.
+     */
+    public void setQueueWindow(String windowJson) {
+        int mode = StreamSettings.MODE_IFRAME;
+        try {
+            if (appCtx != null) mode = StreamSettings.getStreamMode(appCtx);
+        } catch (Exception ignored) {}
+        if (mode != StreamSettings.MODE_VISIONOS) return;
+        if (windowJson == null || windowJson.isEmpty()) return;
+        final java.util.List<String> vids = new java.util.ArrayList<>();
+        final java.util.List<String> titles = new java.util.ArrayList<>();
+        final java.util.List<String> artists = new java.util.ArrayList<>();
+        final java.util.List<String> thumbs = new java.util.ArrayList<>();
+        final java.util.List<Double> durs = new java.util.ArrayList<>();
+        final int[] curIdx = new int[]{-1};
+        try {
+            JSONObject o = new JSONObject(windowJson);
+            JSONArray items = o.optJSONArray("items");
+            if (items == null || items.length() == 0) return;
+            curIdx[0] = o.optInt("currentIndex", -1);
+            if (curIdx[0] < 0 || curIdx[0] >= items.length()) return;
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject it = items.optJSONObject(i);
+                if (it == null || it.optString("videoId", "").isEmpty()) return;
+                vids.add(it.optString("videoId", ""));
+                titles.add(it.optString("title", ""));
+                artists.add(it.optString("artist", ""));
+                thumbs.add(it.optString("thumbnail", ""));
+                durs.add(it.optDouble("duration", 0));
+            }
+        } catch (Exception e) {
+            nlog("[EXO_SOCKET5] setQueueWindow parse FAIL " + e);
+            return;
+        }
+        final String curVid = vids.get(curIdx[0]);
+        synchronized (lock) {
+            // Simpan selalu (pending); diterapkan bila video cocok + exo siap.
+            // Ini tangani race push-vs-play (window datang sebelum NAE kenal track).
+            pendVids = new java.util.ArrayList<>(vids);
+            pendTitles = new java.util.ArrayList<>(titles);
+            pendArtists = new java.util.ArrayList<>(artists);
+            pendThumbs = new java.util.ArrayList<>(thumbs);
+            pendDurs = new java.util.ArrayList<>(durs);
+            pendIdx = curIdx[0];
+            windowSeq++;
+            nlog("[EXO_SOCKET5] setQueueWindow stored n=" + vids.size()
+                    + " cur=" + curIdx[0] + " videoId=" + curVid + " seq=" + windowSeq);
+        }
+        tryApplyWindow();
+    }
+
+    /** Terapkan pending window bila video cocok + exo siap. Idempoten. */
+    private void tryApplyWindow() {
+        final java.util.List<String> vids;
+        final java.util.List<String> titles;
+        final java.util.List<String> artists;
+        final java.util.List<String> thumbs;
+        final java.util.List<Double> durs;
+        final int curIdx;
+        final int gen;
+        final int seq;
+        final String curVid;
+        synchronized (lock) {
+            if (!exoMode || exoPlayer == null || pendVids == null || pendIdx < 0
+                    || pendIdx >= pendVids.size()) {
+                return;
+            }
+            curVid = pendVids.get(pendIdx);
+            if (videoId == null || videoId.isEmpty() || !videoId.equals(curVid)) return;
+            vids = new java.util.ArrayList<>(pendVids);
+            titles = new java.util.ArrayList<>(pendTitles);
+            artists = new java.util.ArrayList<>(pendArtists);
+            thumbs = new java.util.ArrayList<>(pendThumbs);
+            durs = new java.util.ArrayList<>(pendDurs);
+            curIdx = pendIdx;
+            gen = playGen;
+            seq = windowSeq;
+        }
+        nlog("[EXO_SOCKET5] setQueueWindow n=" + vids.size() + " cur=" + curIdx
+                + " videoId=" + curVid + " seq=" + seq);
+        new Thread(() -> resolveWindow(vids, titles, artists, thumbs, durs,
+                curIdx, curVid, gen, seq)).start();
+    }
+
+    private void resolveWindow(java.util.List<String> vids, java.util.List<String> titles,
+            java.util.List<String> artists, java.util.List<String> thumbs,
+            java.util.List<Double> durs, int curIdx, String curVid, int gen, int seq) {
+        final java.util.List<VisionOsResolver.Result> results =
+                new java.util.ArrayList<>(vids.size());
+        for (int i = 0; i < vids.size(); i++) results.add(null);
+        java.util.List<Thread> workers = new java.util.ArrayList<>();
+        for (int i = 0; i < vids.size(); i++) {
+            final int fi = i;
+            Thread t = new Thread(() -> {
+                try {
+                    results.set(fi, VisionOsResolver.resolve(vids.get(fi)));
+                } catch (Exception e) {
+                    nlog("[EXO_SOCKET5] window resolve FAIL " + vids.get(fi) + " " + e);
+                }
+            });
+            workers.add(t);
+            t.start();
+        }
+        for (Thread t : workers) {
+            try { t.join(25000); } catch (InterruptedException e) { return; }
+        }
+        synchronized (lock) {
+            if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return;
+            if (results.get(curIdx) == null) {
+                nlog("[EXO_SOCKET5] window dropped (current unresolvable)");
+                return;
+            }
+        }
+        final java.util.List<MediaItem> items = new java.util.ArrayList<>();
+        for (int i = 0; i < vids.size(); i++) {
+            VisionOsResolver.Result r = results.get(i);
+            if (r == null || r.url == null || r.url.isEmpty()) continue;
+            MediaMetadata md = new MediaMetadata.Builder()
+                    .setTitle(titles.get(i).isEmpty() ? r.title : titles.get(i))
+                    .setArtist(artists.get(i).isEmpty() ? r.author : artists.get(i))
+                    .setArtworkUri(thumbs.get(i).isEmpty()
+                            ? (r.thumbnail != null && !r.thumbnail.isEmpty()
+                                    ? Uri.parse(r.thumbnail) : null)
+                            : Uri.parse(thumbs.get(i)))
+                    .build();
+            MediaItem.Builder ib = new MediaItem.Builder()
+                    .setUri(r.url)
+                    .setMediaMetadata(md);
+            long dd = durs.get(i) > 0 ? (long) (durs.get(i) * 1000) : r.durationMs;
+            if (dd > 0) {
+                ib.setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
+                        .setEndPositionMs(dd)
+                        .build());
+            }
+            items.add(ib.build());
+        }
+        // Hitung ulang index current setelah drop item gagal.
+        int adjIdx = -1;
+        {
+            String cv = curVid;
+            // Samakan urutan: cari posisi curVid di daftar sukses.
+            java.util.List<String> okVids = new java.util.ArrayList<>();
+            for (int i = 0; i < vids.size(); i++) {
+                if (results.get(i) != null && results.get(i).url != null
+                        && !results.get(i).url.isEmpty()) okVids.add(vids.get(i));
+            }
+            adjIdx = okVids.indexOf(cv);
+            if (adjIdx < 0) return;
+        }
+        final java.util.List<MediaItem> fItems = items;
+        final int fIdx = adjIdx;
+        timer.post(() -> applyWindowMain(fItems, fIdx, curVid, gen, seq));
+    }
+
+    private void applyWindowMain(java.util.List<MediaItem> items, int curIdx,
+            String curVid, int gen, int seq) {
+        final ExoPlayer exo;
+        final boolean wasPlaying;
+        final long pos;
+        synchronized (lock) {
+            if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return;
+            if (!exoMode || exoPlayer == null || items.isEmpty()) return;
+            exo = exoPlayer;
+            try {
+                wasPlaying = exo.isPlaying();
+                pos = Math.max(0, exo.getCurrentPosition());
+            } catch (Exception e) {
+                return;
+            }
+            windowApplying = true;
+        }
+        try {
+            exo.setMediaItems(items, curIdx, pos);
+            exo.prepare();
+            if (wasPlaying) {
+                exo.play();
+                nlog("[EXO_SOCKET5] window applied n=" + items.size()
+                        + " cur=" + curIdx + " resume pos=" + pos);
+            } else {
+                nlog("[EXO_SOCKET5] window applied n=" + items.size()
+                        + " cur=" + curIdx + " stays paused pos=" + pos);
+            }
+        } catch (Exception e) {
+            nlog("[EXO_SOCKET5] window apply FAIL " + e);
+        } finally {
+            synchronized (lock) {
+                windowApplying = false;
+            }
+        }
+        pushAll();
     }
 
     private void resolveAndStart(Context c, String vid, int gen) {
