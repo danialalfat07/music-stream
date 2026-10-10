@@ -2545,7 +2545,10 @@ async function fetchQueue(song) {
   } finally {
     if (loadId === Player.loadId) Player._queueFetching = false;
   }
+  // Socket 5: radio-fill selesai = queue final track ini. Satu push
+  // (bukan periodik) agar track 1 dapat window penuh + tombol next.
   try { markDirty(); } catch {}
+  try { pushIfDirty('radio'); } catch {}
 }
 
 function nextTrack(auto) {
