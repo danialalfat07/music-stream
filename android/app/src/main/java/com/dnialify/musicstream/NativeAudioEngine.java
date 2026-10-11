@@ -68,9 +68,6 @@ public final class NativeAudioEngine {
     private String windowWaitVid = null;
     private String windowAppliedVid = null;
     private int windowAppliedGen = -1;
-    // Socket 7.3.8: window-n yang sudah direkonsiliasi ke timeline untuk
-    // vid+gen tercatat (single=1, full=items.size). Guard re-apply growth.
-    private int windowAppliedN = -1;
     // F2: gen yang wait-nya dikonsumsi timeout-single (bukan apply).
     private int windowTimeoutGen = -1;
     // Socket 7.3.3 GLOBAL GUARD cacheFirst: bila armed, SEMUA jalur Exo
@@ -959,6 +956,18 @@ public final class NativeAudioEngine {
         if (!finalUri.equals(playUri)) {
             nlog("[GUARD] cacheFirst forced localhost videoId=" + vid);
         }
+        // 7.3.9: window penuh (n>=2) sudah terpasang duluan (prebuffer lambat)
+        // -> JANGAN timpa dengan single (itu bunuh tombol next). Langsung
+        // arm-wait; timeout mainkan timeline penuh yang sudah terpasang.
+        boolean fullInstalled = false;
+        synchronized (lock) {
+            if (gen != playGen) return;
+            fullInstalled = vid.equals(windowAppliedVid) && gen == windowAppliedGen;
+        }
+        if (fullInstalled) {
+            nlog("[WINDOW] full already installed, skip single gen=" + gen
+                    + " videoId=" + vid);
+        } else
         try {
             MediaMetadata md = new MediaMetadata.Builder()
                     .setTitle(r.title != null && !r.title.isEmpty() ? r.title : title)
@@ -996,9 +1005,6 @@ public final class NativeAudioEngine {
             // bounded; timeout main single. Post-play same-vid tidak apply.
             windowWaitGen = gen;
             windowWaitVid = vid;
-            // 7.3.8: single item terpasang -> reconciled n=1 (full/append
-            // apply menimpa setelahnya bila window tiba pre-play).
-            windowAppliedN = 1;
         }
         nlog("[WINDOW_WAIT] armed gen=" + gen + " videoId=" + vid);
         nlog("[NATIVE_CMD] prepared videoId=" + vid + " engine=EXO waiting-window"
@@ -1047,7 +1053,7 @@ public final class NativeAudioEngine {
             } else {
                 nlog("[WINDOW_TO] timeout no-fire gen=" + gen + " " + nofire);
             }
-        }, 2000);
+        }, 1500);
     }
 
     /** Start playback Exo + post tail. Dipakai timeout-single + window pre-play. */
@@ -1292,16 +1298,14 @@ public final class NativeAudioEngine {
             }
             curVid = pendVids.get(pendIdx);
             if (videoId == null || videoId.isEmpty() || !videoId.equals(curVid)) return;
-            // Socket 7.3.8: skip hanya bila window-n sudah direkonsiliasi
-            // (>= queue-n) untuk vid+gen ini. appliedN < queueN = queue tumbuh
-            // (radio fill) -> re-apply growth, termasuk saat PLAYING/PAUSED.
-            // Dupe push (n sama) tetap skip seperti FIX 3.
-            int queueN = pendVids.size();
-            boolean appliedHere = curVid.equals(windowAppliedVid)
-                    && playGen == windowAppliedGen;
-            if (appliedHere && windowAppliedN >= queueN) {
-                nlog("[WINDOW_SKIP] applied n=" + windowAppliedN + " >= queue n="
-                        + queueN + " gen=" + playGen + " videoId=" + curVid);
+            // Socket 7.3.4 step 5: 1 vid = 1 apply; post-play same-vid tidak apply.
+            if (curVid.equals(windowAppliedVid) && playGen == windowAppliedGen) {
+                nlog("[WINDOW_SKIP] applied-vid gen=" + playGen + " videoId=" + curVid);
+                return;
+            }
+            if (curVid.equals(videoId)
+                    && (state == State.PLAYING || state == State.PAUSED)) {
+                nlog("[WINDOW_SKIP] started state=" + state + " videoId=" + curVid);
                 return;
             }
             vids = new java.util.ArrayList<>(pendVids);
@@ -1367,7 +1371,6 @@ public final class NativeAudioEngine {
             String itemUri = guardedUri(vids.get(i), r.url);
             MediaItem.Builder ib = new MediaItem.Builder()
                     .setUri(itemUri)
-                    .setMediaId(vids.get(i))
                     .setMediaMetadata(md);
             // Socket 5.2 clip fix (C): resolver ms otoritatif + bounded 1 jam.
             // durs JS campur format; abaikan yang aneh, tanpa clip = durasi natural.
@@ -1415,78 +1418,6 @@ public final class NativeAudioEngine {
         timer.post(() -> applyWindowMain(fItems, fIdx, curVid, gen, seq));
     }
 
-    /**
-     * Growth re-apply APPEND-ONLY (7.3.8): timeline memegang window pendek
-     * (mis. single n=1), queue tumbuh (radio fill n=3). Tambah item BARU
-     * setelah posisi current via addMediaItems — tanpa setMediaItems penuh
-     * (tanpa reset timeline, tanpa gap 60-85ms). Item sebelum/sama current
-     * (prev/duplikat) dilewati via mediaId. True = ditangani.
-     */
-    private boolean tryAppendGrowth(ExoPlayer exo, java.util.List<MediaItem> items,
-            int curIdx, String curVid, int gen, int seq) {
-        final java.util.List<MediaItem> add = new java.util.ArrayList<>();
-        final int oldN;
-        final int oldSeq;
-        final String oldVid;
-        final int oldGen;
-        synchronized (lock) {
-            windowApplying = false;
-            oldN = windowAppliedN;
-            oldSeq = windowAppliedSeq;
-            oldVid = windowAppliedVid;
-            oldGen = windowAppliedGen;
-            if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return false;
-            if (!exoMode || exoPlayer != exo) return false;
-            if (!(curVid.equals(windowAppliedVid) && gen == windowAppliedGen
-                    && windowAppliedN >= 0 && items.size() > windowAppliedN)) return false;
-            java.util.Set<String> have = new java.util.HashSet<>();
-            int count = 0;
-            try {
-                count = exo.getMediaItemCount();
-            } catch (Exception e) {
-                return false;
-            }
-            for (int i = 0; i < count; i++) {
-                try {
-                    MediaItem mi = exo.getMediaItemAt(i);
-                    if (mi != null && mi.mediaId != null) have.add(mi.mediaId);
-                } catch (Exception ignored) {}
-            }
-            for (int i = curIdx + 1; i < items.size(); i++) {
-                try {
-                    MediaItem mi = items.get(i);
-                    String id = mi != null ? mi.mediaId : null;
-                    if (id == null || id.isEmpty() || have.contains(id)) continue;
-                    add.add(mi);
-                } catch (Exception ignored) {}
-            }
-            windowAppliedN = items.size();
-            windowAppliedSeq = seq;
-            windowAppliedVid = curVid;
-            windowAppliedGen = gen;
-        }
-        if (add.isEmpty()) {
-            nlog("[WINDOW_APPEND] nothing-new videoId=" + curVid + " gen=" + gen);
-            return true;
-        }
-        try {
-            exo.addMediaItems(add);
-        } catch (Exception e) {
-            // Gagal tambah: kembalikan penanda agar dupe berikutnya retry.
-            synchronized (lock) {
-                windowAppliedN = oldN;
-                windowAppliedSeq = oldSeq;
-                windowAppliedVid = oldVid;
-                windowAppliedGen = oldGen;
-            }
-            nlog("[WINDOW_APPEND] FAIL videoId=" + curVid + " " + e);
-            return false;
-        }
-        nlog("[EXO_SOCKET5] window appended +" + add.size()
-                + " videoId=" + curVid + " gen=" + gen);
-        return true;
-    }
-
     private void applyWindowMain(java.util.List<MediaItem> items, int curIdx,
             String curVid, int gen, int seq) {
         final ExoPlayer exo;
@@ -1497,13 +1428,18 @@ public final class NativeAudioEngine {
             if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return;
             if (!exoMode || exoPlayer == null || items.isEmpty()) return;
             if (seq == windowAppliedSeq) return;
-            // FIX 3 (7.3.6) + 7.3.8: 1 gen = 1 apply PER WINDOW-N. Push dupe
-            // same-n dilarang apply ulang (radio-fill dupe worker); growth
-            // (appliedN < window-n baru) lanjut ke F1/append.
-            if (gen == windowAppliedGen && curVid.equals(windowAppliedVid)
-                    && windowAppliedN >= items.size()) {
-                nlog("[WINDOW_APPLY] skip: already applied gen=" + gen + " videoId=" + curVid
-                        + " n=" + windowAppliedN);
+            // 7.3.9 barrier: MISS butuh window n>=2 (tombol next notif) sebelum
+            // play. n<2 = queue belum siap -> TAHAN (timeout main single).
+            // HIT langsung (file lokal): single-queue offline tidak kena delay.
+            if (items.size() < 2 && !"HIT".equals(lastCache)) {
+                nlog("[WINDOW_HOLD] n=" + items.size() + " <2, waiting gen=" + gen
+                        + " videoId=" + curVid);
+                return;
+            }
+            // FIX 3 (7.3.6): 1 gen = 1 apply. Push dupe same-gen dilarang
+            // apply ulang (radio-fill dupe worker).
+            if (gen == windowAppliedGen && curVid.equals(windowAppliedVid)) {
+                nlog("[WINDOW_APPLY] skip: already applied gen=" + gen + " videoId=" + curVid);
                 return;
             }
             if (gen == windowTimeoutGen) {
@@ -1517,10 +1453,11 @@ public final class NativeAudioEngine {
             } catch (Exception e) {
                 return;
             }
+            // Penanda appliedvid/gen/seq HANYA di-set bila install benar
+            // terjadi (di bawah). SKIP tidak boleh menandai: penanda tanpa
+            // install = timeline basi + single di-skip + timeout di-skip
+            // = stuck selamanya (gen=3 case).
             windowApplying = true;
-            windowAppliedSeq = seq;
-            windowAppliedVid = curVid;
-            windowAppliedGen = gen;
         }
         // FIX 7.3.2: jangan timpa URI item yang sedang bunyi.
         // localhost->direct = reconnect + gap ~700ms. Item current ikut URI
@@ -1558,15 +1495,7 @@ public final class NativeAudioEngine {
         nlog("[WINDOW_F1] pre-setMediaItems gen=" + gen + " state=" + pbState
                 + " isPlaying=" + playing + " playWhenReady=" + pwr + " prePlay=" + prePlay);
         if (playing || pwr) {
-            // 7.3.8: growth re-apply APPEND-ONLY (tanpa setMediaItems/reset/gap).
-            if (tryAppendGrowth(exo, items, curIdx, curVid, gen, seq)) {
-                pushAll();
-                return;
-            }
             nlog("[WINDOW_F1] SKIP: isPlaying=" + playing + " playWhenReady=" + pwr);
-            synchronized (lock) {
-                windowApplying = false;
-            }
             return;
         }
         if (pbState == Player.STATE_READY && !prePlay) {
@@ -1575,12 +1504,18 @@ public final class NativeAudioEngine {
         }
         nlog("[WINDOW_F1] PASS guard, proceeding to setMediaItems");
         try {
+            // 7.3.9: tahan autostart warisan (pwr=true dari track lama -> Exo
+            // main sendiri saat prepare, tanpa WINDOW_PLAY/session/notif).
+            // Play eksplisit menyusul via window-preplay / timeout-single.
+            try { exo.setPlayWhenReady(false); } catch (Exception ignored) {}
             exo.setMediaItems(items, curIdx, pos);
             exo.prepare();
-            // 7.3.8: timeline kini pegang window-n ini (guard re-apply growth).
+            // Install terjadi -> baru tandai (dupe suppression jujur).
             synchronized (lock) {
                 if (gen == playGen && curVid.equals(videoId)) {
-                    windowAppliedN = items.size();
+                    windowAppliedSeq = seq;
+                    windowAppliedVid = curVid;
+                    windowAppliedGen = gen;
                 }
             }
             if (wasPlaying) {
