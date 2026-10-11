@@ -62,6 +62,19 @@ public final class NativeAudioEngine {
     // Socket 5: window timeline (JS owner). Seq guard: window basi dibuang.
     private int windowSeq = 0;
     private boolean windowApplying = false;
+    private int windowAppliedSeq = -1;
+    // Socket 7.3.4: tunggu window bounded sebelum first play + skip post-play.
+    private int windowWaitGen = -1;
+    private String windowWaitVid = null;
+    private String windowAppliedVid = null;
+    private int windowAppliedGen = -1;
+    // F2: gen yang wait-nya dikonsumsi timeout-single (bukan apply).
+    private int windowTimeoutGen = -1;
+    // Socket 7.3.3 GLOBAL GUARD cacheFirst: bila armed, SEMUA jalur Exo
+    // wajib pakai localhost URI untuk videoId yang di-guard. Direct dilarang.
+    private volatile boolean cacheFirstActive = false;
+    private volatile String cacheFirstUri = null;
+    private volatile String cacheFirstVideoId = null;
     // Window terakhir (pending): diterapkan saat videoId cocok + exo siap.
     private java.util.List<String> pendVids;
     private java.util.List<String> pendTitles;
@@ -160,6 +173,7 @@ public final class NativeAudioEngine {
 
     /** Play: cache HIT -> file; MISS -> fill first chunk, then play local snapshot. Never streams. */
     public void play(Context c, String vid, String t, String ar, String art) {
+        disarmCacheFirst();
         // PROTOTYPE B-revisi: VisionOS resolve-only, no MediaPlayer. Mode
         // dibaca sekali di sini; semua mp.* hanya terjangkau via
         // resolveAndStart (jalur IFRAME/cached di bawah).
@@ -756,6 +770,27 @@ public final class NativeAudioEngine {
         startExoItem(vid, r, gen);
     }
 
+    private void armCacheFirst(String vid, String localhostUri) {
+        if (vid == null || vid.isEmpty() || localhostUri == null) return;
+        cacheFirstVideoId = vid;
+        cacheFirstUri = localhostUri;
+        cacheFirstActive = true;
+        nlog("[GUARD] cacheFirst armed videoId=" + vid);
+    }
+
+    private void disarmCacheFirst() {
+        cacheFirstActive = false;
+    }
+
+    /** Central URI decision: guard armed untuk vid -> localhost, else direct. */
+    private String guardedUri(String vid, String directUrl) {
+        if (cacheFirstActive && vid != null && vid.equals(cacheFirstVideoId)
+                && cacheFirstUri != null) {
+            return cacheFirstUri;
+        }
+        return directUrl;
+    }
+
     /** Socket 3: mainkan URL resolve via ExoPlayer tunggal. No MediaSession.
      *  ExoPlayer wajib diakses di main thread: resolve jalan di worker,
      *  wiring dipost ke timer (main). */
@@ -820,6 +855,7 @@ public final class NativeAudioEngine {
                     playUri = "http://127.0.0.1:" + srv.port() + "/local-stream/" + vid;
                     nlog("[CACHE] HIT videoId=" + vid + " bytes=" + hitBytes + " mode=EXO");
                     nlog("[EXO] using local videoId=" + vid + " uri=127.0.0.1 port=" + srv.port());
+                    armCacheFirst(vid, playUri);
                 } else {
                     nlog("[EXO] local proxy unavailable videoId=" + vid + " -> direct");
                     playUri = r.url;
@@ -829,9 +865,8 @@ public final class NativeAudioEngine {
                 playUri = r.url;
             }
         } else {
-            // Socket 7.3 write path: MISS -> download + serve growing .part.
-            // Mirror MediaPlayer resolveAndStart/startPathAt, minus waitForBytes
-            // (Exo runs on main thread; LSS HoldStream holds until bytes land).
+            // Socket 7.3 write path: MISS -> download + growing .part + pre-buffer.
+            // Pre-buffer async (worker wait, main play); main thread tak boleh block.
             final long total = clenOf(r.url);
             if (total <= 0) {
                 synchronized (lock) {
@@ -841,6 +876,7 @@ public final class NativeAudioEngine {
                     }
                 }
                 nlog("[CACHE] MISS total<=0 videoId=" + vid + " mode=EXO -> direct");
+                disarmCacheFirst();
             } else {
                 java.io.File partFile = null;
                 try {
@@ -872,22 +908,53 @@ public final class NativeAudioEngine {
                     if (srv != null && partFile != null) {
                         srv.register(fVid, partFile.getAbsolutePath(), fTotal);
                         growingUri = "http://127.0.0.1:" + srv.port() + "/local-stream/" + fVid;
+                        armCacheFirst(fVid, growingUri);
                     }
                 } catch (Exception e) {
                     nlog("[EXO] growing proxy FAIL " + e + " -> direct");
                 }
                 if (growingUri != null) {
-                    playUri = growingUri;
-                    nlog("[CACHE] MISS videoId=" + vid + " total=" + fTotal + " mode=EXO -> growing local");
-                    nlog("[EXO] using growing videoId=" + vid + " uri=127.0.0.1");
+                    // Fix 7.3 stutter: jangan play saat 0% (hold -> underrun).
+                    // Pre-buffer 2 chunk di worker, play via main thread setelah need tiba.
+                    final String gUri = growingUri;
+                    final long gNeed = Math.min(fTotal,
+                            2 * SongCache.chunkEndFor(0,
+                                    (int) Math.min(r.durationMs, Integer.MAX_VALUE), fTotal));
+                    nlog("[CACHE] MISS videoId=" + vid + " total=" + fTotal
+                            + " mode=EXO -> growing local prebuffer need=" + gNeed);
+                    synchronized (lock) {
+                        if (gen != playGen) return;
+                        setStateLocked(State.BUFFERING);
+                        currentMs = 0;
+                    }
+                    pushAll();
+                    new Thread(() -> {
+                        if (!waitForBytes(fCtx, fVid, gNeed, gen, fTotal)) return;
+                        timer.post(() -> playExoUri(vid, r, gen, exo, gUri));
+                    }).start();
+                    return;
                 } else {
                     synchronized (lock) {
                         if (gen == playGen) source = Source.VISIONOS;
                     }
                     playUri = r.url;
                     nlog("[CACHE] MISS videoId=" + vid + " proxy unavailable -> direct");
+                    disarmCacheFirst();
                 }
             }
+        }
+        playExoUri(vid, r, gen, exo, playUri);
+    }
+
+    /** Eksekusi play Exo di main thread (sync path + deferred pre-buffer). */
+    private void playExoUri(String vid, VisionOsResolver.Result r, int gen,
+            ExoPlayer exo, String playUri) {
+        synchronized (lock) {
+            if (gen != playGen) return;
+        }
+        String finalUri = guardedUri(vid, playUri);
+        if (!finalUri.equals(playUri)) {
+            nlog("[GUARD] cacheFirst forced localhost videoId=" + vid);
         }
         try {
             MediaMetadata md = new MediaMetadata.Builder()
@@ -897,7 +964,7 @@ public final class NativeAudioEngine {
                             ? Uri.parse(r.thumbnail) : null)
                     .build();
             MediaItem.Builder ib = new MediaItem.Builder()
-                    .setUri(playUri)
+                    .setUri(finalUri)
                     .setMediaMetadata(md);
             if (r.durationMs > 0) {
                 ib.setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
@@ -906,6 +973,89 @@ public final class NativeAudioEngine {
             }
             exo.setMediaItem(ib.build());
             exo.prepare();
+            // FIX 4 (7.3.6): cegah autostart. playWhenReady inherited true
+            // dari track sebelumnya -> Exo main sendiri sebelum window apply
+            // (track 2 play duluan). Play hanya via startExoPlayback.
+            try { exo.setPlayWhenReady(false); } catch (Exception ignored) {}
+        } catch (Exception e) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                failLocked(VisionOsResolver.R_MEDIA_ERROR, "exo start " + e);
+            }
+            pushAll();
+            return;
+        }
+        synchronized (lock) {
+            if (gen != playGen) return;
+            setStateLocked(State.BUFFERING);
+            currentMs = 0;
+            // Socket 7.3.4: window DULU, play BELAKANGAN. Tunggu window
+            // bounded; timeout main single. Post-play same-vid tidak apply.
+            windowWaitGen = gen;
+            windowWaitVid = vid;
+        }
+        nlog("[WINDOW_WAIT] armed gen=" + gen + " videoId=" + vid);
+        nlog("[NATIVE_CMD] prepared videoId=" + vid + " engine=EXO waiting-window"
+                + " uri=" + (finalUri != null && finalUri.contains("127.0.0.1") ? "127.0.0.1-local" : "direct"));
+        pushAll();
+        tryApplyWindow();
+        timer.postDelayed(() -> {
+            synchronized (lock) {
+                if (gen != playGen) {
+                    nlog("[WINDOW_TO] timeout stale gen=" + gen + " playGen=" + playGen);
+                    return;
+                }
+            }
+            // FIX 2 (7.3.6): timeout dilarang fire saat sudah bunyi.
+            try {
+                if (exo.isPlaying() || exo.getPlayWhenReady()) {
+                    nlog("[WINDOW_TO] skip: already playing gen=" + gen);
+                    synchronized (lock) {
+                        if (gen == windowWaitGen) {
+                            windowWaitGen = -1;
+                            windowWaitVid = null;
+                        }
+                    }
+                    return;
+                }
+            } catch (Exception ignored) {}
+            boolean fire = false;
+            String nofire = "";
+            synchronized (lock) {
+                if (gen == playGen && gen == windowWaitGen && vid.equals(windowWaitVid)
+                        && vid.equals(videoId)) {
+                    fire = true;
+                    windowTimeoutGen = gen;
+                } else {
+                    nofire = "playGen=" + playGen + " waitGen=" + windowWaitGen
+                            + " waitVid=" + windowWaitVid + " curVid=" + videoId;
+                }
+                if (gen == windowWaitGen) {
+                    windowWaitGen = -1;
+                    windowWaitVid = null;
+                }
+            }
+            if (fire) {
+                nlog("[WINDOW_TO] timeout fire gen=" + gen + " videoId=" + vid + " -> single");
+                timer.post(() -> startExoPlayback(vid, r.host, gen, exo, finalUri, "timeout-single"));
+            } else {
+                nlog("[WINDOW_TO] timeout no-fire gen=" + gen + " " + nofire);
+            }
+        }, 2000);
+    }
+
+    /** Start playback Exo + post tail. Dipakai timeout-single + window pre-play. */
+    private void startExoPlayback(String vid, String host, int gen,
+            ExoPlayer exo, String uri, String why) {
+        synchronized (lock) {
+            if (gen != playGen || !vid.equals(videoId)) {
+                nlog("[WINDOW_PLAY] skip stale gen=" + gen + " playGen=" + playGen
+                        + " videoId=" + vid + " why=" + why);
+                return;
+            }
+        }
+        nlog("[WINDOW_PLAY] start why=" + why + " gen=" + gen + " videoId=" + vid);
+        try {
             exo.play();
         } catch (Exception e) {
             synchronized (lock) {
@@ -920,9 +1070,9 @@ public final class NativeAudioEngine {
             setStateLocked(State.BUFFERING);
             currentMs = 0;
         }
-        nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=EXO host=" + r.host
-                + " uri=" + (playUri != null && playUri.contains("127.0.0.1") ? "127.0.0.1-local" : "direct")
-                + " playerHash=" + System.identityHashCode(exo));
+        nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=EXO host=" + host
+                + " uri=" + (uri != null && uri.contains("127.0.0.1") ? "127.0.0.1-local" : "direct")
+                + " why=" + why + " playerHash=" + System.identityHashCode(exo));
         pushAll();
         startExoTicker();
         // Socket 4: session service untuk notif 1002 (guard VISIONOS implisit:
@@ -937,8 +1087,6 @@ public final class NativeAudioEngine {
         } catch (Exception e) {
             nlog("[NATIVE_CMD] session service start FAIL " + e);
         }
-        // Socket 5: upgrade ke timeline window bila sudah ada push.
-        tryApplyWindow();
     }
 
     private void attachExoListenerLocked(final ExoPlayer exo) {
@@ -1048,6 +1196,7 @@ public final class NativeAudioEngine {
     /** Hentikan audio Exo saat ganti track/gagal. Player tetap (reuse).
      *  Service session ikut berhenti (notif 1002 hilang). */
     private void stopExoLocked() {
+        disarmCacheFirst();
         if (exoPlayer != null) {
             final ExoPlayer exo = exoPlayer;
             timer.post(() -> {
@@ -1137,6 +1286,16 @@ public final class NativeAudioEngine {
             }
             curVid = pendVids.get(pendIdx);
             if (videoId == null || videoId.isEmpty() || !videoId.equals(curVid)) return;
+            // Socket 7.3.4 step 5: 1 vid = 1 apply; post-play same-vid tidak apply.
+            if (curVid.equals(windowAppliedVid) && playGen == windowAppliedGen) {
+                nlog("[WINDOW_SKIP] applied-vid gen=" + playGen + " videoId=" + curVid);
+                return;
+            }
+            if (curVid.equals(videoId)
+                    && (state == State.PLAYING || state == State.PAUSED)) {
+                nlog("[WINDOW_SKIP] started state=" + state + " videoId=" + curVid);
+                return;
+            }
             vids = new java.util.ArrayList<>(pendVids);
             titles = new java.util.ArrayList<>(pendTitles);
             artists = new java.util.ArrayList<>(pendArtists);
@@ -1197,8 +1356,9 @@ public final class NativeAudioEngine {
                                     ? Uri.parse(r.thumbnail) : null)
                             : Uri.parse(thumbs.get(i)))
                     .build();
+            String itemUri = guardedUri(vids.get(i), r.url);
             MediaItem.Builder ib = new MediaItem.Builder()
-                    .setUri(r.url)
+                    .setUri(itemUri)
                     .setMediaMetadata(md);
             // Socket 5.2 clip fix (C): resolver ms otoritatif + bounded 1 jam.
             // durs JS campur format; abaikan yang aneh, tanpa clip = durasi natural.
@@ -1251,9 +1411,21 @@ public final class NativeAudioEngine {
         final ExoPlayer exo;
         final boolean wasPlaying;
         final long pos;
+        nlog("[WINDOW_APPLY] entry videoId=" + curVid + " gen=" + gen + " seq=" + seq);
         synchronized (lock) {
             if (gen != playGen || seq != windowSeq || !curVid.equals(videoId)) return;
             if (!exoMode || exoPlayer == null || items.isEmpty()) return;
+            if (seq == windowAppliedSeq) return;
+            // FIX 3 (7.3.6): 1 gen = 1 apply. Push dupe same-gen dilarang
+            // apply ulang (radio-fill dupe worker).
+            if (gen == windowAppliedGen && curVid.equals(windowAppliedVid)) {
+                nlog("[WINDOW_APPLY] skip: already applied gen=" + gen + " videoId=" + curVid);
+                return;
+            }
+            if (gen == windowTimeoutGen) {
+                nlog("[WINDOW_F2] SKIP: timeout-single already fired gen=" + gen);
+                return;
+            }
             exo = exoPlayer;
             try {
                 wasPlaying = exo.isPlaying();
@@ -1262,7 +1434,54 @@ public final class NativeAudioEngine {
                 return;
             }
             windowApplying = true;
+            windowAppliedSeq = seq;
+            windowAppliedVid = curVid;
+            windowAppliedGen = gen;
         }
+        // FIX 7.3.2: jangan timpa URI item yang sedang bunyi.
+        // localhost->direct = reconnect + gap ~700ms. Item current ikut URI
+        // yang sedang main; prev/next tetap direct.
+        try {
+            MediaItem curItem = exo.getCurrentMediaItem();
+            String curUri = (curItem != null && curItem.localConfiguration != null
+                    && curItem.localConfiguration.uri != null)
+                    ? curItem.localConfiguration.uri.toString() : null;
+            if (curUri != null && curUri.contains("127.0.0.1")
+                    && curIdx >= 0 && curIdx < items.size()) {
+                MediaItem fixed = items.get(curIdx).buildUpon()
+                        .setUri(Uri.parse(curUri)).build();
+                items.set(curIdx, fixed);
+                nlog("[EXO_SOCKET5] window current kept localhost (no URI swap)");
+            }
+        } catch (Exception e) {
+            nlog("[EXO_SOCKET5] window keep-local FAIL " + e);
+        }
+        // ===== F1 (7.3.6): TOCTOU FIX, tanpa bypass =====
+        // isPlaying/pwr -> SKIP SELALU (reset saat bunyi = gap).
+        // READY -> SKIP kecuali pre-play pending (prepare selesai duluan).
+        boolean prePlay;
+        synchronized (lock) {
+            prePlay = (gen == windowWaitGen && curVid.equals(windowWaitVid));
+        }
+        int pbState = -1;
+        boolean playing = false;
+        boolean pwr = false;
+        try {
+            pbState = exo.getPlaybackState();
+            playing = exo.isPlaying();
+            pwr = exo.getPlayWhenReady();
+        } catch (Exception ignored) {}
+        nlog("[WINDOW_F1] pre-setMediaItems gen=" + gen + " state=" + pbState
+                + " isPlaying=" + playing + " playWhenReady=" + pwr + " prePlay=" + prePlay);
+        if (playing || pwr) {
+            nlog("[WINDOW_F1] SKIP: isPlaying=" + playing + " playWhenReady=" + pwr);
+            return;
+        }
+        if (pbState == Player.STATE_READY && !prePlay) {
+            nlog("[WINDOW_F1] SKIP: ready without pre-play pending");
+            return;
+        }
+        nlog("[WINDOW_F1] PASS guard, proceeding to setMediaItems");
         try {
             exo.setMediaItems(items, curIdx, pos);
             exo.prepare();
@@ -1271,8 +1490,31 @@ public final class NativeAudioEngine {
                 nlog("[EXO_SOCKET5] window applied n=" + items.size()
                         + " cur=" + curIdx + " resume pos=" + pos);
             } else {
-                nlog("[EXO_SOCKET5] window applied n=" + items.size()
-                        + " cur=" + curIdx + " stays paused pos=" + pos);
+                boolean pending = false;
+                synchronized (lock) {
+                    if (gen == windowWaitGen && curVid.equals(windowWaitVid)) {
+                        pending = true;
+                        windowWaitGen = -1;
+                        windowWaitVid = null;
+                        nlog("[WINDOW_WAIT] cleared by apply gen=" + gen);
+                    }
+                }
+                if (pending) {
+                    String appliedUri = "";
+                    try {
+                        MediaItem ai = items.get(curIdx);
+                        if (ai != null && ai.localConfiguration != null
+                                && ai.localConfiguration.uri != null) {
+                            appliedUri = ai.localConfiguration.uri.toString();
+                        }
+                    } catch (Exception ignored) {}
+                    nlog("[EXO_SOCKET5] window applied n=" + items.size()
+                            + " cur=" + curIdx + " pre-play, starting");
+                    startExoPlayback(curVid, "window", gen, exo, appliedUri, "window-preplay");
+                } else {
+                    nlog("[EXO_SOCKET5] window applied n=" + items.size()
+                            + " cur=" + curIdx + " stays paused pos=" + pos);
+                }
             }
         } catch (Exception e) {
             nlog("[EXO_SOCKET5] window apply FAIL " + e);
@@ -1756,6 +1998,7 @@ public final class NativeAudioEngine {
     private boolean wasPlayingBeforeSeek;
 
     private void stopLocked(String why) {
+        disarmCacheFirst();
         timer.removeCallbacks(ticker);
         abandonAudioFocus();
         releaseWakeLock();
