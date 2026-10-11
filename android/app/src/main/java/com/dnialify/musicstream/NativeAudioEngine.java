@@ -768,6 +768,7 @@ public final class NativeAudioEngine {
 
     private void startExoItemMain(String vid, VisionOsResolver.Result r, int gen) {
         final ExoPlayer exo;
+        final android.content.Context ctx;
         synchronized (lock) {
             if (gen != playGen) return;
             exoMode = true;
@@ -782,6 +783,59 @@ public final class NativeAudioEngine {
             attachExoListenerLocked(exo);
             durationMs = r.durationMs > 0
                     ? (int) Math.min(r.durationMs, Integer.MAX_VALUE) : 0;
+            ctx = appCtx;
+        }
+        // Socket 7.2: cache HIT -> localhost proxy, MISS -> direct URL.
+        // No download on miss, no SongCache/LocalStreamServer change.
+        boolean hit = false;
+        java.io.File hitFile = null;
+        long hitBytes = 0;
+        try {
+            if (ctx != null && vid != null && !vid.isEmpty()
+                    && SongCache.isComplete(ctx, vid)) {
+                java.io.File f = SongCache.audioFile(ctx, vid);
+                if (f != null && f.isFile() && f.length() > 0) {
+                    hit = true;
+                    hitFile = f;
+                    hitBytes = f.length();
+                }
+            }
+        } catch (Exception ignored) {}
+        String playUri = r.url;
+        if (hit) {
+            synchronized (lock) {
+                if (gen != playGen) return;
+                lastTotal = hitBytes;
+                playFile = hitFile.getAbsolutePath();
+                lastCache = "HIT";
+                source = Source.CACHED_AUDIO;
+            }
+            try {
+                LocalStreamServer srv;
+                synchronized (lock) {
+                    srv = ensureServer(ctx);
+                }
+                if (srv != null && hitBytes > 0) {
+                    srv.register(vid, hitFile.getAbsolutePath(), hitBytes);
+                    playUri = "http://127.0.0.1:" + srv.port() + "/local-stream/" + vid;
+                    nlog("[CACHE] HIT videoId=" + vid + " bytes=" + hitBytes + " mode=EXO");
+                    nlog("[EXO] using local videoId=" + vid + " uri=127.0.0.1 port=" + srv.port());
+                } else {
+                    nlog("[EXO] local proxy unavailable videoId=" + vid + " -> direct");
+                    playUri = r.url;
+                }
+            } catch (Exception e) {
+                nlog("[EXO] local proxy FAIL " + e + " -> direct");
+                playUri = r.url;
+            }
+        } else {
+            synchronized (lock) {
+                if (gen == playGen) {
+                    lastCache = "MISS";
+                    source = Source.VISIONOS;
+                }
+            }
+            nlog("[CACHE] MISS videoId=" + vid + " mode=EXO -> direct");
         }
         try {
             MediaMetadata md = new MediaMetadata.Builder()
@@ -791,7 +845,7 @@ public final class NativeAudioEngine {
                             ? Uri.parse(r.thumbnail) : null)
                     .build();
             MediaItem.Builder ib = new MediaItem.Builder()
-                    .setUri(r.url)
+                    .setUri(playUri)
                     .setMediaMetadata(md);
             if (r.durationMs > 0) {
                 ib.setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder()
@@ -815,6 +869,7 @@ public final class NativeAudioEngine {
             currentMs = 0;
         }
         nlog("[NATIVE_CMD] play videoId=" + vid + " mode=VISIONOS engine=EXO host=" + r.host
+                + " uri=" + (playUri != null && playUri.contains("127.0.0.1") ? "127.0.0.1-local" : "direct")
                 + " playerHash=" + System.identityHashCode(exo));
         pushAll();
         startExoTicker();
