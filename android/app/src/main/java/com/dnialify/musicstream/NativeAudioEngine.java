@@ -785,8 +785,8 @@ public final class NativeAudioEngine {
                     ? (int) Math.min(r.durationMs, Integer.MAX_VALUE) : 0;
             ctx = appCtx;
         }
-        // Socket 7.2: cache HIT -> localhost proxy, MISS -> direct URL.
-        // No download on miss, no SongCache/LocalStreamServer change.
+        // Socket 7.3: HIT -> localhost final, MISS -> download + growing .part.
+        // No SongCache/LocalStreamServer file change (caller only).
         boolean hit = false;
         java.io.File hitFile = null;
         long hitBytes = 0;
@@ -829,13 +829,65 @@ public final class NativeAudioEngine {
                 playUri = r.url;
             }
         } else {
-            synchronized (lock) {
-                if (gen == playGen) {
-                    lastCache = "MISS";
-                    source = Source.VISIONOS;
+            // Socket 7.3 write path: MISS -> download + serve growing .part.
+            // Mirror MediaPlayer resolveAndStart/startPathAt, minus waitForBytes
+            // (Exo runs on main thread; LSS HoldStream holds until bytes land).
+            final long total = clenOf(r.url);
+            if (total <= 0) {
+                synchronized (lock) {
+                    if (gen == playGen) {
+                        lastCache = "MISS";
+                        source = Source.VISIONOS;
+                    }
+                }
+                nlog("[CACHE] MISS total<=0 videoId=" + vid + " mode=EXO -> direct");
+            } else {
+                java.io.File partFile = null;
+                try {
+                    if (ctx != null) partFile = SongCache.partFile(ctx, vid);
+                } catch (Exception ignored) {}
+                final String fUrl = r.url;
+                final long fTotal = total;
+                final android.content.Context fCtx = ctx;
+                final String fVid = vid;
+                if (fCtx != null && !SongCache.isDownloading(fVid)) {
+                    new Thread(() -> {
+                        try {
+                            SongCache.download(fCtx, fVid, fUrl, fTotal);
+                        } catch (Exception ignored) {}
+                    }).start();
+                }
+                String growingUri = null;
+                try {
+                    LocalStreamServer srv;
+                    synchronized (lock) {
+                        if (gen != playGen) return;
+                        lastTotal = fTotal;
+                        lastUrl = fUrl;
+                        playFile = partFile != null ? partFile.getAbsolutePath() : "";
+                        lastCache = "MISS";
+                        source = Source.CACHED_AUDIO;
+                        srv = ensureServer(ctx);
+                    }
+                    if (srv != null && partFile != null) {
+                        srv.register(fVid, partFile.getAbsolutePath(), fTotal);
+                        growingUri = "http://127.0.0.1:" + srv.port() + "/local-stream/" + fVid;
+                    }
+                } catch (Exception e) {
+                    nlog("[EXO] growing proxy FAIL " + e + " -> direct");
+                }
+                if (growingUri != null) {
+                    playUri = growingUri;
+                    nlog("[CACHE] MISS videoId=" + vid + " total=" + fTotal + " mode=EXO -> growing local");
+                    nlog("[EXO] using growing videoId=" + vid + " uri=127.0.0.1");
+                } else {
+                    synchronized (lock) {
+                        if (gen == playGen) source = Source.VISIONOS;
+                    }
+                    playUri = r.url;
+                    nlog("[CACHE] MISS videoId=" + vid + " proxy unavailable -> direct");
                 }
             }
-            nlog("[CACHE] MISS videoId=" + vid + " mode=EXO -> direct");
         }
         try {
             MediaMetadata md = new MediaMetadata.Builder()
