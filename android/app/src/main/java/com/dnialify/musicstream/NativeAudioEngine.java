@@ -2303,7 +2303,7 @@ public final class NativeAudioEngine {
             JSONObject o = new JSONObject();
             o.put("engine", "NATIVE");
             o.put("source", String.valueOf(source));
-            o.put("state", String.valueOf(state));
+            o.put("state", displayStateLocked());
             o.put("cache", lastCache);
             o.put("videoId", videoId);
             o.put("currentTime", currentMs / 1000.0);
@@ -2320,6 +2320,27 @@ public final class NativeAudioEngine {
         } catch (Exception e) {
             return new JSONObject();
         }
+    }
+
+    /**
+     * Snapshot state from live Exo truth, not stale lastState. Exo can sit
+     * in STATE_BUFFERING (rebuffer) while audio keeps playing; the mirror
+     * must say PLAYING or JS spinner/label stuck. MP path: lastState.
+     * Call with lock held (reads volatile player ref; Exo getters thread-safe).
+     */
+    private String displayStateLocked() {
+        try {
+            if (exoMode && exoPlayer != null) {
+                boolean playing = false;
+                int ps = Player.STATE_IDLE;
+                try { playing = exoPlayer.isPlaying(); } catch (Exception ignored) {}
+                try { ps = exoPlayer.getPlaybackState(); } catch (Exception ignored) {}
+                if (playing) return "PLAYING";
+                if (ps == Player.STATE_BUFFERING) return "BUFFERING";
+                if (ps == Player.STATE_READY) return "PAUSED";
+            }
+        } catch (Exception ignored) {}
+        return String.valueOf(state);
     }
 
     private void pushAll() {
