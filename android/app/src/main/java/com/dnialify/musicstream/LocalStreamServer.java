@@ -24,6 +24,7 @@ public class LocalStreamServer extends NanoHTTPD {
     private static final int HOLD_EXTENSION_MS = 30000;
     private static final int MAX_HOLD_EXTENSIONS = 3;
     private static final int SERVE_BUF = 65536;
+    private static final long STATE_RECHECK_MS = 5000L;
 
     private final Context appCtx;
 
@@ -136,11 +137,31 @@ public class LocalStreamServer extends NanoHTTPD {
         private int holdExtensions = 0;
         private long lastLoggedHave = -1;
         private boolean loggedHold;
+        private long cachedTotalBytes = -1;
+        private long lastStateCheck = 0;
+        private RandomAccessFile raf;
+        private File currentSource;
 
         HoldStream(Track track, long start, long end) {
             this.track = track;
             this.pos = start;
             this.end = end;
+            this.cachedTotalBytes = track.total;
+            Log.d(TAG, "[LSS] cached totalBytes=" + cachedTotalBytes
+                    + " vid=" + track.videoId);
+        }
+
+        private File detectSource() {
+            File part = new File(track.path);
+            File webm = SongCache.audioFile(appCtx, track.videoId);
+            if (part.isFile()) return part;
+            if (webm == null || !webm.isFile()) return null;
+            if (cachedTotalBytes > 0 && webm.length() != cachedTotalBytes) {
+                Log.w(TAG, "[LSS] size mismatch: " + webm.length()
+                        + " vs " + cachedTotalBytes);
+                return null;
+            }
+            return webm;
         }
 
         private boolean complete() {
@@ -181,21 +202,37 @@ public class LocalStreamServer extends NanoHTTPD {
                 if (closed) return -1;
                 Track live = tracks.get(track.videoId);
                 if (live == null || live != track) return -1;
-                boolean isComplete = complete();
-                File source = sourceFile(isComplete);
-                long have = source.isFile() ? source.length() : 0;
+                long now = System.currentTimeMillis();
+                File source = currentSource;
+                if (source == null || now - lastStateCheck > STATE_RECHECK_MS) {
+                    File detected = detectSource();
+                    lastStateCheck = now;
+                    if (detected == null) {
+                        Log.w(TAG, "[LSS] source null, fail");
+                        return -1;
+                    }
+                    if (currentSource == null || !currentSource.equals(detected)) {
+                        if (raf != null) {
+                            try { raf.close(); } catch (IOException ignored) {}
+                        }
+                        raf = new RandomAccessFile(detected, "r");
+                        currentSource = detected;
+                        Log.d(TAG, "[LSS] source switch: " + detected.getName());
+                    }
+                    source = currentSource;
+                }
+                long have = source.length();
                 if (have != lastLoggedHave) {
                     lastLoggedHave = have;
                     Log.d(TAG, "[LSS] file size now=" + have + " expectedTotal="
-                            + track.total + " writerState=" + (isComplete ? "COMPLETE" : "RUNNING_OR_PAUSED")
+                            + track.total + " writerState=" + (source.equals(SongCache.audioFile(appCtx, track.videoId))
+                            ? "COMPLETE" : "RUNNING_OR_PAUSED")
                             + " path=" + source.getName());
                 }
                 if (pos < have) {
                     long want = Math.min((long) len, Math.min(end, have - 1) - pos + 1);
                     if (want <= 0) return -1;
-                    RandomAccessFile raf = null;
                     try {
-                        raf = new RandomAccessFile(source, "r");
                         raf.seek(pos);
                         int n = raf.read(buf, off, (int) Math.min(want, SERVE_BUF));
                         if (n < 0) return -1;
@@ -205,24 +242,12 @@ public class LocalStreamServer extends NanoHTTPD {
                         throw e;
                     } catch (Exception e) {
                         throw new IOException(String.valueOf(e));
-                    } finally {
-                        try {
-                            if (raf != null) raf.close();
-                        } catch (Exception ignored) {}
                     }
-                }
-                // At complete state, re-resolve final file before declaring EOF.
-                if (isComplete) {
-                    File fin = SongCache.audioFile(appCtx, track.videoId);
-                    if (fin.isFile() && fin.length() == track.total && pos < fin.length()) {
-                        continue;
-                    }
-                    if (pos >= track.total) return -1;
-                    Log.d(TAG, "[LSS] writer COMPLETE or true EOF pos=" + pos
-                            + " total=" + track.total + " finalFile=" + fin.getName() + " closing");
-                    return -1;
                 }
                 if (pos >= track.total) return -1;
+                if (source.getName().endsWith(".part")) {
+                    lastStateCheck = 0;
+                }
                 if (!loggedHold) {
                     loggedHold = true;
                     Log.d(TAG, "[LSS] reached current EOF, waiting for writer pos=" + pos
@@ -235,6 +260,7 @@ public class LocalStreamServer extends NanoHTTPD {
                         failed = rec != null
                                 && SongCache.ST_FAILED.equals(rec.optString("cacheStatus", ""));
                     } catch (Exception ignored) {}
+                    boolean isComplete = complete();
                     if (isComplete || failed) {
                         Log.d(TAG, "[LSS] hold timeout exceeded " + (HOLD_TIMEOUT_MS / 1000)
                                 + "s pos=" + pos + " have=" + have + " end=" + end
@@ -267,6 +293,12 @@ public class LocalStreamServer extends NanoHTTPD {
         @Override
         public void close() {
             closed = true;
+            if (raf != null) {
+                try { raf.close(); } catch (IOException ignored) {}
+                raf = null;
+            }
+            currentSource = null;
+            cachedTotalBytes = -1;
         }
     }
 }
