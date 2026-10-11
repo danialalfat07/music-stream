@@ -240,7 +240,14 @@ public final class SongCache {
         try {
             JSONObject r = getRecord(c, videoId);
             File a = audioFile(c, videoId);
-            if (r == null) return a.isFile() && a.length() > 0;
+            if (r == null) {
+                if (!a.isFile() || a.length() <= 0) return false;
+                if (!VisionOsCache.ebmlMagic(a)) {
+                    Log.w(TAG, "[G4] legacy corrupt: " + videoId);
+                    return false;
+                }
+                return true;
+            }
             if (!ST_COMPLETE.equals(r.optString("cacheStatus", ""))) return false;
             long want = r.optLong("audioSize", 0);
             if (!a.isFile() || (want > 0 && a.length() != want)) {
