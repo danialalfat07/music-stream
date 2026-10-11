@@ -46,6 +46,10 @@ public final class NativeAudioEngine {
 
     private static final NativeAudioEngine INSTANCE = new NativeAudioEngine();
     private static volatile int CHUNK_WINDOW_SIZE = 5;
+    // G1 watchdog: idle maksimum tanpa byte baru sebelum waitForBytes
+    // nyatakan HANG (progress-based; slow network yang byte-nya ngalir
+    // tak pernah fire karena lastMoveAt ikut gerak).
+    private static final long WATCHDOG_IDLE_MS = 60000L;
     public static final int CHUNK_WINDOW_MIN = 1;
     public static final int CHUNK_WINDOW_MAX = 200;
 
@@ -1693,14 +1697,30 @@ public final class NativeAudioEngine {
             if (have != lastSeen) {
                 lastSeen = have;
                 lastMoveAt = now;
-            } else if (now - lastMoveAt > SongCache.TIMEOUT_MS
-                    && !SongCache.isDownloading(vid)) {
-                synchronized (lock) {
-                    if (gen != playGen) return false;
-                    failLocked(VisionOsResolver.R_TIMEOUT, "fill stalled");
+            } else {
+                long idleMs = now - lastMoveAt;
+                if (idleMs > SongCache.TIMEOUT_MS && !SongCache.isDownloading(vid)) {
+                    synchronized (lock) {
+                        if (gen != playGen) return false;
+                        failLocked(VisionOsResolver.R_TIMEOUT, "fill stalled");
+                    }
+                    pushAll();
+                    return false;
                 }
-                pushAll();
-                return false;
+                // G1 watchdog: idle lama + writer "hidup" tapi byte berhenti
+                // (hang) -> fail juga, kecuali FULL offline-download.
+                // Slow network (byte ngalir) tak pernah sampai sini karena
+                // lastMoveAt ikut gerak tiap byte baru.
+                if (idleMs > WATCHDOG_IDLE_MS && !SongCache.isFull(vid)) {
+                    nlog("[WATCHDOG] hang detected videoId=" + vid
+                            + " idle=" + idleMs + "ms need=" + need + " have=" + have);
+                    synchronized (lock) {
+                        if (gen != playGen) return false;
+                        failLocked(VisionOsResolver.R_TIMEOUT, "watchdog no bytes 60s");
+                    }
+                    pushAll();
+                    return false;
+                }
             }
             try {
                 Thread.sleep(250);
