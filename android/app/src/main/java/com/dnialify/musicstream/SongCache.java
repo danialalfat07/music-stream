@@ -274,7 +274,7 @@ public final class SongCache {
         try {
             File dir = dir(ctx);
             if (dir == null || !dir.exists()) return 0;
-            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm"));
+            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm") && !f.getName().endsWith(".play.webm"));
             return files == null ? 0 : files.length;
         } catch (Exception e) {
             return 0;
@@ -292,7 +292,7 @@ public final class SongCache {
             } catch (Exception e) {
                 pinned = new java.util.HashSet<>();
             }
-            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm"));
+            File[] files = dir.listFiles(f -> f.isFile() && f.getName().endsWith(".webm") && !f.getName().endsWith(".play.webm"));
             if (files == null) return;
             Log.d(TAG, "[EVICT] start: files=" + files.length + " max=" + max + " pinned=" + pinned.size());
             if (files.length <= max) {
@@ -314,6 +314,10 @@ public final class SongCache {
                     if (meta.exists()) meta.delete();
                     File part = new File(dir, vid + ".webm.part");
                     if (part.exists()) part.delete();
+                    File art = artFile(ctx, vid);
+                    if (art.exists()) art.delete();
+                    File snap = new File(dir, vid + ".play.webm");
+                    if (snap.exists()) snap.delete();
                     if (ok) {
                         count--;
                         Log.d(TAG, "[EVICT] removed " + vid + " count now " + count);
