@@ -1263,7 +1263,9 @@ function initAudio(){
       }
       // FASE C prototype: track sukses → reset skip berturut-turut.
       if (ev.state === 'PLAYING') { Player.skipStreak = 0; Player._skipCountedFor = null; }
-      if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS') {
+      // Sticky-offline guard: lastCache native tetap 'MISS' setelah COMPLETE,
+      // jadi event BUFFERING/RESOLVING pasca-COMPLETE tidak boleh menimpa label offline.
+      if ((ev.state === 'RESOLVING' || ev.state === 'BUFFERING') && ev.cache === 'MISS' && !isOfflineDone()) {
         try { window.setPlayMethod('Menghubungkan…'); } catch {}
       } else if (Player.nativeActive) {
         refreshSourceLabel();
@@ -2105,6 +2107,7 @@ const OfflineLib = {
       if (Player.current && Player.current.videoId === vid) {
         paintDlLayer();
         refreshSourceLabel();
+        try { renderPlayButtons(); } catch {}
       }
     } catch {}
     if ((location.hash || '').startsWith('#/library/offline')) route();
@@ -2259,22 +2262,29 @@ function paintNpPlayed() {
     const kn = document.getElementById('np-knob'); if (kn) kn.style.left = pct + '%';
   } catch {}
 }
-function refreshSourceLabel() {
-  // VisionOS (<100% cached) vs Offline Downloader ✓ (100%). Native only;
-  // other engines keep the legacy badge. Reset on every track change.
+function isOfflineDone() {
+  // Predikat tunggal status offline track kini: COMPLETE atau byte penuh.
+  // Dipakai refreshSourceLabel + guard label 'Menghubungkan…' (satu sumber).
   try {
     const s = Player.current;
-    if (!Player.nativeActive || !s) return;
-    let done = false;
+    if (!Player.nativeActive || !s) return false;
     if (typeof OfflineLib !== 'undefined' && OfflineLib.get) {
       const e = OfflineLib.get(s.videoId);
       if (e) {
-        done = e.cacheStatus === 'COMPLETE'
+        return e.cacheStatus === 'COMPLETE'
           || (Number(e.audioSize) > 0
             && (Number(e.downloadedBytes) || 0) >= Number(e.audioSize));
       }
     }
-    window.setPlayMethod(done ? 'Offline Downloader ✓' : 'VisionOS');
+  } catch {}
+  return false;
+}
+function refreshSourceLabel() {
+  // VisionOS (<100% cached) vs Offline Downloader ✓ (100%). Native only;
+  // other engines keep the legacy badge. Reset on every track change.
+  try {
+    if (!Player.nativeActive || !Player.current) return;
+    window.setPlayMethod(isOfflineDone() ? 'Offline Downloader ✓' : 'VisionOS');
   } catch {}
 }
 function onTrackChanged(s) {
