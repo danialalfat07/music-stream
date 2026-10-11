@@ -865,6 +865,13 @@ public final class SongCache {
      * validation still guards mismatch (fails as FAILED, never corrupt COMPLETE).
      */
     static String refreshStreamUrl(String videoId) throws Exception {
+        // Force visitor refresh: resolve dengan visitor basi return URL SAMA
+        // (403 beruntun) -> eskalasi palsu 9x identik efektif. Clear dulu
+        // agar resolve fetch visitor baru + URL benar baru. Cost: 1 fetch
+        // visitor per refresh (maks 2x per chunk, hanya di jalur gagal).
+        try {
+            VisionOsResolver.clearVisitorCache();
+        } catch (Exception ignored) {}
         VisionOsResolver.Result r = VisionOsResolver.resolve(videoId);
         if (r == null || r.url == null || r.url.isEmpty()) {
             throw new Exception("re-resolve returned empty url");
