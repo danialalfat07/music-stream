@@ -19,6 +19,9 @@ public final class ExoMediaSessionService extends MediaSessionService {
 
     private static final String TAG = "ExoMediaSessionService";
     private static final String SOCKET_TAG = "EXO_SOCKET5";
+    // Notif ID 1002 (jangan 1001 default: tabrakan legacy PlaybackService).
+    private static final int NOTIF_ID = 1002;
+    private static final String CHANNEL_ID = "exo_playback";
 
     private MediaSession mediaSession;
     private ForwardingPlayer forwardingPlayer;
@@ -29,10 +32,22 @@ public final class ExoMediaSessionService extends MediaSessionService {
         // Notif ID 1002 (jangan 1001 default: tabrakan legacy PlaybackService).
         setMediaNotificationProvider(
                 new androidx.media3.session.DefaultMediaNotificationProvider.Builder(this)
-                        .setNotificationId(1002)
-                        .setChannelId("exo_playback")
+                        .setNotificationId(NOTIF_ID)
+                        .setChannelId(CHANNEL_ID)
                         .setChannelName(R.string.app_name)
                         .build());
+        // L9 (A): pegang foreground SEKARANG — jendela 5 dtk startForegroundService
+        // tidak boleh kosong sambil menunggu media3 posting notif playback.
+        // ID sama (1002) -> media3 menggantikannya saat notif asli siap.
+        try {
+            android.app.Notification ph = buildPlaceholderNotification();
+            if (ph != null) {
+                startForeground(NOTIF_ID, ph);
+                android.util.Log.d(TAG, "[FGS] startForeground immediate placeholder");
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "[FGS] startForeground immediate failed", e);
+        }
         ExoPlayer player = ExoPlayerHolder.getInstance(this).getPlayer();
         forwardingPlayer = new ForwardingPlayer(player) {
             @Override
@@ -62,6 +77,33 @@ public final class ExoMediaSessionService extends MediaSessionService {
     @Override
     public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) {
         return mediaSession;
+    }
+
+    /** FGS placeholder: notif minimal di channel exo_playback. Channel dibuat
+     *  sendiri (media3 baru bikin saat posting notif asli; kita butuh lebih dulu). */
+    private android.app.Notification buildPlaceholderNotification() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.app.NotificationManager nm =
+                        getSystemService(android.app.NotificationManager.class);
+                if (nm != null) {
+                    nm.createNotificationChannel(new android.app.NotificationChannel(
+                            CHANNEL_ID, getString(R.string.app_name),
+                            android.app.NotificationManager.IMPORTANCE_LOW));
+                }
+            }
+            android.app.Notification.Builder b =
+                    android.os.Build.VERSION.SDK_INT >= 26
+                            ? new android.app.Notification.Builder(this, CHANNEL_ID)
+                            : new android.app.Notification.Builder(this);
+            return b.setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle("Memuat...")
+                    .setOngoing(true)
+                    .build();
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "[FGS] buildPlaceholderNotification failed", e);
+            return null;
+        }
     }
 
     /**

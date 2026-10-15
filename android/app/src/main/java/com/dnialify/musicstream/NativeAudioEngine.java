@@ -1304,7 +1304,9 @@ public final class NativeAudioEngine {
     }
 
     /** Hentikan audio Exo saat ganti track/gagal. Player tetap (reuse).
-     *  Service session ikut berhenti (notif 1002 hilang). */
+     *  L9 (B1): service session TIDAK lagi di-stop di sini — Media3
+     *  menurunkan notif/service sendiri saat player idle (startForeground
+     *  service yang masih di window 5 dtk tidak boleh di-stop: crash). */
     private void stopExoLocked() {
         disarmCacheFirst();
         if (exoPlayer != null) {
@@ -1316,11 +1318,6 @@ public final class NativeAudioEngine {
         }
         stopExoTicker();
         exoMode = false;
-        try {
-            if (appCtx != null) {
-                appCtx.stopService(new android.content.Intent(appCtx, ExoMediaSessionService.class));
-            }
-        } catch (Exception ignored) {}
     }
 
     /**
