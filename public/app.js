@@ -3045,9 +3045,10 @@ function toggleSB() {
 
 /* ================= lyrics ================= */
 let lyricsReqId = 0; // guard against out-of-order responses on fast skips
-async function loadLyrics(song, { silent = false } = {}) {
+async function loadLyrics(song, { silent = false, retry = false } = {}) {
   if (!song) return;
   const myReq = ++lyricsReqId;
+  const MAX_RETRY = retry ? 1 : 3; // tombol try-again = 1x, first play = 3x
   const durationSec = (() => {
     if (Player.yt && Player.ready && Player.yt.getDuration)
       return Math.round(Player.yt.getDuration() || 0);
@@ -3072,24 +3073,109 @@ async function loadLyrics(song, { silent = false } = {}) {
     $('#lyrics-container').innerHTML =
       '<div class="lyrics-empty">Looking for lyrics…</div>';
   }
-  try {
-    const d = await api(
-      `/api/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${durationSec}&browseId=${encodeURIComponent(Player.lyricsBrowseId || '')}`,
-    );
-    if (myReq !== lyricsReqId) return; // a newer request superseded us
-    // never downgrade: keep existing synced lyrics if the retry found less
-    if (Player.lyrics.synced && !d.synced) return;
-    Player.lyrics = { ...d, lines: d.synced ? parseLRC(d.synced) : [] };
-    try { console.log('[LYRICS] fetched title="'+title+'" artist="'+artist+'" dur='+durationSec+' rawSyncedLen='+(d.synced?d.synced.length:0)+' plainLen='+(d.plain?d.plain.length:0)+' parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
-    try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] fetched parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
-  } catch (e) {
-    try { console.log('[LYRICS] fetch failed '+e); } catch {}
-    if (myReq !== lyricsReqId) return;
-    if (!Player.lyrics.synced && !Player.lyrics.plain)
-      Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
+  const apiUrl =
+    `/api/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${durationSec}&browseId=${encodeURIComponent(Player.lyricsBrowseId || '')}`;
+  const lyricsFromCache = (raw) => {
+    try {
+      if (!raw || raw === 'null') return null;
+      const p = JSON.parse(raw);
+      if (!p || !p.lyrics) return null;
+      return {
+        synced: p.lyricsFormat === 'lrc' ? p.lyrics : null,
+        plain: p.lyricsFormat === 'plain' ? p.lyrics : null,
+        source: p.source || 'cache',
+        lines: p.lyricsFormat === 'lrc' ? parseLRC(p.lyrics) : [],
+      };
+    } catch {
+      return null;
+    }
+  };
+  const hasBridge = (name) => {
+    try { return !!(window.NativePlayback && NativePlayback[name]); } catch { return false; }
+  };
+  // 1. Cek path (read #1): cache .lyrics.json dulu
+  if (song.videoId && hasBridge('getCachedLyrics')) {
+    try {
+      const hit = lyricsFromCache(NativePlayback.getCachedLyrics(song.videoId));
+      if (hit) {
+        if (myReq !== lyricsReqId) return;
+        // never downgrade: keep existing synced lyrics if cache found less
+        if (!(Player.lyrics.synced && !hit.synced)) {
+          Player.lyrics = hit;
+          renderLyrics();
+        }
+        return;
+      }
+    } catch {}
   }
+  // 2. Fetch dengan retry (tanpa write-back di tengah loop)
+  let attempt = 0;
+  let fetched = null;
+  while (attempt < MAX_RETRY) {
+    if (myReq !== lyricsReqId) return; // a newer request superseded us
+    attempt++;
+    try {
+      const d = await api(apiUrl);
+      if (myReq !== lyricsReqId) return;
+      if (d && (d.synced || d.plain)) {
+        fetched = d;
+        break;
+      }
+    } catch (e) {
+      try { console.log('[LYRICS] fetch attempt ' + attempt + '/' + MAX_RETRY + ' failed ' + e); } catch {}
+    }
+  }
+  // 3. Fetch sukses -> write atomic .lyrics.json (1 writer: file ini saja)
+  if (fetched && song.videoId && hasBridge('saveLyrics')) {
+    try {
+      const payload = {
+        videoId: song.videoId,
+        lyrics: fetched.synced ? fetched.synced : fetched.plain,
+        lyricsFormat: fetched.synced ? 'lrc' : 'plain',
+        source: fetched.source || 'api',
+        fetchedAt: Date.now(),
+      };
+      NativePlayback.saveLyrics(song.videoId, JSON.stringify(payload));
+    } catch {}
+  }
+  // 4. Cek path (read #2): verifikasi isi file yang baru ditulis
+  if (song.videoId && hasBridge('getCachedLyrics')) {
+    try {
+      const hit2 = lyricsFromCache(NativePlayback.getCachedLyrics(song.videoId));
+      if (hit2) {
+        if (myReq !== lyricsReqId) return;
+        if (!(Player.lyrics.synced && !hit2.synced)) {
+          Player.lyrics = hit2;
+          try { console.log('[LYRICS] cache verified title="' + title + '" parsed=' + Player.lyrics.lines.length); } catch {}
+          renderLyrics();
+        }
+        return;
+      }
+    } catch {}
+  }
+  // 5. Write gagal tapi fetch ada -> pakai hasil fetch langsung (fallback)
+  if (fetched) {
+    if (myReq !== lyricsReqId) return;
+    // never downgrade: keep existing synced lyrics if the fetch found less
+    if (Player.lyrics.synced && !fetched.synced) return;
+    Player.lyrics = {
+      synced: fetched.synced || null,
+      plain: fetched.plain || null,
+      source: fetched.source || 'api',
+      lines: fetched.synced ? parseLRC(fetched.synced) : [],
+    };
+    try { console.log('[LYRICS] fetched (direct) title="' + title + '" artist="' + artist + '" dur=' + durationSec + ' parsed=' + Player.lyrics.lines.length + ' source=' + fetched.source); } catch {}
+    try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] fetched parsed=' + Player.lyrics.lines.length + ' source=' + fetched.source); } catch {}
+    renderLyrics();
+    return;
+  }
+  // 6. Gagal semua -> kosong, tombol try again muncul via renderLyrics
+  if (myReq !== lyricsReqId) return;
+  try { console.log('[LYRICS] all attempts failed title="' + title + '"'); } catch {}
+  if (!Player.lyrics.synced && !Player.lyrics.plain)
+    Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
   renderLyrics();
-  try { console.log('[LYRICS] after render lines='+Player.lyrics.lines.length+' plain='+(!!Player.lyrics.plain)); } catch {}
+  try { console.log('[LYRICS] after render lines=' + Player.lyrics.lines.length + ' plain=' + (!!Player.lyrics.plain)); } catch {}
 }
 /* retry once the real duration is known (player loaded after first attempt),
    or when the first attempt found nothing */
@@ -3158,7 +3244,7 @@ function renderLyrics() {
     if (rb)
       rb.addEventListener('click', () => {
         Player._lyricsRetried = false;
-        loadLyrics(Player.current);
+        loadLyrics(Player.current, { retry: true });
       });
   }
   src.textContent = L.source ? `Lyrics provided by ${L.source}` : '';
