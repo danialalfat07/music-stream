@@ -263,20 +263,18 @@ public final class SongCache {
 
     /** FASE 2.6: tulis lirik mentah ke record. Hanya untuk record COMPLETE. */
     public static synchronized boolean writeLyrics(Context c, String videoId, String lyricsRaw, String format) {
-        Log.d(TAG, "[LYR-N] writeLyrics in vid=" + videoId + " len=" + (lyricsRaw == null ? 0 : lyricsRaw.length()) + " fmt=" + format);
         try {
-            if (c == null || videoId == null || videoId.isEmpty()) { Log.d(TAG, "[LYR-N] SKIP null videoId/lyrics"); return false; }
-            if (lyricsRaw == null || lyricsRaw.isEmpty()) { Log.d(TAG, "[LYR-N] SKIP null videoId/lyrics"); return false; }
+            if (c == null || videoId == null || videoId.isEmpty()) return false;
+            if (lyricsRaw == null || lyricsRaw.isEmpty()) return false;
             JSONObject r = getRecord(c, videoId);
-            if (r == null) { Log.d(TAG, "[LYR-N] SKIP no record vid=" + videoId); return false; }
+            if (r == null) return false;
             r.put("lyrics", lyricsRaw);
             r.put("lyricsFormat", (format == null || format.isEmpty()) ? "lrc" : format);
             r.put("lyricsStatus", LY_AVAILABLE);
             putRecord(c, videoId, r);
-            Log.d(TAG, "[LYR-N] SAVED vid=" + videoId + " status=" + r.optString("cacheStatus", "?"));
+            Log.d(TAG, "[SONG] lyrics saved videoId=" + videoId + " status=" + r.optString("cacheStatus", "?"));
             return true;
         } catch (Exception e) {
-            Log.d(TAG, "[LYR-N] FAIL vid=" + videoId + " err=" + e);
             return false;
         }
     }

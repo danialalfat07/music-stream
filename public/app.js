@@ -2148,7 +2148,6 @@ const OfflineLib = {
     } catch { return []; }
   },
   play(videoId) {    const e = this.get(videoId);
-    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] OfflineLib.play vid=' + videoId); } catch {}
     if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
     const song = {
       videoId: e.videoId, title: e.title, artist: e.artist,
@@ -2168,7 +2167,6 @@ const OfflineLib = {
         const raw = NativePlayback.getCachedSong(videoId);
         if (!raw || raw === 'null') return;
         const r = JSON.parse(raw);
-        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] record-read lirik=' + (r && r.lyrics ? 'ada' : 'kosong')); } catch {}
         if (Player.loadId !== lid || !Player.current || Player.current.videoId !== videoId) return;
         if (r.lyrics) {
           Player.lyrics = {
@@ -2293,7 +2291,6 @@ function onTrackChanged(s) {
   // Single choke point: every track change refreshes track-bound UI here.
   // (Player.current is a queue[index] getter, so all paths funnel via startCurrent.)
   if (!s || !s.videoId) return;
-  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] onTrackChanged vid=' + s.videoId); } catch {}
   try { pushPinnedToNative(); } catch {}
   try { refreshDlBadges(); } catch {}
   try { offStampPlayed(s.videoId); } catch {}
@@ -2390,7 +2387,6 @@ function startCurrent() {
         startNativeTrack(s, loadId);
         Library.pushHistory(s);
         Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
-        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] RESET Player.lyrics vid=' + s.videoId); } catch {}
         Player._lyricsRetried = false;
         Player._lyricsDur = 0;
         lastLyricIdx = -1;
@@ -3051,8 +3047,6 @@ function toggleSB() {
 let lyricsReqId = 0; // guard against out-of-order responses on fast skips
 async function loadLyrics(song, { silent = false } = {}) {
   if (!song) return;
-  const lyrLog = (m) => { try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog(m); } catch {} };
-  lyrLog('[LYR-J] loadLyrics START vid=' + (song && song.videoId) + ' source=' + (navigator.onLine ? 'online' : 'offline'));
   const myReq = ++lyricsReqId;
   const durationSec = (() => {
     if (Player.yt && Player.ready && Player.yt.getDuration)
@@ -3078,39 +3072,32 @@ async function loadLyrics(song, { silent = false } = {}) {
     $('#lyrics-container').innerHTML =
       '<div class="lyrics-empty">Looking for lyrics…</div>';
   }
-  lyrLog('[LYR-J] fetching /api/lyrics title=' + title);
   try {
     const d = await api(
       `/api/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${durationSec}&browseId=${encodeURIComponent(Player.lyricsBrowseId || '')}`,
     );
-    lyrLog('[LYR-J] fetched OK synced=' + (d.synced ? d.synced.length : 0) + ' plain=' + (d.plain ? d.plain.length : 0));
-    if (myReq !== lyricsReqId) { lyrLog('[LYR-J] SKIP stale req'); return; } // a newer request superseded us
+    if (myReq !== lyricsReqId) return; // a newer request superseded us
     // never downgrade: keep existing synced lyrics if the retry found less
-    if (Player.lyrics.synced && !d.synced) { lyrLog('[LYR-J] SKIP downgrade'); return; }
+    if (Player.lyrics.synced && !d.synced) return;
     Player.lyrics = { ...d, lines: d.synced ? parseLRC(d.synced) : [] };
-    lyrLog('[LYR-J] SET memory lines=' + Player.lyrics.lines.length);
     // FASE 2.6: write-back raw lyrics ke .song.json (offline cache)
     try {
       if (window.NativePlayback && NativePlayback.saveSongLyrics && song && song.videoId && (d.synced || d.plain)) {
         const ret = NativePlayback.saveSongLyrics(song.videoId, d.synced ? d.synced : d.plain, d.synced ? 'lrc' : 'plain');
-        lyrLog('[LYR-J] writeback call ret=' + ret);
         try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYRICS] writeback vid=' + song.videoId + ' ret=' + ret); } catch {}
       }
     } catch {}
     try { console.log('[LYRICS] fetched title="'+title+'" artist="'+artist+'" dur='+durationSec+' rawSyncedLen='+(d.synced?d.synced.length:0)+' plainLen='+(d.plain?d.plain.length:0)+' parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
     try { if (window.Diagnostics) window.Diagnostics.logLine('[LYRICS] fetched parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}
   } catch (e) {
-    lyrLog('[LYR-J] fetch FAIL err=' + e);
     try { console.log('[LYRICS] fetch failed '+e); } catch {}
-    if (myReq !== lyricsReqId) { lyrLog('[LYR-J] SKIP stale req'); return; }
+    if (myReq !== lyricsReqId) return;
     // FASE 2.6 fallback: baca lirik dari record .song.json (offline)
-    lyrLog('[LYR-J] fallback enter vid=' + (song && song.videoId));
     try {
       if (window.NativePlayback && NativePlayback.getCachedSong && song && song.videoId) {
         const rawRec = NativePlayback.getCachedSong(song.videoId);
         if (rawRec && rawRec !== 'null') {
           const rec = JSON.parse(rawRec);
-          lyrLog('[LYR-J] fallback rec=' + (rec ? 'ada' : 'null') + ' hasLyrics=' + (rec && rec.lyrics ? 'yes' : 'no'));
           if (rec && rec.lyrics) {
             Player.lyrics = {
               synced: rec.lyricsFormat === 'lrc' ? rec.lyrics : null,
@@ -3118,17 +3105,14 @@ async function loadLyrics(song, { silent = false } = {}) {
               source: 'offline-cache',
               lines: rec.lyricsFormat === 'lrc' ? parseLRC(rec.lyrics) : [],
             };
-            lyrLog('[LYR-J] fallback parsed lines=' + Player.lyrics.lines.length + ' fmt=' + rec.lyricsFormat);
             renderLyrics();
-            lyrLog('[LYR-J] fallback render OK');
             return;
           }
         }
       }
-    } catch (fbErr) { lyrLog('[LYR-J] fallback FAIL err=' + fbErr); }
+    } catch {}
     if (!Player.lyrics.synced && !Player.lyrics.plain)
       Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
-    lyrLog('[LYR-J] WIPE Player.lyrics (fallback tidak menemukan)');
   }
   renderLyrics();
   try { console.log('[LYRICS] after render lines='+Player.lyrics.lines.length+' plain='+(!!Player.lyrics.plain)); } catch {}
@@ -3136,7 +3120,6 @@ async function loadLyrics(song, { silent = false } = {}) {
 /* retry once the real duration is known (player loaded after first attempt),
    or when the first attempt found nothing */
 function maybeRetryLyrics() {
-  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] maybeRetryLyrics enter'); } catch {}
   const s = Player.current;
   if (!s || !Player.yt || !Player.ready || !Player.yt.getDuration) return;
   const dur = Math.round(Player.yt.getDuration() || 0);
@@ -3148,7 +3131,6 @@ function maybeRetryLyrics() {
     !Player._lyricsRetried
   ) {
     Player._lyricsRetried = true;
-    try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] maybeRetryLyrics retry fetch'); } catch {}
     loadLyrics(s, { silent: true });
   }
 }
@@ -3169,7 +3151,6 @@ function renderLyrics() {
   const c = $('#lyrics-container');
   const src = $('#lyrics-source');
   const L = Player.lyrics;
-  try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYR-J] render lines=' + (L && L.lines ? L.lines.length : 0) + ' plain=' + !!(L && L.plain)); } catch {}
   if (L.lines.length) {
     c.innerHTML = L.lines
       .map(
