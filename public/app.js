@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.79";
+const APP_VERSION = "2.3.80";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2610,6 +2610,7 @@ function nextTrack(auto) {
     else return;
   }
   Player.index = ni;
+  if (!auto) Player._nativeFailed = null;
   // Socket 5 dirty: transisi = dirty, push via pushIfDirty (delay 500ms).
   try { markDirty(); } catch {}
   try { pushIfDirty('next'); } catch {}
@@ -2630,6 +2631,7 @@ function prevTrack() {
     Player.yt.seekTo(0);
     return;
   }
+  Player._nativeFailed = null;
   if (Player.index > 0) {
     Player.index--;
     // Socket 5 dirty: transisi = dirty, push via pushIfDirty (delay 500ms).
