@@ -3091,6 +3091,25 @@ async function loadLyrics(song, { silent = false } = {}) {
   } catch (e) {
     try { console.log('[LYRICS] fetch failed '+e); } catch {}
     if (myReq !== lyricsReqId) return;
+    // FASE 2.6 fallback: baca lirik dari record .song.json (offline)
+    try {
+      if (window.NativePlayback && NativePlayback.getCachedSong && song && song.videoId) {
+        const rawRec = NativePlayback.getCachedSong(song.videoId);
+        if (rawRec && rawRec !== 'null') {
+          const rec = JSON.parse(rawRec);
+          if (rec && rec.lyrics) {
+            Player.lyrics = {
+              synced: rec.lyricsFormat === 'lrc' ? rec.lyrics : null,
+              plain: rec.lyricsFormat === 'plain' ? rec.lyrics : null,
+              source: 'offline-cache',
+              lines: rec.lyricsFormat === 'lrc' ? parseLRC(rec.lyrics) : [],
+            };
+            renderLyrics();
+            return;
+          }
+        }
+      }
+    } catch {}
     if (!Player.lyrics.synced && !Player.lyrics.plain)
       Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
   }
