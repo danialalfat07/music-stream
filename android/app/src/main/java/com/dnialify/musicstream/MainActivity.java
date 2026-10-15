@@ -1256,15 +1256,6 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
-        public boolean saveSongLyrics(String videoId, String lyrics, String format) {
-            try {
-                return SongCache.writeLyrics(MainActivity.this, videoId, lyrics, format);
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        @JavascriptInterface
         public String getCachedSongs() {
             try {
                 org.json.JSONArray arr = new org.json.JSONArray();

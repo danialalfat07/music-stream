@@ -95,48 +95,6 @@ public final class SongCache {
 
     private SongCache() {}
 
-    static boolean isWebmMagic(byte[] head) {
-        return head != null && head.length >= 4
-                && (head[0] & 0xFF) == 0x1A
-                && (head[1] & 0xFF) == 0x45
-                && (head[2] & 0xFF) == 0xDF
-                && (head[3] & 0xFF) == 0xA3;
-    }
-
-    static boolean isMp4Magic(byte[] head) {
-        return head != null && head.length >= 8
-                && head[4] == 0x66 && head[5] == 0x74
-                && head[6] == 0x79 && head[7] == 0x70;
-    }
-
-    static boolean isKnownContainer(byte[] head) {
-        return isWebmMagic(head) || isMp4Magic(head);
-    }
-
-    private static boolean isKnownContainer(File f) {
-        FileInputStream in = null;
-        try {
-            in = new FileInputStream(f);
-            byte[] head = new byte[8];
-            int n = 0;
-            while (n < head.length) {
-                int r = in.read(head, n, head.length - n);
-                if (r < 0) break;
-                n += r;
-            }
-            if (n < 8) {
-                return isWebmMagic(java.util.Arrays.copyOf(head, n));
-            }
-            return isKnownContainer(head);
-        } catch (Exception e) {
-            return false;
-        } finally {
-            try {
-                if (in != null) in.close();
-            } catch (Exception ignored) {}
-        }
-    }
-
     static File dir(Context c) {
         return VisionOsCache.dir(c);
     }
@@ -261,25 +219,6 @@ public final class SongCache {
         return r;
     }
 
-    /** FASE 2.6: tulis lirik mentah ke record. Hanya untuk record COMPLETE. */
-    public static synchronized boolean writeLyrics(Context c, String videoId, String lyricsRaw, String format) {
-        try {
-            if (c == null || videoId == null || videoId.isEmpty()) return false;
-            if (lyricsRaw == null || lyricsRaw.isEmpty()) return false;
-            JSONObject r = getRecord(c, videoId);
-            if (r == null) return false;
-            if (!ST_COMPLETE.equals(r.optString("cacheStatus", ""))) return false;
-            r.put("lyrics", lyricsRaw);
-            r.put("lyricsFormat", (format == null || format.isEmpty()) ? "lrc" : format);
-            r.put("lyricsStatus", LY_AVAILABLE);
-            putRecord(c, videoId, r);
-            Log.d(TAG, "[SONG] lyrics saved videoId=" + videoId);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     public static List<JSONObject> listRecords(Context c) {
         List<JSONObject> out = new ArrayList<>();
         try {
@@ -303,7 +242,7 @@ public final class SongCache {
             File a = audioFile(c, videoId);
             if (r == null) {
                 if (!a.isFile() || a.length() <= 0) return false;
-                if (!isKnownContainer(a)) {
+                if (!VisionOsCache.ebmlMagic(a)) {
                     Log.w(TAG, "[G4] legacy corrupt: " + videoId);
                     return false;
                 }
@@ -571,7 +510,7 @@ public final class SongCache {
             out.close();
             out = null;
             progress(c, videoId, r, received, total);
-            if (part.length() != total || !isKnownContainer(part)) {
+            if (part.length() != total || !VisionOsCache.ebmlMagic(part)) {
                 throw new Exception("validation failed size=" + part.length()
                         + " want=" + total);
             }
@@ -793,7 +732,7 @@ public final class SongCache {
                 try { in.close(); } catch (Exception ignored) {}
                 try { out.close(); } catch (Exception ignored) {}
             }
-            if (dst.length() != n || !isKnownContainer(dst)) {
+            if (dst.length() != n || !VisionOsCache.ebmlMagic(dst)) {
                 dst.delete();
                 return null;
             }
