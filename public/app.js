@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.76";
+const APP_VERSION = "2.3.75";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -3078,30 +3078,6 @@ async function loadLyrics(song, { silent = false } = {}) {
     $('#lyrics-container').innerHTML =
       '<div class="lyrics-empty">Looking for lyrics…</div>';
   }
-  // FASE 2.7: cache-first — cek .song.json dulu, skip network kalau hit
-  try {
-    if (window.NativePlayback && NativePlayback.getCachedSong && song && song.videoId) {
-      const rawHit = NativePlayback.getCachedSong(song.videoId);
-      if (rawHit && rawHit !== 'null') {
-        const hit = JSON.parse(rawHit);
-        if (hit && hit.lyrics && hit.lyrics.length > 0) {
-          if (myReq !== lyricsReqId) { lyrLog('[LYR-J] SKIP stale req'); return; }
-          lyrLog('[LYR-J] cache HIT vid=' + song.videoId + ' fmt=' + hit.lyricsFormat);
-          Player.lyrics = {
-            synced: hit.lyricsFormat === 'lrc' ? hit.lyrics : null,
-            plain: hit.lyricsFormat === 'plain' ? hit.lyrics : null,
-            source: 'offline-cache',
-            lines: hit.lyricsFormat === 'lrc' ? parseLRC(hit.lyrics) : [],
-          };
-          renderLyrics();
-          return;
-        }
-      }
-    }
-  } catch (e) {
-    lyrLog('[LYR-J] cache check FAIL err=' + e);
-  }
-  lyrLog('[LYR-J] cache MISS vid=' + song.videoId + ' — fetching network');
   lyrLog('[LYR-J] fetching /api/lyrics title=' + title);
   try {
     const d = await api(
