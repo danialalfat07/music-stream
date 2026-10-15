@@ -1292,7 +1292,9 @@ public class MainActivity extends BridgeActivity {
                     if (fs != null) {
                         for (java.io.File f : fs) {
                             if (f.getName().endsWith(".webm")
-                                    || f.getName().endsWith(".part")) f.delete();
+                                    || f.getName().endsWith(".part")
+                                    || f.getName().endsWith(".lyrics.json")
+                                    || f.getName().endsWith(".lyrics.json.tmp")) f.delete();
                         }
                     }
                 } catch (Exception ignored) {}
