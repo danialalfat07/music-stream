@@ -3083,7 +3083,8 @@ async function loadLyrics(song, { silent = false } = {}) {
     // FASE 2.6: write-back raw lyrics ke .song.json (offline cache)
     try {
       if (window.NativePlayback && NativePlayback.saveSongLyrics && song && song.videoId && (d.synced || d.plain)) {
-        NativePlayback.saveSongLyrics(song.videoId, d.synced ? d.synced : d.plain, d.synced ? 'lrc' : 'plain');
+        const ret = NativePlayback.saveSongLyrics(song.videoId, d.synced ? d.synced : d.plain, d.synced ? 'lrc' : 'plain');
+        try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[LYRICS] writeback vid=' + song.videoId + ' ret=' + ret); } catch {}
       }
     } catch {}
     try { console.log('[LYRICS] fetched title="'+title+'" artist="'+artist+'" dur='+durationSec+' rawSyncedLen='+(d.synced?d.synced.length:0)+' plainLen='+(d.plain?d.plain.length:0)+' parsed='+Player.lyrics.lines.length+' source='+d.source); } catch {}

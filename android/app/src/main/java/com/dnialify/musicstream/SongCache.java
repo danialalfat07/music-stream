@@ -268,12 +268,11 @@ public final class SongCache {
             if (lyricsRaw == null || lyricsRaw.isEmpty()) return false;
             JSONObject r = getRecord(c, videoId);
             if (r == null) return false;
-            if (!ST_COMPLETE.equals(r.optString("cacheStatus", ""))) return false;
             r.put("lyrics", lyricsRaw);
             r.put("lyricsFormat", (format == null || format.isEmpty()) ? "lrc" : format);
             r.put("lyricsStatus", LY_AVAILABLE);
             putRecord(c, videoId, r);
-            Log.d(TAG, "[SONG] lyrics saved videoId=" + videoId);
+            Log.d(TAG, "[SONG] lyrics saved videoId=" + videoId + " status=" + r.optString("cacheStatus", "?"));
             return true;
         } catch (Exception e) {
             return false;
