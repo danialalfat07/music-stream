@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.78";
+const APP_VERSION = "2.3.79";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -1739,6 +1739,7 @@ async function playSong(song, queue = null, index = null) {
   try { _isClosed = false; } catch {}
   song = normalizeSong(song);
   Player.cued = false;
+  Player._nativeFailed = null;
   Player.pending = null;
   if (queue) {
     Player.queue = queue.map((q) => ({ ...normalizeSong(q), _user: false }));
