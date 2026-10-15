@@ -1249,6 +1249,8 @@ public class MainActivity extends BridgeActivity {
         public String getCachedSong(String videoId) {
             try {
                 org.json.JSONObject r = SongCache.getRecord(MainActivity.this, videoId);
+                String lyrics = r != null ? r.optString("lyrics", "") : "";
+                Log.d("DnialifyVisionOS", "[LYR-N] getCachedSong vid=" + videoId + " hasLyrics=" + (!lyrics.isEmpty()) + " lyricsLen=" + lyrics.length());
                 return r != null ? r.toString() : "null";
             } catch (Exception e) {
                 return "null";
