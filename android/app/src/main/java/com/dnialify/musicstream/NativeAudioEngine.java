@@ -751,22 +751,6 @@ public final class NativeAudioEngine {
      *  Sukses -> PENDING diam. Gagal -> failLocked (skip) + trackFailed.
      *  L2/L3 tidak dijalankan (butuh playback). Tidak menyentuh mp. */
     private void resolveOnly(Context c, String vid, int gen) {
-        // FASE 2.5 cache-first: COMPLETE -> skip network, Result synthetic dari .song.json
-        if (c != null && vid != null && !vid.isEmpty() && SongCache.isComplete(c, vid)) {
-            Log.d(TAG, "[RESOLVE] SKIP (cache complete) videoId=" + vid);
-            VisionOsResolver.Result sr = buildSyntheticResult(c, vid);
-            if (sr != null) {
-                synchronized (lock) {
-                    if (gen != playGen) return;
-                    lastResolverDurationMs = sr.durationMs > 0
-                            ? (int) Math.min(sr.durationMs, Integer.MAX_VALUE) : 0;
-                    setStateLocked(State.IDLE);
-                }
-                startExoItem(vid, sr, gen);
-                return;
-            }
-            // synthetic gagal -> fall through ke resolve biasa
-        }
         VisionOsResolver.Result r;
         try {
             r = VisionOsResolver.resolve(vid);
@@ -788,26 +772,6 @@ public final class NativeAudioEngine {
             setStateLocked(State.IDLE);
         }
         startExoItem(vid, r, gen);
-    }
-
-    /** FASE 2.5: Result synthetic dari .song.json untuk track COMPLETE. Tanpa network. */
-    private static VisionOsResolver.Result buildSyntheticResult(Context c, String vid) {
-        try {
-            JSONObject rec = SongCache.getRecord(c, vid);
-            if (rec == null) return null;
-            String title = rec.optString("title", "");
-            String artist = rec.optString("artist", "");
-            String thumb = rec.optString("artworkThumb", "");
-            if (thumb.isEmpty()) thumb = rec.optString("artworkUrl", "");
-            double durSec = rec.optDouble("duration", 0);
-            long durMs = durSec > 0 ? (long) (durSec * 1000.0) : 0;
-            return new VisionOsResolver.Result(
-                    "https://resolve/" + vid,
-                    0, null, 0, null, false,
-                    title, artist, thumb, durMs, false, 0);
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private void armCacheFirst(String vid, String localhostUri) {
