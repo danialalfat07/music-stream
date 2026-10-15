@@ -810,6 +810,44 @@ public final class NativeAudioEngine {
         }
     }
 
+    /** FASE L7: Result window lokal untuk track COMPLETE. localhost URI nyata
+     *  (bukan dummy), agar item window offline tetap playable. Tanpa network. */
+    private VisionOsResolver.Result buildLocalWindowResult(String vid) {
+        try {
+            android.content.Context c = appCtx;
+            if (c == null || vid == null || vid.isEmpty()) return null;
+            if (!SongCache.isComplete(c, vid)) return null;
+            JSONObject rec = SongCache.getRecord(c, vid);
+            if (rec == null) return null;
+            java.io.File hitFile = SongCache.audioFile(c, vid);
+            if (hitFile == null || !hitFile.isFile()) return null;
+            long hitBytes = hitFile.length();
+            if (hitBytes <= 0) return null;
+            LocalStreamServer srv;
+            synchronized (lock) {
+                srv = ensureServer(c);
+            }
+            if (srv == null) return null;
+            String localUri;
+            try {
+                srv.register(vid, hitFile.getAbsolutePath(), hitBytes);
+                localUri = "http://127.0.0.1:" + srv.port() + "/local-stream/" + vid;
+            } catch (Exception e) {
+                return null;
+            }
+            String title = rec.optString("title", "");
+            String artist = rec.optString("artist", "");
+            String thumb = rec.optString("artworkThumb", "");
+            if (thumb.isEmpty()) thumb = rec.optString("artworkUrl", "");
+            double durSec = rec.optDouble("duration", 0);
+            long durMs = durSec > 0 ? (long) (durSec * 1000.0) : 0;
+            return new VisionOsResolver.Result(localUri, 0, null, 0, null, false,
+                    title, artist, thumb, durMs, false, 0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void armCacheFirst(String vid, String localhostUri) {
         if (vid == null || vid.isEmpty() || localhostUri == null) return;
         cacheFirstVideoId = vid;
@@ -1374,7 +1412,9 @@ public final class NativeAudioEngine {
             final int fi = i;
             Thread t = new Thread(() -> {
                 try {
-                    results.set(fi, VisionOsResolver.resolve(vids.get(fi)));
+                    VisionOsResolver.Result r = buildLocalWindowResult(vids.get(fi));
+                    if (r == null) r = VisionOsResolver.resolve(vids.get(fi));
+                    results.set(fi, r);
                 } catch (Exception e) {
                     nlog("[EXO_SOCKET5] window resolve FAIL " + vids.get(fi) + " " + e);
                 }
