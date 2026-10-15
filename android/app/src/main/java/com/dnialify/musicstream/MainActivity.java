@@ -712,7 +712,43 @@ public class MainActivity extends BridgeActivity {
             String target = url;
             new Thread(() -> {
                 try {
-                    Bitmap bmp = BitmapFactory.decodeStream(new java.net.URL(target).openStream());
+                    final Bitmap[] holder = new Bitmap[1];
+                    // L8 lapis 1: data-URI (artworkThumb offline) -> decode langsung
+                    if (target.startsWith("data:")) {
+                        try {
+                            int comma = target.indexOf(',');
+                            if (comma > 0) {
+                                byte[] raw = android.util.Base64.decode(
+                                        target.substring(comma + 1), android.util.Base64.DEFAULT);
+                                holder[0] = BitmapFactory.decodeByteArray(raw, 0, raw.length);
+                            }
+                        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] data-uri decode err " + e); }
+                    } else if (target.startsWith("http")) {
+                        // L8 lapis 2: cari .art lokal via record yang artworkUrl-nya cocok
+                        try {
+                            java.util.List<org.json.JSONObject> recs = SongCache.listRecords(MainActivity.this);
+                            if (recs != null) {
+                                for (org.json.JSONObject r : recs) {
+                                    if (r != null && target.equals(r.optString("artworkUrl", ""))) {
+                                        String lp = r.optString("artworkFile", "");
+                                        if (!lp.isEmpty()) {
+                                            java.io.File f = new java.io.File(lp);
+                                            if (f.isFile() && f.length() > 0) {
+                                                holder[0] = BitmapFactory.decodeFile(lp);
+                                                if (holder[0] != null) Log.d(TAG_DIAG, "[PipNative] artwork local .art");
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        } catch (Exception e) { Log.d(TAG_DIAG, "[PipNative] local art scan err " + e); }
+                    }
+                    // L8 lapis 3: fallback network seperti semula
+                    if (holder[0] == null) {
+                        holder[0] = BitmapFactory.decodeStream(new java.net.URL(target).openStream());
+                    }
+                    Bitmap bmp = holder[0];
                     if (bmp != null) {
                         runOnUiThread(() -> {
                             try {

@@ -848,6 +848,26 @@ public final class NativeAudioEngine {
         }
     }
 
+    /** FASE L8: URI artwork — file .art lokal dulu (offline), fallback URL network. */
+    private static android.net.Uri artworkUriFor(android.content.Context c, String vid, String fallbackUrl) {
+        try {
+            if (c != null && vid != null && !vid.isEmpty() && SongCache.isComplete(c, vid)) {
+                java.io.File art = SongCache.artFile(c, vid);
+                if (art != null && art.isFile() && art.length() > 0) {
+                    return android.net.Uri.fromFile(art);
+                }
+            }
+        } catch (Exception e) {
+            nlog("[L8] artFile err " + e);
+        }
+        if (fallbackUrl != null && !fallbackUrl.isEmpty()) {
+            try {
+                return android.net.Uri.parse(fallbackUrl);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
     private void armCacheFirst(String vid, String localhostUri) {
         if (vid == null || vid.isEmpty() || localhostUri == null) return;
         cacheFirstVideoId = vid;
@@ -1047,12 +1067,12 @@ public final class NativeAudioEngine {
                     + " videoId=" + vid);
         } else
         try {
-            MediaMetadata md = new MediaMetadata.Builder()
+            android.net.Uri artU = artworkUriFor(appCtx, vid, r.thumbnail);
+            MediaMetadata.Builder mb = new MediaMetadata.Builder()
                     .setTitle(r.title != null && !r.title.isEmpty() ? r.title : title)
-                    .setArtist(r.author != null && !r.author.isEmpty() ? r.author : artist)
-                    .setArtworkUri((r.thumbnail != null && !r.thumbnail.isEmpty())
-                            ? Uri.parse(r.thumbnail) : null)
-                    .build();
+                    .setArtist(r.author != null && !r.author.isEmpty() ? r.author : artist);
+            if (artU != null) mb.setArtworkUri(artU);
+            MediaMetadata md = mb.build();
             MediaItem.Builder ib = new MediaItem.Builder()
                     .setUri(finalUri)
                     .setMediaMetadata(md);
@@ -1440,14 +1460,13 @@ public final class NativeAudioEngine {
             if (i == curIdx && r.durationMs > 0) {
                 resolvedCurrentDurationMs = (int) Math.min(r.durationMs, Integer.MAX_VALUE);
             }
-            MediaMetadata md = new MediaMetadata.Builder()
+            String artFb = thumbs.get(i).isEmpty() ? r.thumbnail : thumbs.get(i);
+            android.net.Uri artW = artworkUriFor(appCtx, vids.get(i), artFb);
+            MediaMetadata.Builder mb = new MediaMetadata.Builder()
                     .setTitle(titles.get(i).isEmpty() ? r.title : titles.get(i))
-                    .setArtist(artists.get(i).isEmpty() ? r.author : artists.get(i))
-                    .setArtworkUri(thumbs.get(i).isEmpty()
-                            ? (r.thumbnail != null && !r.thumbnail.isEmpty()
-                                    ? Uri.parse(r.thumbnail) : null)
-                            : Uri.parse(thumbs.get(i)))
-                    .build();
+                    .setArtist(artists.get(i).isEmpty() ? r.author : artists.get(i));
+            if (artW != null) mb.setArtworkUri(artW);
+            MediaMetadata md = mb.build();
             String itemUri = guardedUri(vids.get(i), r.url);
             MediaItem.Builder ib = new MediaItem.Builder()
                     .setUri(itemUri)
