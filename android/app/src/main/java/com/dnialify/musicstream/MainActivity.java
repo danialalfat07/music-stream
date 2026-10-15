@@ -1268,6 +1268,27 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
+        /** Lirik terpisah: baca <vid>.lyrics.json. Return JSON string atau "null". */
+        @JavascriptInterface
+        public String getCachedLyrics(String videoId) {
+            try {
+                String json = SongCache.readLyrics(MainActivity.this, videoId);
+                return json != null ? json : "null";
+            } catch (Exception e) {
+                return "null";
+            }
+        }
+
+        /** Lirik terpisah: tulis <vid>.lyrics.json (atomic). Tidak menyentuh .song.json. */
+        @JavascriptInterface
+        public boolean saveLyrics(String videoId, String json) {
+            try {
+                return SongCache.writeLyricsAtomic(MainActivity.this, videoId, json);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
         @JavascriptInterface
         public String deleteCachedSong(String videoId) {
             try {
