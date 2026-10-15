@@ -115,6 +115,73 @@ public final class SongCache {
         return new File(dir(c), videoId + ".art");
     }
 
+    /** Lirik terpisah: <id>.lyrics.json (sibling .song.json, bukan bagian record). */
+    public static File lyricsFile(Context c, String videoId) {
+        return new File(dir(c), videoId + ".lyrics.json");
+    }
+
+    static File lyricsTmpFile(Context c, String videoId) {
+        return new File(dir(c), videoId + ".lyrics.json.tmp");
+    }
+
+    /** Baca file lirik mentah atau null. Never throws. */
+    public static synchronized String readLyrics(Context c, String videoId) {
+        try {
+            if (c == null || videoId == null || videoId.isEmpty()) return null;
+            File f = lyricsFile(c, videoId);
+            if (!f.isFile() || f.length() <= 0) return null;
+            byte[] b = new byte[(int) f.length()];
+            FileInputStream in = new FileInputStream(f);
+            try {
+                int n = 0;
+                while (n < b.length) {
+                    int r = in.read(b, n, b.length - n);
+                    if (r < 0) break;
+                    n += r;
+                }
+            } finally {
+                in.close();
+            }
+            return new String(b, "UTF-8");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Tulis lirik ATOMIC (temp + fsync + rename). Tidak menyentuh .song.json. */
+    public static synchronized boolean writeLyricsAtomic(Context c, String videoId, String json) {
+        if (c == null || videoId == null || videoId.isEmpty()) return false;
+        if (json == null || json.isEmpty()) return false;
+        File tmp = lyricsTmpFile(c, videoId);
+        File dst = lyricsFile(c, videoId);
+        try {
+            FileOutputStream out = new FileOutputStream(tmp);
+            try {
+                out.write(json.getBytes("UTF-8"));
+                out.getFD().sync();
+            } finally {
+                out.close();
+            }
+        } catch (Exception e) {
+            try { tmp.delete(); } catch (Exception ignored) {}
+            return false;
+        }
+        try {
+            if (dst.isFile() && !dst.delete()) {
+                try { tmp.delete(); } catch (Exception ignored) {}
+                return false;
+            }
+            if (!tmp.renameTo(dst)) {
+                try { tmp.delete(); } catch (Exception ignored) {}
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            try { tmp.delete(); } catch (Exception ignored) {}
+            return false;
+        }
+    }
+
     /** Load record or null. Never throws. */
     public static synchronized JSONObject getRecord(Context c, String videoId) {
         try {
@@ -750,7 +817,7 @@ public final class SongCache {
         } catch (Exception ignored) {}
     }
 
-    /** Delete owned files only (audio/part/record/art). History/playlists untouched. */
+    /** Delete owned files only (audio/part/record/art/lyrics). History/playlists untouched. */
     public static JSONObject delete(Context c, String videoId) {        JSONObject out = new JSONObject();
         int n = 0;
         long bytes = 0;
@@ -761,6 +828,7 @@ public final class SongCache {
         try {
             File[] fs = {audioFile(c, videoId), partFile(c, videoId),
                     recordFile(c, videoId), artFile(c, videoId),
+                    lyricsFile(c, videoId), lyricsTmpFile(c, videoId),
                     new File(dir(c), videoId + ".play.webm")};
             for (File f : fs) {
                 if (f.isFile()) {
