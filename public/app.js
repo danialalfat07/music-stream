@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "2.3.84";
+const APP_VERSION = "3.0.0";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -2307,6 +2307,8 @@ function parseDurationSec(d) {
   if (typeof d === 'number' && isFinite(d)) return d > 0 ? d : 0;
   const t = String(d == null ? '' : d).trim();
   if (!t) return 0;
+  // L13: format mm.ss (mis. "3.54" = 3 menit 54 detik) -> normalisasi ke M:SS
+  if (/^\d{1,2}(\.\d{2}){1,2}$/.test(t)) return parseDurationSec(t.replace(/\./g, ':'));
   if (/^\d+(\.\d+)?$/.test(t)) { const n = Number(t); return n > 0 ? n : 0; }
   const parts = t.split(':').map((x) => Number(x));
   if (!parts.length || parts.some((x) => !isFinite(x) || x < 0)) return 0;
