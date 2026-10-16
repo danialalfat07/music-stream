@@ -29,12 +29,20 @@ const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
 app.set('trust proxy', 1);
-// L21d: serve assetlinks eksplisit (express.static default dotfiles:'ignore',
-// sehingga /.well-known/* jatuh ke SPA fallback tanpa route ini).
-app.get('/.well-known/assetlinks.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.sendFile(path.join(__dirname, 'public', '.well-known', 'assetlinks.json'));
-});
+    // L21e: hardcode assetlinks — file dotfile di-exclude Vercel build
+    app.get('/.well-known/assetlinks.json', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.send(JSON.stringify([{
+            relation: ['delegate_permission/common.handle_all_urls'],
+            target: {
+                namespace: 'android_app',
+                package_name: 'com.dnialify.musicstream',
+                sha256_cert_fingerprints: [
+                    'F3:A2:83:B7:84:DD:A7:8A:53:03:7B:25:44:41:F2:41:C6:7F:C3:34:11:0B:68:11:DF:26:41:AB:53:CA:E1:90'
+                ]
+            }
+        }]));
+    });
 // static with no-cache for versioned HTML/JS to prevent 2.1.5 stale loop
 app.use(
   express.static(path.join(__dirname, 'public'), {
