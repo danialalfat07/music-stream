@@ -29,6 +29,12 @@ const app = express();
 app.use(express.json());
 // trust proxy for Vercel/X-Forwarded-For
 app.set('trust proxy', 1);
+// L21d: serve assetlinks eksplisit (express.static default dotfiles:'ignore',
+// sehingga /.well-known/* jatuh ke SPA fallback tanpa route ini).
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.sendFile(path.join(__dirname, 'public', '.well-known', 'assetlinks.json'));
+});
 // static with no-cache for versioned HTML/JS to prevent 2.1.5 stale loop
 app.use(
   express.static(path.join(__dirname, 'public'), {
