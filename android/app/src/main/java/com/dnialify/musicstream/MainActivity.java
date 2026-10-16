@@ -730,13 +730,12 @@ public class MainActivity extends BridgeActivity {
                             if (recs != null) {
                                 for (org.json.JSONObject r : recs) {
                                     if (r != null && target.equals(r.optString("artworkUrl", ""))) {
-                                        String lp = r.optString("artworkFile", "");
-                                        if (!lp.isEmpty()) {
-                                            java.io.File f = new java.io.File(lp);
-                                            if (f.isFile() && f.length() > 0) {
-                                                holder[0] = BitmapFactory.decodeFile(lp);
-                                                if (holder[0] != null) Log.d(TAG_DIAG, "[PipNative] artwork local .art");
-                                            }
+                                        // L17: resolve via artFile() + validasi disk (field record "artworkFile" tidak ada di legacy)
+                                        String vidRec = r.optString("videoId", "");
+                                        java.io.File artF = vidRec.isEmpty() ? null : SongCache.artFile(MainActivity.this, vidRec);
+                                        if (artF != null && artF.isFile() && artF.length() > 0) {
+                                            holder[0] = BitmapFactory.decodeFile(artF.getAbsolutePath());
+                                            if (holder[0] != null) Log.d(TAG_DIAG, "[PipNative] artwork local .art");
                                         }
                                         break;
                                     }
