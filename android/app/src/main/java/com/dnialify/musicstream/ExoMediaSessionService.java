@@ -62,8 +62,19 @@ public final class ExoMediaSessionService extends MediaSessionService {
                 sendToWebView("if(window.prevTrack) prevTrack();");
             }
         };
+        // L20: tap notif -> buka MainActivity (media3 kirim saat tap area notif).
+        android.content.Intent openIntent = new android.content.Intent(
+                this, com.dnialify.musicstream.MainActivity.class);
+        openIntent.setFlags(
+                android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP |
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int piFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+        if (android.os.Build.VERSION.SDK_INT >= 23) piFlags |= 0x04000000; // FLAG_IMMUTABLE
+        android.app.PendingIntent sessionActivity = android.app.PendingIntent.getActivity(
+                this, 0, openIntent, piFlags);
         mediaSession = new MediaSession.Builder(this, forwardingPlayer)
                 .setCallback(sessionCallback)
+                .setSessionActivity(sessionActivity)
                 .build();
         android.util.Log.d(TAG, "session created, attached playerHash="
                 + System.identityHashCode(player)
