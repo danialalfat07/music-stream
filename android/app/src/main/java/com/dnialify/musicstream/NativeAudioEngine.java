@@ -989,6 +989,24 @@ public final class NativeAudioEngine {
                         try {
                             SongCache.download(fCtx, fVid, fUrl, fTotal);
                         } catch (Exception ignored) {}
+                        // L16: best-effort artwork, never fails audio (guard = file disk, bukan field record)
+                        try {
+                            java.io.File artFile = SongCache.artFile(fCtx, fVid);
+                            boolean needArt = (artFile == null) || !artFile.isFile() || artFile.length() <= 0;
+                            if (needArt) {
+                                org.json.JSONObject recA = SongCache.getRecord(fCtx, fVid);
+                                String artUrl = recA != null ? recA.optString("artworkUrl", "") : "";
+                                if (!artUrl.isEmpty()) {
+                                    SongCache.fetchArtwork(fCtx, fVid, artUrl);
+                                } else {
+                                    android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call SKIP reason=no-url vid=" + fVid);
+                                }
+                            } else {
+                                android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call SKIP reason=art-exists vid=" + fVid);
+                            }
+                        } catch (Exception e) {
+                            android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call FAIL vid=" + fVid + " e=" + e);
+                        }
                     }).start();
                 }
                 String growingUri = null;
