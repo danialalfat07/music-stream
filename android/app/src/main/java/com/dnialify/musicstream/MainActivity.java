@@ -52,6 +52,8 @@ public class MainActivity extends BridgeActivity {
     private String pipTitle = "Dnialify Music Stream";
     private String pipArtist = "MusicStream";
     private String pipArtworkUrl = "";
+    // L21b: deep link App Links yang datang sebelum bridge siap.
+    private String pendingDeepLink = null;
     private String pipCurrentLyric = "";
     private long pipPositionMs = 0;
     private long pipDurationMs = 0;
@@ -100,6 +102,44 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             Log.d(TAG_DIAG, "enforceLimit onCreate failed " + e);
         }
+        // L21b: tangani deep link App Links (VIEW intent).
+        handleDeepLinkIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLinkIntent(intent);
+    }
+
+    private void handleDeepLinkIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        if (!android.content.Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        android.net.Uri data = intent.getData();
+        if (data == null) return;
+        if (!"dnialify-music-stream.vercel.app".equals(data.getHost())) return;
+        final String url = data.toString();
+        pendingDeepLink = url;
+        tryLoadPendingDeepLink();
+    }
+
+    private void tryLoadPendingDeepLink() {
+        if (pendingDeepLink == null) return;
+        android.webkit.WebView wv = null;
+        try {
+            wv = getBridge().getWebView();
+        } catch (Exception ignored) {}
+        if (wv == null) {
+            // bridge belum siap -> coba lagi nanti
+            new android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed(this::tryLoadPendingDeepLink, 200);
+            return;
+        }
+        final android.webkit.WebView fwv = wv;
+        final String u = pendingDeepLink;
+        pendingDeepLink = null;
+        fwv.post(() -> fwv.loadUrl(u));
     }
     private String loadAssetText(String name) {
         try {
