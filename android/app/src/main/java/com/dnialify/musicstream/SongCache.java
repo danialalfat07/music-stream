@@ -667,8 +667,14 @@ public final class SongCache {
 
     /** Best-effort artwork fetch. Never fails audio. Returns local path or null. */
     public static String fetchArtwork(Context c, String videoId, String url) {
-        if (url == null || url.isEmpty()) return null;
-        if (!url.startsWith("http")) return null;
+        if (url == null || url.isEmpty()) {
+            Log.d(TAG, "[SONG] artwork SKIP reason=url-null vid=" + videoId);
+            return null;
+        }
+        if (!url.startsWith("http")) {
+            Log.d(TAG, "[SONG] artwork SKIP reason=non-http url=" + url + " vid=" + videoId);
+            return null;
+        }
         HttpURLConnection h = null;
         try {
             h = (HttpURLConnection) new URL(url).openConnection();
@@ -676,9 +682,15 @@ public final class SongCache {
             h.setReadTimeout(15000);
             h.setRequestProperty("User-Agent", UA);
             int status = h.getResponseCode();
-            if (status < 200 || status > 299) return null;
+            if (status < 200 || status > 299) {
+                Log.d(TAG, "[SONG] artwork SKIP reason=http-" + status + " vid=" + videoId);
+                return null;
+            }
             String ct = String.valueOf(h.getHeaderField("Content-Type"));
-            if (!ct.contains("image/")) return null;
+            if (!ct.contains("image/")) {
+                Log.d(TAG, "[SONG] artwork SKIP reason=ctype-" + ct + " vid=" + videoId);
+                return null;
+            }
             File f = artFile(c, videoId);
             FileOutputStream out = new FileOutputStream(f);
             InputStream in = h.getInputStream();
