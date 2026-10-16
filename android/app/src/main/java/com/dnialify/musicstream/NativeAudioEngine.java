@@ -1291,6 +1291,12 @@ public final class NativeAudioEngine {
         @Override public void run() {
             timer.removeCallbacks(this);
             boolean keep = false;
+            // L23: snapshot untuk enforcement window (I/O di luar lock)
+            String wVid = null;
+            long wTotal = 0;
+            int wCur = 0, wDur = 0;
+            String wUrl = null;
+            android.content.Context wCtx = null;
             synchronized (lock) {
                 if (exoMode && exoPlayer != null) {
                     try { currentMs = (int) exoPlayer.getCurrentPosition(); }
@@ -1306,7 +1312,38 @@ public final class NativeAudioEngine {
                     }
                     pushEvent("timeUpdate", null);
                     keep = true;
+                    wVid = videoId;
+                    wTotal = lastTotal;
+                    wCur = currentMs;
+                    wDur = durationMs;
+                    wUrl = lastUrl;
+                    wCtx = appCtx;
                 }
+            }
+            // L23: enforcement window mode Exo (tick() mp-only tidak jalan di sini).
+            // stopAt dinamis = windowEndForPos; pause = stopAt beku -> worker stop
+            // di batas; play = stopAt maju -> setWindow/download resume.
+            if (keep && wVid != null && !wVid.isEmpty() && wTotal > 0 && wDur > 0
+                    && wCtx != null) {
+                try {
+                    long stopAt = windowEndForPos(wCur, wDur, wTotal);
+                    if (stopAt > 0) {
+                        SongCache.setStopAt(wVid, stopAt);
+                    }
+                    synchronized (lock) {
+                        windowChunk = chunkIdxForPos(wCur, wDur, wTotal);
+                        windowEnd = stopAt;
+                    }
+                    // start writer bila idle dan masih kurang (pola setWindow :1891-1896)
+                    if (!SongCache.isDownloading(wVid) && wUrl != null && !wUrl.isEmpty()
+                            && !SongCache.hasBytes(wCtx, wVid, Math.min(stopAt, wTotal))) {
+                        final android.content.Context fc = wCtx;
+                        final String fUrl = wUrl;
+                        final long fTotal = wTotal;
+                        final String fVid = wVid;
+                        new Thread(() -> SongCache.download(fc, fVid, fUrl, fTotal)).start();
+                    }
+                } catch (Exception ignored) {}
             }
             if (keep) timer.postDelayed(this, 500);
         }

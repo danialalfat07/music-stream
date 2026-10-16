@@ -82,6 +82,29 @@ public final class SongCache {
     }
 
     /**
+     * L23: batas download sequential per-videoId (byte). Default = tanpa batas.
+     * Di-update dinamis dari exoTicker (windowEndForPos). FULL mengabaikannya.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long>
+        STOP_AT = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void setStopAt(String videoId, long stopAtBytes) {
+        if (videoId == null) return;
+        if (stopAtBytes <= 0) STOP_AT.remove(videoId);
+        else STOP_AT.put(videoId, stopAtBytes);
+    }
+
+    public static long getStopAt(String videoId) {
+        if (videoId == null) return Long.MAX_VALUE;
+        Long v = STOP_AT.get(videoId);
+        return v != null ? v : Long.MAX_VALUE;
+    }
+
+    public static void clearStopAt(String videoId) {
+        if (videoId != null) STOP_AT.remove(videoId);
+    }
+
+    /**
      * Delete tombstone: a dying writer (killed by delete()) must not rewrite
      * the record or emit events, or the deleted song resurrects as a ghost
      * partial row. Cleared when a new download starts.
@@ -462,6 +485,10 @@ public final class SongCache {
             long lastRecordAt = received;
             int chunks = 0;
             while (received < total) {
+                // L23: stopAt dinamis (FULL selalu sampai total). Berubah di tengah
+                // chunk HTTP (100 KB) -> berlaku di iterasi luar berikutnya.
+                long limit = isFull(videoId) ? total : Math.min(total, getStopAt(videoId));
+                if (received >= limit) break;
                 if (Boolean.TRUE.equals(CANCEL.get(videoId))) {
                     throw new PausedException(received);
                 }
@@ -577,6 +604,24 @@ public final class SongCache {
             out.close();
             out = null;
             progress(c, videoId, r, received, total);
+            // L23: keluar loop sebelum total = stopAt window tercapai -> PAUSED
+            // (pola tulis sama dengan catch PausedException). COMPLETE hanya
+            // bila received >= total, dijaga validasi size + EBML di bawah.
+            if (received < total) {
+                try {
+                    r.put("cacheStatus", ST_PAUSED);
+                    r.put("downloadedBytes", received);
+                    r.put("downloadPercent", pct(received, total));
+                    if (!isDeleted(videoId)) {
+                        putRecord(c, videoId, r);
+                    }
+                } catch (Exception ignored) {}
+                Log.d(TAG, "[SONG] PAUSED videoId=" + videoId + " at=" + received
+                        + " reason=window-stop");
+                if (!isDeleted(videoId)) {
+                    CacheEvents.emit(c, "cacheState", videoId, r);
+                }
+            } else {
             if (part.length() != total || !VisionOsCache.ebmlMagic(part)) {
                 throw new Exception("validation failed size=" + part.length()
                         + " want=" + total);
@@ -590,6 +635,7 @@ public final class SongCache {
                 r.put("downloadedBytes", total);
                 r.put("downloadPercent", 100);
                 clearFull(videoId);
+                clearStopAt(videoId); // L23: batas window tidak berlaku lagi
                 r.put("audioFile", fin.getAbsolutePath());
                 if (!isDeleted(videoId)) {
                     putRecord(c, videoId, r);
@@ -606,6 +652,7 @@ public final class SongCache {
                     enforceLimit(c, max);
                 } catch (Exception ignored) {}
             }
+            } // L23: penutup else PAUSED-vs-COMPLETE
         } catch (PausedException p) {
             try {
                 out.close();
