@@ -984,7 +984,17 @@ public final class NativeAudioEngine {
                 final long fTotal = total;
                 final android.content.Context fCtx = ctx;
                 final String fVid = vid;
+                // L23b: hitung need (2 chunk) di awal — dipakai preset stopAt + waiter.
+                // Rumus sama seperti gNeed di bawah (nilai identik, murni geser posisi).
+                final long fNeed = Math.min(fTotal,
+                        2 * SongCache.chunkEndFor(0,
+                                (int) Math.min(r.durationMs, Integer.MAX_VALUE), fTotal));
                 if (fCtx != null && !SongCache.isDownloading(fVid)) {
+                    // L23b: preset stopAt = need (2 chunk) supaya worker tidak burst
+                    // sampai exoTicker pertama menimpa (<=500ms).
+                    if (fTotal > 0) {
+                        SongCache.setStopAt(fVid, Math.min(fTotal, fNeed));
+                    }
                     new Thread(() -> {
                         try {
                             SongCache.download(fCtx, fVid, fUrl, fTotal);
@@ -1033,9 +1043,7 @@ public final class NativeAudioEngine {
                     // Fix 7.3 stutter: jangan play saat 0% (hold -> underrun).
                     // Pre-buffer 2 chunk di worker, play via main thread setelah need tiba.
                     final String gUri = growingUri;
-                    final long gNeed = Math.min(fTotal,
-                            2 * SongCache.chunkEndFor(0,
-                                    (int) Math.min(r.durationMs, Integer.MAX_VALUE), fTotal));
+                    final long gNeed = fNeed; // L23b: dihitung di awal (preset stopAt)
                     nlog("[CACHE] MISS videoId=" + vid + " total=" + fTotal
                             + " mode=EXO -> growing local prebuffer need=" + gNeed);
                     synchronized (lock) {
@@ -1780,6 +1788,15 @@ public final class NativeAudioEngine {
         // 3. CACHE-FIRST: writer fills (resume-aware, proven path), waiter plays
         // local snapshot as soon as the first chunk lands. Never streams.
         final Context ac = c;
+        // L23b: hitung need (2 chunk) di awal — dipakai preset stopAt + waiter.
+        // Rumus sama seperti di bawah (nilai identik, murni geser posisi).
+        long preNeed = Math.min(total,
+                2 * SongCache.chunkEndFor(0, (int) r.durationMs, total));
+        // L23b: preset stopAt = need (2 chunk) supaya worker tidak burst
+        // sampai exoTicker pertama menimpa (<=500ms).
+        if (total > 0) {
+            SongCache.setStopAt(vid, Math.min(total, preNeed));
+        }
         new Thread(() -> {
             SongCache.download(ac, vid, url, total);
             // L15: best-effort artwork, never fails audio (guard = file disk, bukan field record)
@@ -1805,7 +1822,7 @@ public final class NativeAudioEngine {
         // Playback goes through the local proxy (never a frozen snapshot),
         // so no snapshot copy here: register the live file and start.
         long oneChunk = SongCache.chunkEndFor(0, (int) r.durationMs, total);
-        long need = Math.min(total, 2 * oneChunk);
+        long need = preNeed; // L23b: = Math.min(total, 2 * oneChunk), dihitung di awal
         if (!waitForBytes(ac, vid, need, gen, total)) return;
         synchronized (lock) {
             if (gen != playGen) return;
