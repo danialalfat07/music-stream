@@ -3677,6 +3677,12 @@ function downloadOffline(song) {
   if (!song || !song.videoId) return;
   if (window.NativePlayback && NativePlayback.cacheSong) {
     try { OfflineLib.cacheSong(song); } catch {}
+    // L18a: tombol download juga fetch lirik (JS hanya fetch saat play)
+    try {
+      if (typeof loadLyrics === 'function') {
+        loadLyrics({ videoId: song.videoId, title: song.title, artist: song.artist });
+      }
+    } catch {}
     return;
   }
   toast('Download offline hanya tersedia di aplikasi Android');
@@ -3686,6 +3692,12 @@ async function downloadSong(song) {
   if (!song || !song.videoId) return;
   if (window.NativePlayback && NativePlayback.cacheSong) {
     try { OfflineLib.cacheSong(song); } catch {}
+    // L18a: tombol download juga fetch lirik (JS hanya fetch saat play)
+    try {
+      if (typeof loadLyrics === 'function') {
+        loadLyrics({ videoId: song.videoId, title: song.title, artist: song.artist });
+      }
+    } catch {}
     return;
   }
   return downloadMp3(song);
