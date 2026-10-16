@@ -4,7 +4,7 @@
     "target": {
       "namespace": "android_app",
       "package_name": "com.dnialify.musicstream",
-      "sha256_cert_fingerprints": ["E2:56:AC:64:4F:91:76:7A:37:02:EF:73:DF:B5:A5:86:84:CE:40:69:ED:7A:E0:E4:87:42:5E:01:D5:60:33:80"]
+      "sha256_cert_fingerprints": ["F3:A2:83:B7:84:DD:A7:8A:53:03:7B:25:44:41:F2:41:C6:7F:C3:34:11:0B:68:11:DF:26:41:AB:53:CA:E1:90"]
     }
   }
 ]
