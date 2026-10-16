@@ -1248,7 +1248,25 @@ public class MainActivity extends BridgeActivity {
                 // kick writer when URL known (resolve here, stream-first for UI via nativePlay)
                 new Thread(() -> {
                     try {
-                        if (SongCache.isComplete(MainActivity.this, vid)) return;
+                        if (SongCache.isComplete(MainActivity.this, vid)) {
+                            // L18b: sudah complete -> tetap pastikan .art ada (backfill artwork)
+                            try {
+                                java.io.File artFile = SongCache.artFile(MainActivity.this, vid);
+                                boolean needArt = (artFile == null) || !artFile.isFile() || artFile.length() <= 0;
+                                if (needArt) {
+                                    org.json.JSONObject recA = SongCache.getRecord(MainActivity.this, vid);
+                                    String artUrl = recA != null ? recA.optString("artworkUrl", "") : "";
+                                    if (!artUrl.isEmpty()) {
+                                        final String fVid = vid, fUrl = artUrl;
+                                        new Thread(() -> {
+                                            try { SongCache.fetchArtwork(MainActivity.this, fVid, fUrl); }
+                                            catch (Exception ignored) {}
+                                        }).start();
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                            return;
+                        }
                         VisionOsResolver.Result r = VisionOsResolver.resolve(vid);
                         SongCache.downloadFull(MainActivity.this, vid, r.url, clenOf(r.url));
                         SongCache.fetchArtwork(MainActivity.this, vid,
