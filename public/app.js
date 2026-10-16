@@ -879,6 +879,46 @@ async function ensureAppVersionBeforePlay() {
   return true;
 }
 
+// FE gate: block UI total kalau versi native device < MIN (fail-open kalau bridge gagal).
+// Bridge: window.AppInfo.getVersionName() (sinkron, string versionName) — MainActivity.java:978.
+function enforceNativeMinVersion() {
+  try {
+    if (document.getElementById('native-update-gate')) return; // sudah di-block
+    const MIN = '3.0.0';
+    let native = '';
+    try {
+      if (window.AppInfo && typeof AppInfo.getVersionName === 'function') {
+        native = AppInfo.getVersionName() || '';
+      }
+    } catch {}
+    if (!native) return; // bridge gagal / belum ready -> fail-open, jangan block
+    const cmp = (a, b) => {
+      const pa = String(a).split('.').map(Number);
+      const pb = String(b).split('.').map(Number);
+      for (let i = 0; i < 3; i++) {
+        if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+        if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+      }
+      return 0;
+    };
+    if (cmp(native, MIN) >= 0) return;
+    const DRIVE = 'https://drive.google.com/drive/folders/1ppIjUKCUcVBc6V24jf7TlVAMFTraquKT?usp=drive_link';
+    const el = document.createElement('div');
+    el.id = 'native-update-gate';
+    el.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#111;color:#fff;'
+      + 'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+      + 'padding:24px;font-family:sans-serif;text-align:center;';
+    el.innerHTML = '<h2>Update Diperlukan</h2>'
+      + '<p>Versi aplikasi kamu (' + native + ') sudah tidak didukung. '
+      + 'Silakan update ke versi terbaru untuk melanjutkan.</p>'
+      + '<a href="' + DRIVE + '" target="_blank" '
+      + 'style="margin-top:16px;padding:12px 24px;background:#1db954;color:#fff;'
+      + 'border-radius:8px;text-decoration:none;font-weight:bold;">Buka Halaman Update</a>';
+    document.body.appendChild(el);
+    document.documentElement.style.overflow = 'hidden';
+  } catch {}
+}
+
 function migrateUserDataIfNeeded() {
   // beta badge toggle
   try {
@@ -8172,6 +8212,9 @@ try {
 } catch {}
 // server-authoritative version check (no-store, 5min cooldown, mandatory before play)
 checkAppVersion({ silent: true }).catch(() => {});
+// FE gate: block UI kalau native < 3.0.0 (cek 2x: bridge mungkin belum ready saat parse)
+try { enforceNativeMinVersion(); } catch {}
+setTimeout(() => { try { enforceNativeMinVersion(); } catch {} }, 2000);
 $('#theme-toggle').addEventListener('click', toggleTheme);
 $('#settings-btn')?.addEventListener('click', () => openSettingsModal('settings'));
 $('#help-btn')?.addEventListener('click', openHelpModal);
