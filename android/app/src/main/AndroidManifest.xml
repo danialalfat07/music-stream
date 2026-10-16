@@ -86,6 +86,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- L21a: App Links untuk dnialify-music-stream.vercel.app (semua sub-path). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="dnialify-music-stream.vercel.app" />
+            </intent-filter>
+
         </activity>
 
         <provider
