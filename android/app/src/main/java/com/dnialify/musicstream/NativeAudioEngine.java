@@ -1727,13 +1727,24 @@ public final class NativeAudioEngine {
         final Context ac = c;
         new Thread(() -> {
             SongCache.download(ac, vid, url, total);
-            // best-effort artwork, never fails audio
+            // L15: best-effort artwork, never fails audio (guard = file disk, bukan field record)
             try {
-                JSONObject rec = SongCache.getRecord(ac, vid);
-                if (rec != null && !rec.has("artworkFile")) {
-                    SongCache.fetchArtwork(ac, vid, rec.optString("artworkUrl", ""));
+                java.io.File artFile = SongCache.artFile(ac, vid);
+                boolean needArt = (artFile == null) || !artFile.isFile() || artFile.length() <= 0;
+                if (needArt) {
+                    org.json.JSONObject recA = SongCache.getRecord(ac, vid);
+                    String artUrl = recA != null ? recA.optString("artworkUrl", "") : "";
+                    if (!artUrl.isEmpty()) {
+                        SongCache.fetchArtwork(ac, vid, artUrl);
+                    } else {
+                        android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call SKIP reason=no-url vid=" + vid);
+                    }
+                } else {
+                    android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call SKIP reason=art-exists vid=" + vid);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                android.util.Log.d("DnialifyVisionOS", "[SONG] artwork-call FAIL vid=" + vid + " e=" + e);
+            }
         }).start();
         // initial need = first TWO chunks (prepare needs real clusters now).
         // Playback goes through the local proxy (never a frozen snapshot),
