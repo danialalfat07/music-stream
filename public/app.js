@@ -3050,6 +3050,35 @@ function toggleSB() {
 
 /* ================= lyrics ================= */
 let lyricsReqId = 0; // guard against out-of-order responses on fast skips
+// L19: fetch lirik mandiri untuk tombol download — tidak sentuh Player.lyrics,
+// renderLyrics, lyricsReqId, atau state play apa pun. browseId dikosongkan
+// (server tetap cari via LRCLIB/fuzzy/NetEase tanpa browseId).
+async function fetchLyricsForDownload(song) {
+  if (!song || !song.videoId) return;
+  try {
+    const title = displayTitle(song.title) || song.title || '';
+    const artist = song.artist || song.subtitle || '';
+    const durSec = parseDurationSec(normalizeDuration(song.duration || song.lengthSeconds || 0)) || 0;
+    const d = await api(`/api/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${durSec}&browseId=`);
+    if (!d || (!d.synced && !d.plain)) {
+      try { console.log('[LYRICS-DL] empty vid=' + song.videoId); } catch {}
+      return;
+    }
+    if (window.NativePlayback && NativePlayback.saveLyrics) {
+      const payload = {
+        videoId: song.videoId,
+        lyrics: d.synced ? d.synced : d.plain,
+        lyricsFormat: d.synced ? 'lrc' : 'plain',
+        source: d.source || 'api',
+        fetchedAt: Date.now(),
+      };
+      NativePlayback.saveLyrics(song.videoId, JSON.stringify(payload));
+      try { console.log('[LYRICS-DL] saved vid=' + song.videoId); } catch {}
+    }
+  } catch (e) {
+    try { console.log('[LYRICS-DL] error vid=' + (song && song.videoId) + ' e=' + e); } catch {}
+  }
+}
 async function loadLyrics(song, { silent = false, retry = false } = {}) {
   if (!song) return;
   const myReq = ++lyricsReqId;
@@ -3677,10 +3706,10 @@ function downloadOffline(song) {
   if (!song || !song.videoId) return;
   if (window.NativePlayback && NativePlayback.cacheSong) {
     try { OfflineLib.cacheSong(song); } catch {}
-    // L18a: tombol download juga fetch lirik (JS hanya fetch saat play)
+    // L19: tombol download fetch lirik mandiri (fetchLyricsForDownload, bukan loadLyrics)
     try {
-      if (typeof loadLyrics === 'function') {
-        loadLyrics({ videoId: song.videoId, title: song.title, artist: song.artist });
+      if (typeof fetchLyricsForDownload === 'function') {
+        fetchLyricsForDownload(song);
       }
     } catch {}
     return;
@@ -3692,10 +3721,10 @@ async function downloadSong(song) {
   if (!song || !song.videoId) return;
   if (window.NativePlayback && NativePlayback.cacheSong) {
     try { OfflineLib.cacheSong(song); } catch {}
-    // L18a: tombol download juga fetch lirik (JS hanya fetch saat play)
+    // L19: tombol download fetch lirik mandiri (fetchLyricsForDownload, bukan loadLyrics)
     try {
-      if (typeof loadLyrics === 'function') {
-        loadLyrics({ videoId: song.videoId, title: song.title, artist: song.artist });
+      if (typeof fetchLyricsForDownload === 'function') {
+        fetchLyricsForDownload(song);
       }
     } catch {}
     return;
