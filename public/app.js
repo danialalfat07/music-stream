@@ -3560,7 +3560,7 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button></div>`;
+    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button><button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button></div>`;
     html += radio
       .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false, `<button class="tbtn btn-rrm" data-qi="${i}" title="Remove from radio">${icon('i-x')}</button>`))
       .join('');
@@ -3642,6 +3642,15 @@ function renderQueue() {
   if (clr) clr.addEventListener('click', clearUserQueue);
   const sc = $('#q-scramble', el);
   if (sc) sc.addEventListener('click', scrambleRadioQueue);
+  const mx = $('#queue-mix', el);
+  if (mx) mx.addEventListener('click', async () => {
+    try {
+      const seed = Player.current;
+      if (!seed || !seed.videoId) return;
+      await fetchQueue(seed);
+      toast('Radio refreshed');
+    } catch (e) { toast('Radio refresh failed'); }
+  });
   $$('.btn-rrm', el).forEach((b) =>
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -7402,15 +7411,6 @@ $('#np-shuffle').addEventListener('click', function () {
   toast(Player.shuffle ? 'Shuffle on' : 'Shuffle off');
 });
 
-document.getElementById('np-mix')?.addEventListener('click', async () => {
-  try {
-    if (Player.pending && Player.cued) { toast('Tap Play to refresh radio'); return; }
-    const seed = Player.current;
-    if (!seed || !seed.videoId) return;
-    await fetchQueue(seed);
-    toast('Radio refreshed');
-  } catch (e) { toast('Radio refresh failed'); }
-});
 $('#np-repeat').addEventListener('click', function () {
   Player.repeat = (Player.repeat + 1) % 3;
   const on = Player.repeat > 0;
