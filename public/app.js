@@ -2094,7 +2094,7 @@ const OfflineLib = {
       artist: song.artist || song.subtitle || '',
       album: song.album || '',
       artworkUrl: song.thumbnail || '',
-      duration: song.duration || song.lengthSeconds || 0,
+      duration: parseDurationSec(song.duration || song.lengthSeconds || 0),
       source: 'VISIONOS',
     };
     // attach timed lyrics when caching the currently playing track (keep timestamps)
