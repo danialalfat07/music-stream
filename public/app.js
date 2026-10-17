@@ -5458,7 +5458,9 @@ function offlineBodyHTML() {
       try {
         const vid = e.videoId;
         const art = e.artworkThumb || e.thumbnail || '';
-        const dur = Number(e.duration) > 0 ? fmtTime(Number(e.duration)) : '';
+        const durNum = Number(e.duration);
+        const dur = durNum > 0 ? fmtTime(durNum) : '--:--';
+        const durCls = durNum > 0 ? 'tdur' : 'tdur is-empty';
         const checked = !!checkedMap[vid];
         const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
         return `<div class="track${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-idx="${idx}" data-offrow="${esc(vid)}">`
@@ -5466,7 +5468,7 @@ function offlineBodyHTML() {
           + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
           + `<span class="track-art-wrap">${coverHTML(art, 'track')}${renderDownloadBadge(vid)}</span>`
           + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(e.artist || '')}</div></div>`
-          + (dur ? `<span class="tdur">${esc(dur)}</span>` : '')
+          + `<span class="${durCls}">${esc(dur)}</span>`
           + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
           + `</div>`;
       } catch { return ''; }
@@ -5475,14 +5477,21 @@ function offlineBodyHTML() {
       try {
         const vid = e.videoId;
         const art = e.artworkThumb || e.thumbnail || '';
-        const dur = Number(e.duration) > 0 ? fmtTime(Number(e.duration)) : '';
+        const durNum = Number(e.duration);
+        const dur = durNum > 0 ? fmtTime(durNum) : '--:--';
+        const durCls = durNum > 0 ? 'tdur' : 'tdur is-empty';
+        const pct = Number(e.downloadPercent) > 0
+          ? Math.min(100, Math.round(Number(e.downloadPercent)))
+          : (Number(e.audioSize) > 0
+              ? Math.round((Number(e.downloadedBytes) || 0) / Number(e.audioSize) * 100)
+              : 0);
         const checked = !!checkedMap[vid];
         const pin = offIsPinned(vid) ? `<span class="off-pin" title="Pinned">${icon('i-pin')}</span>` : '';
         return `<div class="track${checked ? ' selected' : ''}" data-video-id="${esc(vid)}" data-offrow="${esc(vid)}">`
           + `<span class="track-check${sel ? '' : ' hidden'}"><input type="checkbox" data-offcheck="${esc(vid)}"${checked ? ' checked' : ''} tabindex="-1"></span>`
-          + `<span class="track-art-wrap">${coverHTML(art, 'track')}${renderDownloadBadge(vid)}</span>`
+          + `<span class="track-art-wrap is-partial">${coverHTML(art, 'track')}<span class="off-art-pct">${pct}%</span></span>`
           + `<div class="tmeta"><div class="tt">${esc(displayTitle(e.title) || e.title || vid)}${pin}</div><div class="ts">${esc(e.artist || '')}</div></div>`
-          + (dur ? `<span class="tdur">${esc(dur)}</span>` : '')
+          + `<span class="${durCls}">${esc(dur)}</span>`
           + `<button type="button" class="tbtn off-more" data-offmore="${esc(vid)}" title="More">${icon('i-more')}</button>`
           + `</div>`;
       } catch { return ''; }

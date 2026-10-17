@@ -1814,6 +1814,27 @@ body.pip-system .fw-bar, body.pip-system .fw-controls { opacity: .6; }
 .dl-badge.dl-pending {
   color: #b3b3b3;
 }
+.track .tdur.is-empty { opacity: .45; }
+
+.track-art-wrap.is-partial img,
+.track-art-wrap.is-partial .art-ph-track {
+  filter: grayscale(1);
+}
+.off-art-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .55);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 2;
+}
 #offline-select-toolbar {
   position: fixed; left: 8px; right: 8px; bottom: 16px;
   display: none; align-items: center; gap: 12px;
