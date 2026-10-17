@@ -102,6 +102,19 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             Log.d(TAG_DIAG, "enforceLimit onCreate failed " + e);
         }
+        // L26: one local-only duration recovery sweep for records created before
+        // resolver duration was persisted. Mark before starting to avoid repeats.
+        try {
+            android.content.SharedPreferences p = getSharedPreferences("l26", MODE_PRIVATE);
+            if (!p.getBoolean("backfill_duration_done_v1", false)) {
+                p.edit().putBoolean("backfill_duration_done_v1", true).apply();
+                final android.content.Context app = getApplicationContext();
+                new Thread(() -> SongCache.backfillAllMissingDuration(app),
+                        "l26-duration-backfill").start();
+            }
+        } catch (Exception e) {
+            Log.w(TAG_DIAG, "[L26] backfill trigger failed", e);
+        }
         // L21b: tangani deep link App Links (VIEW intent).
         handleDeepLinkIntent(getIntent());
     }

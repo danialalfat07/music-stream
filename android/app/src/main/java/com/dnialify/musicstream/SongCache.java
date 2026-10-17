@@ -1,6 +1,7 @@
 package com.dnialify.musicstream;
 
 import android.content.Context;
+import android.media.MediaMetadataRetriever;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -340,6 +341,48 @@ public final class SongCache {
             }
         } catch (Exception ignored) {}
         return out;
+    }
+
+    /** L26: recover missing durations from completed local WebM/Opus files. */
+    public static int backfillAllMissingDuration(Context c) {
+        int updated = 0;
+        int skipped = 0;
+        int failed = 0;
+        for (JSONObject r : listRecords(c)) {
+            String videoId = r.optString("videoId", "");
+            if (videoId.isEmpty() || r.optDouble("duration", 0) > 0
+                    || !ST_COMPLETE.equals(r.optString("cacheStatus", ""))) {
+                skipped++;
+                continue;
+            }
+            File f = null;
+            try {
+                String recordedPath = r.optString("audioFile", "");
+                if (!recordedPath.isEmpty()) f = new File(recordedPath);
+                if (f == null || !f.isFile() || f.length() <= 0) f = audioFile(c, videoId);
+                if (f == null || !f.isFile() || f.length() <= 0) {
+                    skipped++;
+                    continue;
+                }
+                MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                try {
+                    mmr.setDataSource(f.getAbsolutePath());
+                    String raw = mmr.extractMetadata(
+                            MediaMetadataRetriever.METADATA_KEY_DURATION);
+                    long ms = raw == null ? 0 : Long.parseLong(raw);
+                    if (ms > 0 && backfillDuration(c, videoId, ms / 1000.0)) updated++;
+                    else failed++;
+                } finally {
+                    try { mmr.release(); } catch (Exception ignored) {}
+                }
+            } catch (Exception e) {
+                failed++;
+                Log.w(TAG, "[L26] duration read failed videoId=" + videoId, e);
+            }
+        }
+        Log.d(TAG, "[L26] backfill duration swept: " + updated
+                + " updated, " + skipped + " skipped, " + failed + " failed");
+        return updated;
     }
 
     /** True only when record COMPLETE + file present + size match. Repairs stale COMPLETE. */
