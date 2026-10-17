@@ -2151,9 +2151,38 @@ const OfflineLib = {
         try { renderPlayButtons(); } catch {}
       }
     } catch {}
-    if ((location.hash || '').startsWith('#/library/offline')) route();
+    // L30: incremental update untuk progress-only event, full route()
+    // hanya untuk perubahan struktural (status/complete/error).
+    const prevStatus = prev.cacheStatus || 'NONE';
+    const nowStatus = m[vid].cacheStatus || 'NONE';
+    const structural =
+      ev.event === 'cacheComplete'
+      || ev.event === 'cacheError'
+      || prevStatus !== nowStatus
+      || prevStatus === 'COMPLETE'
+      || nowStatus === 'COMPLETE';
+
+    if ((location.hash || '').startsWith('#/library/offline')) {
+      if (structural) {
+        route();
+      } else {
+        try {
+          const pctEl = document.querySelector(
+            '.track[data-offrow="' + vid + '"] .off-art-pct');
+          if (pctEl) {
+            const pct = Math.max(0, Math.min(100,
+              Math.round(Number(ev.percent) || 0)));
+            pctEl.textContent = pct + '%';
+          }
+        } catch {}
+      }
+    }
+
     try { renderSidebarLibrary(); } catch {}
-    try { refreshDlBadges(); } catch {}
+
+    if (structural) {
+      try { refreshDlBadges(); } catch {}
+    }
   },
   continueDownload(videoId) {
     if (!videoId) return;
