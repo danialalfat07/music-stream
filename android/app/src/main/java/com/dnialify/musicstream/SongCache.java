@@ -242,6 +242,23 @@ public final class SongCache {
         } catch (Exception ignored) {}
     }
 
+    /** L26: persist resolver duration without replacing an existing value. */
+    public static synchronized boolean backfillDuration(Context c, String videoId,
+            double seconds) {
+        if (c == null || videoId == null || videoId.isEmpty()
+                || Double.isNaN(seconds) || Double.isInfinite(seconds)
+                || seconds <= 0 || seconds > 3600) return false;
+        try {
+            JSONObject r = getRecord(c, videoId);
+            if (r == null || r.optDouble("duration", 0) > 0) return false;
+            r.put("duration", seconds);
+            putRecord(c, videoId, r);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Create/refresh metadata shell. Audio NOT waited for. Returns record. */
     public static synchronized JSONObject ensureMeta(Context c, JSONObject meta) {
         String vid = meta.optString("videoId", "");

@@ -787,6 +787,9 @@ public final class NativeAudioEngine {
                     ? (int) Math.min(r.durationMs, Integer.MAX_VALUE) : 0;
             setStateLocked(State.IDLE);
         }
+        if (r != null && r.durationMs > 0) {
+            SongCache.backfillDuration(c, vid, r.durationMs / 1000.0);
+        }
         startExoItem(vid, r, gen);
     }
 

@@ -1435,6 +1435,10 @@ public class MainActivity extends BridgeActivity {
                     org.json.JSONObject r =
                             SongCache.getRecord(MainActivity.this, videoId);
                     VisionOsResolver.Result res = VisionOsResolver.resolve(videoId);
+                    if (res != null && res.durationMs > 0) {
+                        SongCache.backfillDuration(MainActivity.this, videoId,
+                                res.durationMs / 1000.0);
+                    }
                     SongCache.downloadFull(MainActivity.this, videoId, res.url,
                             clenOf(res.url));
                 } catch (Exception e) {
