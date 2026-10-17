@@ -3560,7 +3560,7 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button><button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button></div>`;
+    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><span class="q-actions"><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button><button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button></span></div>`;
     html += radio
       .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false, `<button class="tbtn btn-rrm" data-qi="${i}" title="Remove from radio">${icon('i-x')}</button>`))
       .join('');
