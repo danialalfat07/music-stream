@@ -4353,6 +4353,11 @@ async function route() {
   view.classList.remove('view-enter');
   void view.offsetWidth;
   applyTint(parts[0] || 'home');
+  // L29: exit offline select mode when navigating away from the offline page
+  const _onOfflineRoute = parts[0] === 'library' && parts[1] === 'offline';
+  if (offlineSelectMode && !_onOfflineRoute) {
+    try { exitOfflineSelectMode(); } catch {}
+  }
   // show cached instantly to avoid delay (stale-while-revalidate)
   const _cached = cacheGet(hash);
   if (_cached) {
@@ -5303,6 +5308,7 @@ function updateOfflineSelectToolbar() {
   const countEl = document.getElementById('offline-select-count');
   const dlBtn = document.getElementById('offline-select-download');
   const delBtn = document.getElementById('offline-select-delete');
+  const cancelBtn = document.getElementById('offline-select-cancel');
   const active = !!(offlineSelectMode || (typeof OffUI !== 'undefined' && OffUI.select));
   let n = 0;
   try { n = getSelectedOfflineIds().length; } catch {}
@@ -5315,9 +5321,10 @@ function updateOfflineSelectToolbar() {
     toolbar.style.display = 'flex';
     toolbar.classList.remove('hidden');
     document.body.classList.add('has-select-toolbar');
-    if (countEl) countEl.textContent = n + ' dipilih';
+    if (countEl) countEl.textContent = n + ' selected';
     if (dlBtn) dlBtn.disabled = !n;
     if (delBtn) delBtn.disabled = !n;
+    if (cancelBtn) cancelBtn.disabled = false;
   } else {
     toolbar.style.display = 'none';
     toolbar.classList.add('hidden');
@@ -5356,7 +5363,7 @@ function selectAllOfflineRows() {
   try { repaintOffline(); } catch {}
 }
 document.addEventListener('click', (ev) => {
-  const t = ev.target && ev.target.closest ? ev.target.closest('#offline-select-download,#offline-select-delete') : null;
+  const t = ev.target && ev.target.closest ? ev.target.closest('#offline-select-download,#offline-select-delete,#offline-select-cancel') : null;
   const id = (t && t.id) || null;
   if (!id) return;
   if (id === 'offline-select-download') {
@@ -5391,26 +5398,11 @@ document.addEventListener('click', (ev) => {
     try { exitOfflineSelectMode(); } catch {}
     return;
   }
+  if (id === 'offline-select-cancel') {
+    try { exitOfflineSelectMode(); } catch {}
+    return;
+  }
 });
-function updateOfflineSelectBar() {
-  try {
-    const n = offlineSelected.size;
-    let total = 0;
-    try {
-      const m = (typeof OfflineLib !== 'undefined' ? OfflineLib.map() : {}) || {};
-      total = Object.values(m).filter((e) => e && e.videoId).length;
-    } catch {}
-    if (!total) total = getOfflineTracks().length;
-    const c = document.getElementById('offline-selcount');
-    if (c) c.textContent = n + ' selected';
-    const t = document.getElementById('offline-select-toggle');
-    if (t) t.textContent = (total && n === total) ? 'Deselect All' : 'Select All';
-    const dl = document.getElementById('offline-dl-sel');
-    const del = document.getElementById('offline-del-sel');
-    if (dl) dl.disabled = !n;
-    if (del) del.disabled = !n;
-  } catch {}
-}
 function offlineBodyHTML() {
   // Album-style Offline page. Reuses detail-head / detail-actions / track-list.
   // NEVER throws, NEVER ''.
@@ -5521,11 +5513,6 @@ function offlineBodyHTML() {
         html += `<button type="button" class="pill-btn off-wide" id="off-expand"><span>Show incomplete (${partial.length})</span></button>`;
       }
     }
-    if (sel)
-      html += `<div id="offline-selbar" class="select-bar"><span id="offline-selcount">${nChecked} selected</span>`
-        + `<button id="offline-dl-sel" class="pill-btn"${nChecked ? '' : ' disabled'}><span>Download</span></button>`
-        + `<button id="offline-del-sel" class="pill-btn"${nChecked ? '' : ' disabled'}><span>Delete</span></button>`
-        + `<button id="offline-cancel-sel" class="pill-btn"><span>Cancel</span></button></div>`;
     return html;
   } catch {
     return emptyHTML('No offline songs yet', 'Use Download on any song (native cache, APK only).', { label: 'Find songs', go: '#/search', ic: 'i-download' });
@@ -5549,7 +5536,6 @@ function bindOfflineRows(root) {
     selToggle.addEventListener('click', (ev) => {
       ev.stopPropagation();
       try { selectAllOfflineRows(); } catch {}
-      try { updateOfflineSelectBar(); } catch {}
       try { updateOfflineSelectToolbar(); } catch {}
     });
   }
@@ -5703,15 +5689,6 @@ function bindOfflineRows(root) {
   if (dlBtn && !dlBtn._offBound) { dlBtn._offBound = true; dlBtn.addEventListener('click', runDownloadSelected); }
   const delBtn = document.getElementById('off-del');
   if (delBtn && !delBtn._offBound) { delBtn._offBound = true; delBtn.addEventListener('click', runDeleteSelected); }
-  const dlSel = document.getElementById('offline-dl-sel');
-  if (dlSel && !dlSel._offBound) { dlSel._offBound = true; dlSel.addEventListener('click', runDownloadSelected); }
-  const delSel = document.getElementById('offline-del-sel');
-  if (delSel && !delSel._offBound) { delSel._offBound = true; delSel.addEventListener('click', runDeleteSelected); }
-  const cancelSel = document.getElementById('offline-cancel-sel');
-  if (cancelSel && !cancelSel._offBound) {
-    cancelSel._offBound = true;
-    cancelSel.addEventListener('click', () => { try { exitOfflineSelectMode(); } catch {} });
-  }
   const cancelLegacy = document.getElementById('off-cancel');
   if (cancelLegacy && !cancelLegacy._offBound) {
     cancelLegacy._offBound = true;
@@ -5722,7 +5699,6 @@ function bindOfflineRows(root) {
     selLegacy._offBound = true;
     selLegacy.addEventListener('click', () => { try { enterOfflineSelectMode(); } catch {} });
   }
-  try { updateOfflineSelectBar(); } catch {}
   try { updateOfflineSelectToolbar(); } catch {}
 }
 function viewLibrary(view, tab) {

@@ -1781,8 +1781,6 @@ body.pip-system .fw-bar, body.pip-system .fw-controls { opacity: .6; }
 .track[data-offrow] .off-more{opacity:1}
 @media (max-width: 860px){ .track[data-offrow] .off-more{display:inline-flex} }
 .hidden { display: none !important; }
-.select-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; background: var(--bg); z-index: 5; border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
-.select-bar span:first-child { flex: 1; font-size: 13px; color: var(--muted); }
 .track-check { display: inline-flex; align-items: center; flex: none; }
 .track-check input { width: 18px; height: 18px; accent-color: #1db954; }
 .track-art-wrap {
