@@ -7401,6 +7401,16 @@ $('#np-shuffle').addEventListener('click', function () {
   try { markDirty(); } catch {}
   toast(Player.shuffle ? 'Shuffle on' : 'Shuffle off');
 });
+
+document.getElementById('np-mix')?.addEventListener('click', async () => {
+  try {
+    if (Player.pending && Player.cued) { toast('Tap Play to refresh radio'); return; }
+    const seed = Player.current;
+    if (!seed || !seed.videoId) return;
+    await fetchQueue(seed);
+    toast('Radio refreshed');
+  } catch (e) { toast('Radio refresh failed'); }
+});
 $('#np-repeat').addEventListener('click', function () {
   Player.repeat = (Player.repeat + 1) % 3;
   const on = Player.repeat > 0;
