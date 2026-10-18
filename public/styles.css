@@ -80,7 +80,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
 .ic { width: 16px; height: 16px; fill: currentColor; display: block; }
 img { display: block; }
 a { color: inherit; }
@@ -324,9 +324,9 @@ html[data-theme="light"] .tb-btn { background: rgba(0, 0, 0, 0.08); color: var(-
 .chip {
   padding: 7px 14px; background: var(--hover-strong);
   border-radius: 999px; font-size: 13px; color: var(--text); font-weight: 600;
-  transition: background 0.22s var(--ease-spring), color 0.22s var(--ease-spring), transform 0.22s var(--ease-spring);
+  transition: background 0.22s var(--ease-spring), color 0.22s var(--ease-spring);
 }
-.chip:hover { background: color-mix(in srgb, var(--text) 18%, transparent); transform: scale(1.03); }
+.chip:hover { background: color-mix(in srgb, var(--text) 18%, transparent); }
 .chip.active { background: var(--chip-on-bg); color: var(--chip-on-fg); font-weight: 700; }
 .search-chips { display: flex; gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 2px 0 8px; margin: 14px 0 18px; }
 .search-chips::-webkit-scrollbar { display: none; }
@@ -567,15 +567,15 @@ html[data-theme="light"] .detail-head {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 9px 18px; background: transparent; border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
   border-radius: 999px; font-size: 13.5px; font-weight: 700; letter-spacing: 0.02em;
-  transition: transform 0.22s var(--ease-spring), border-color 0.22s var(--ease-spring), background 0.22s var(--ease-spring), color 0.22s var(--ease-spring);
+  transition: border-color 0.22s var(--ease-spring), background 0.22s var(--ease-spring), color 0.22s var(--ease-spring);
 }
 .pill-btn .ic { width: 15px; height: 15px; }
-.pill-btn:hover { border-color: var(--text); transform: scale(1.04); }
+.pill-btn:hover { border-color: var(--text); }
 .pill-btn.primary {
   background: var(--accent-bright); border-color: transparent; color: #000;
   padding: 14px 32px; font-size: 15px;
 }
-.pill-btn.primary:hover { background: #3be477; transform: scale(1.05); }
+.pill-btn.primary:hover { background: #3be477; }
 .pill-btn:disabled, .pill-btn.primary:disabled { opacity: 0.5; pointer-events: none; transform: none; }
 
 /* offline queue: library play-all button + home offline banner */
