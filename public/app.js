@@ -6521,6 +6521,7 @@ function openSongMenu(song, opts = {}) {
 function openNowPlayingMore() {
   const song = focusedSong();
   if (!song) return;
+  const isApk = !!window.NativePlayback; // L35c: web hides Widget row
   const modal = $('#modal');
   const body = $('#modal-body');
   const actions = $('.modal-actions');
@@ -6534,7 +6535,7 @@ function openNowPlayingMore() {
     ${row('share', 'i-share', 'Share')}
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
-    ${row('float', 'i-pip', 'Widget')}`;
+    ${isApk ? row('float', 'i-pip', 'Widget') : ''}`;
   $$('[data-npact]', body).forEach((b) =>
     b.addEventListener('click', () => {
       const a = b.dataset.npact;
@@ -6692,6 +6693,12 @@ function applySettingsEnvironment() {
     };
     const secEngine = document.getElementById('sec-engine');
     if (secEngine) secEngine.style.display = isApk ? '' : 'none';
+    // L35c: hide Battery Optimization row on web
+    const batRow = document.querySelector('#set-battery');
+    if (batRow) {
+      const row = batRow.closest('.settings-row');
+      if (row) row.style.display = isApk ? '' : 'none';
+    }
     lock('sec-iframe', isApk && mode === 1); // VisionOS active: iframe rows irrelevant
     lock('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
   } catch {}
@@ -6951,21 +6958,6 @@ function openSettingsModal(tab = 'settings') {
   updateVolumeControls(Player.volumeLevel);
   const extraVol = document.getElementById('set-volume-extra');
   if (extraVol) extraVol.onclick = toggleExtraVolume;
-  const fl = $('#set-float');
-  if (fl) {
-    // Settings > Widget is a Home-nav preference, not an instant toggle.
-    const paintFl = () => {
-      try {
-        fl.textContent = isHomePipOn() ? 'On' : 'Off';
-        fl.classList.toggle('primary', isHomePipOn());
-      } catch {}
-    };
-    paintFl();
-    fl.onclick = () => {
-      try { store.set('widget_home_pip', !isHomePipOn()); } catch {}
-      paintFl();
-    };
-  }
   // Environment-aware sections: web locks Stream to iFrame; APK follows mode.
   // Disabled = visible at 50% opacity, not clickable (never hidden).
   const syncNative = () => {
@@ -7569,8 +7561,10 @@ $('#np-repeat').addEventListener('click', function () {
 });
 $('#np-speed').addEventListener('click', cycleSpeed);
 $('#np-float').addEventListener('click', () => showPipOnce());
+$('#mini-float').disabled = !window.NativePlayback; // L35c: lock on web
 $('#mini-float').addEventListener('click', (e) => {
   e.stopPropagation();
+  if (!window.NativePlayback) return; // L35c: web locked, native clickable
   showPipOnce();
 });
 $('#np-quality').addEventListener('click', toggleQuality);
