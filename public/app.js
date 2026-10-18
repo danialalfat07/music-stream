@@ -1791,7 +1791,6 @@ async function playSong(song, queue = null, index = null) {
     Player.index = 0;
   }
   startCurrent();
-  if (!queue || queue.length <= 1) fetchQueue(song); // build radio queue
 }
 
 function userQueueCount() {
@@ -1865,7 +1864,10 @@ function scrambleRadioQueue() {
 function removeRadioQueued(i) {
   if (i === Player.index || i < 0 || i >= Player.queue.length) return;
   if (i < Player.index) Player.index--;
+  const removedVideoId = Player.queue[i] && Player.queue[i].videoId;
   Player.queue.splice(i, 1);
+  if (!Player._trashHistory) Player._trashHistory = new Set();
+  Player._trashHistory.add(removedVideoId);
   renderQueue();
   toast('Removed from radio');
   try { markDirty(); } catch {}
@@ -2478,6 +2480,8 @@ function startCurrent() {
             artwork: s.thumbnail ? [{ src: s.thumbnail, sizes: '544x544' }] : [],
           });
         }
+        // L33: fire-and-forget, semua advance otomatis cek refill
+        refillRadio().catch(() => {});
         return;
     }
   }
@@ -2591,10 +2595,17 @@ function startCurrent() {
   ) {
     setTimeout(() => loadRelated(true), 150);
   }
+  // L33: fire-and-forget, semua advance otomatis cek refill
+  refillRadio().catch(() => {});
 }
 
 async function fetchQueue(song) {
   if (_isClosed) return;
+  // L33: cegah fetchQueue bersamaan dengan refill
+  if (Player._radioRefillInFlight) {
+    try { toast('Radio sedang dimuat, coba lagi'); } catch {}
+    return;
+  }
   const vid = song && song.videoId;
   const loadId = Player.loadId;
   Player._queueFetching = true;
@@ -2631,6 +2642,65 @@ async function fetchQueue(song) {
   // (bukan periodik) agar track 1 dapat window penuh + tombol next.
   try { markDirty(); } catch {}
   try { pushIfDirty('radio'); } catch {}
+}
+
+// L33: infinite radio — append batch baru saat radio menipis.
+// Idempotent: in-flight + cooldown 30s.
+// Guard: _queueFetching (skip saat Mix sedang replace).
+async function refillRadio() {
+  try {
+    if (Player._queueFetching) return;  // Mix sedang jalan
+    if (Player._radioRefillInFlight) return;
+    if (Date.now() - (Player._lastRefillAt || 0) < 30000) return;
+    const seed = Player.current;
+    if (!seed || !seed.videoId) return;
+
+    const upcoming = Player.queue.slice(Player.index + 1);
+    const radioUpcoming = upcoming.filter((q) => q && !q._user);
+    if (radioUpcoming.length >= 10) return;
+
+    Player._radioRefillInFlight = true;
+    try {
+      const d = await api(
+        `/api/next?videoId=${encodeURIComponent(seed.videoId)}`
+      );
+      if (!d || !d.queue || d.queue.length < 2) return;
+      if (Player.cued || !Player.current
+          || Player.current.videoId !== seed.videoId) return;
+
+      const existing = new Set(Player.queue.map((q) => q && q.videoId));
+      const history = new Set(
+        (Player.history || []).slice(-100).map((h) => h && h.videoId)
+      );
+      const trash = Player._trashHistory || new Set();
+      const newRadio = d.queue
+        .filter((q) => q && q.videoId)
+        .filter((q) => q.videoId !== seed.videoId)
+        .filter((q) => !existing.has(q.videoId))
+        .filter((q) => !history.has(q.videoId))
+        .filter((q) => !trash.has(q.videoId));
+
+      if (newRadio.length === 0) return;
+
+      newRadio.forEach((q) => { q._user = false; });
+      Player.queue.push(...newRadio);  // APPEND
+      Player._lastRefillAt = Date.now();
+
+      try { markDirty(); } catch {}
+      try { pushIfDirty('radio'); } catch {}
+
+      try {
+        const h = location.hash || '';
+        if (h.startsWith('#/library/offline') || h.startsWith('#/queue')) {
+          renderQueue();
+        }
+      } catch {}
+    } finally {
+      Player._radioRefillInFlight = false;
+    }
+  } catch (e) {
+    try { console.warn('[radio refill]', e && e.message); } catch {}
+  }
 }
 
 function nextTrack(auto) {
@@ -2715,10 +2785,8 @@ function prevTrack() {
 }
 function togglePlay() {
   if (!Player.current) return;
-  if (Player.cued) {    const s = Player.current;
-    const hasRadio = Player.queue.some((q, i) => i > Player.index && !q._user);
+  if (Player.cued) {
     startCurrent();
-    if (!hasRadio) fetchQueue(s);
     return;
   }
   // Phase 8 Engine B: route transport to native, logical Player unchanged.
@@ -2765,7 +2833,6 @@ function playPendingSong() {
   Player.queue = [{ ...normalizeSong(s), _user: false }, ...userUpcoming];
   Player.index = 0;
   startCurrent();
-  fetchQueue(s);
 }
 function toggleNowPlayingPlay() {
   if (isPreviewing()) {
