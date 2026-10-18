@@ -1791,6 +1791,8 @@ async function playSong(song, queue = null, index = null) {
     Player.queue = [{ ...song, _user: false }];
     Player.index = 0;
   }
+  // L34e: lagu baru -> reset cooldown refill (cooldown tetap berlaku antar-refill lagu yang sama)
+  Player._lastRefillAt = 0;
   startCurrent();
 }
 
@@ -2696,12 +2698,8 @@ async function refillRadio() {
       try { markDirty(); } catch {}
       try { pushIfDirty('radio'); } catch {}
 
-      try {
-        const h = location.hash || '';
-        if (h.startsWith('#/library/offline') || h.startsWith('#/queue')) {
-          renderQueue();
-        }
-      } catch {}
+      // L34e: render tanpa gate hash ('#/queue' bukan route nyata)
+      try { renderQueue(); } catch {}
     } finally {
       Player._radioRefillInFlight = false;
     }
@@ -4065,7 +4063,14 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
     ${tn}${qn}
     <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
     <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || it.subtitle || '')}</div></div>
-    ${it.duration ? `<span class="tdur">${esc(it.duration)}</span>` : ''}
+    ${(() => {
+      if (!it.duration) return '';
+      const s = String(it.duration);
+      if (s.includes(':')) return `<span class="tdur">${esc(s)}</span>`;
+      const n = Number(it.duration);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      return `<span class="tdur">${esc(fmtTime(n))}</span>`;
+    })()}
     <button class="tbtn btn-fav" title="Favorite">${icon(Library.isFav(it.videoId) ? 'i-heart-f' : 'i-heart-o')}</button>
     <button class="tbtn btn-queue" title="Add to queue">${icon('i-queue')}</button>
     <button class="tbtn btn-addpl" title="Add to playlist">${icon('i-plus')}</button>
