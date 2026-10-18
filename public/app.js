@@ -6699,6 +6699,17 @@ function applySettingsEnvironment() {
       const row = batRow.closest('.settings-row');
       if (row) row.style.display = isApk ? '' : 'none';
     }
+    // L36: hide App Version row on web (keep Web Version)
+    const avRow = document.querySelector('#about-app-ver');
+    if (avRow) {
+      const row = avRow.closest('.settings-row');
+      if (row) row.style.display = isApk ? '' : 'none';
+    }
+    // L36: hide Logs pane + tab chip on web (native debugging tetap)
+    const logPane = document.querySelector('[data-spane="logs"]');
+    if (logPane) logPane.style.display = isApk ? '' : 'none';
+    const logTab = document.querySelector('[data-stab="logs"]');
+    if (logTab) logTab.style.display = isApk ? '' : 'none';
     lock('sec-iframe', isApk && mode === 1); // VisionOS active: iframe rows irrelevant
     lock('sec-visionos', !isApk || mode !== 1); // web or iFrame: visionos rows irrelevant
   } catch {}
