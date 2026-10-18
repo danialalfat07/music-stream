@@ -2484,6 +2484,8 @@ function startCurrent() {
         }
         // L33: fire-and-forget, semua advance otomatis cek refill
         refillRadio().catch(() => {});
+        // L34b: ensure queue sheet updates after track change (Mix state visible)
+        try { renderQueue(); } catch {}
         return;
     }
   }
@@ -2599,6 +2601,8 @@ function startCurrent() {
   }
   // L33: fire-and-forget, semua advance otomatis cek refill
   refillRadio().catch(() => {});
+  // L34b: ensure queue sheet updates after track change (Mix state visible)
+  try { renderQueue(); } catch {}
 }
 
 async function fetchQueue(song) {
@@ -2651,7 +2655,7 @@ async function fetchQueue(song) {
 // Guard: _queueFetching (skip saat Mix sedang replace).
 async function refillRadio() {
   try {
-    if (Player._offlineMode) return;
+    if (Player._offlineMode || isOfflineQueue()) return;
     if (Player._queueFetching) return;  // Mix sedang jalan
     if (Player._radioRefillInFlight) return;
     if (Date.now() - (Player._lastRefillAt || 0) < 30000) return;
@@ -2704,6 +2708,19 @@ async function refillRadio() {
   } catch (e) {
     try { console.warn('[radio refill]', e && e.message); } catch {}
   }
+}
+
+// L34b: content-based offline detection (fallback kalau flag race)
+function isOfflineQueue() {
+  try {
+    if (Player._offlineMode) return true;
+    const offList = getOfflineTracks();
+    if (!offList.length) return false;
+    const offVids = new Set(offList.map((t) => t.videoId));
+    const remaining = Player.queue.slice(Player.index);
+    if (!remaining.length) return false;
+    return remaining.every((q) => q && offVids.has(q.videoId));
+  } catch { return false; }
 }
 
 function nextTrack(auto) {
@@ -3630,7 +3647,8 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    const mixBtn = Player._offlineMode ? '' : `<button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button>`;
+    const hideMix = Player._offlineMode || isOfflineQueue();
+    const mixBtn = hideMix ? '' : `<button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button>`;
     html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><span class="q-actions"><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button>${mixBtn}</span></div>`;
     html += radio
       .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false, `<button class="tbtn btn-rrm" data-qi="${i}" title="Remove from radio">${icon('i-x')}</button>`))
@@ -5330,19 +5348,20 @@ function getOfflineQueueList() {
 }
 function playOfflineQueue() {
   // One action for both entry points: queue all COMPLETE tracks, play at 0.
-  // Reuses playSong/startCurrent, no new playback path.
+  // L34b: bypass playSong (yang reset _offlineMode=false + version check).
+  // Direct pattern mirror OfflineLib.play: set flag dulu, lalu startCurrent.
   const list = getOfflineQueueList();
   if (!list || !list.length) {
     try { toast('No downloaded songs'); } catch {}
     return;
   }
-  try {
-    Player._playCached = list[0].videoId;
-    playSong(list[0], list, 0);
-    // L34: di-set SETELAH playSong karena playSong reset ke false utk
-    // sumber lain; true harus jadi nilai terakhir sebelum startCurrent.
-    Player._offlineMode = true;
-  } catch {}
+  Player._offlineMode = true;
+  Player.queue = list;
+  Player.index = 0;
+  Player._playCached = list[0].videoId;
+  Player._nativeFailed = null;
+  try { _isClosed = false; } catch {}
+  startCurrent();
 }
 let _offlineNetBound = false;
 function updateOfflineBanner() {
