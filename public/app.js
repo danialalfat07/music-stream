@@ -1770,6 +1770,7 @@ window.onYouTubeIframeAPIReady = () => {
 
 async function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
+  Player._offlineMode = false;
   try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[TRACE_01] playSong enter videoId=' + song.videoId); } catch {}
   // mandatory version check before any play - uses cache/no-store fetch with 5min cooldown
   try {
@@ -2221,6 +2222,7 @@ const OfflineLib = {
   },
   play(videoId) {    const e = this.get(videoId);
     if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
+    Player._offlineMode = true;
     const song = {
       videoId: e.videoId, title: e.title, artist: e.artist,
       subtitle: e.artist, thumbnail: e.artworkThumb || e.thumbnail || '', duration: e.duration,
@@ -2649,6 +2651,7 @@ async function fetchQueue(song) {
 // Guard: _queueFetching (skip saat Mix sedang replace).
 async function refillRadio() {
   try {
+    if (Player._offlineMode) return;
     if (Player._queueFetching) return;  // Mix sedang jalan
     if (Player._radioRefillInFlight) return;
     if (Date.now() - (Player._lastRefillAt || 0) < 30000) return;
@@ -3627,7 +3630,8 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><span class="q-actions"><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button><button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button></span></div>`;
+    const mixBtn = Player._offlineMode ? '' : `<button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button>`;
+    html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><span class="q-actions"><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button>${mixBtn}</span></div>`;
     html += radio
       .map(({ q, i }) => trackRowHTML({ ...q, qi: i, qRadio: true }, false, `<button class="tbtn btn-rrm" data-qi="${i}" title="Remove from radio">${icon('i-x')}</button>`))
       .join('');
@@ -4581,6 +4585,22 @@ async function viewHome(view) {
   });
   let html = `<div class="hello-row"><div><div class="greeting">${esc(dateLine)}</div><h1 class="page-title">${greet}</h1></div></div>`;
   html += `<div id="offline-banner" class="offline-banner" hidden><div class="offline-banner-text"><div class="offline-banner-title">You're offline</div><div class="offline-banner-sub">Play your downloaded music</div></div><button type="button" id="offline-play-btn" class="offline-banner-btn">${icon('i-play')}<span>Play Offline Queue</span></button></div>`;
+  // L34: Offline Library shortcut card (only when has offline tracks)
+  try {
+    const offTracks = getOfflineTracks();
+    if (offTracks.length > 0) {
+      const first = offTracks[0];
+      const firstArt = (first && (first.thumbnail
+        || first.artworkThumb)) || '';
+      const count = offTracks.length;
+      html += `<div class="quick-grid" style="margin: 12px 0;">`
+        + `<div class="card off-shortcut" data-nav="#/library/offline">`
+        + `<div class="art">${coverHTML(firstArt)}</div>`
+        + `<div class="t">Offline Library</div>`
+        + `<div class="s">${count} track${count === 1 ? '' : 's'}</div>`
+        + `</div></div>`;
+    }
+  } catch {}
   if (hist.length) {
     html += `<div class="shelf-title">Recently played</div><div class="quick-grid">${hist
       .slice(0, 8)
@@ -4632,6 +4652,15 @@ async function viewHome(view) {
   $$('[data-pl]', view).forEach((el) =>
     el.addEventListener('click', () => go(`#/localpl/${el.dataset.pl}`)),
   );
+  // L34: bind Offline Library shortcut
+  try {
+    const offShortcut = view.querySelector('.off-shortcut');
+    if (offShortcut) {
+      offShortcut.addEventListener('click', () => {
+        try { go('#/library/offline'); } catch {}
+      });
+    }
+  } catch {}
   loadMixForYou();
 }
 
@@ -5310,6 +5339,9 @@ function playOfflineQueue() {
   try {
     Player._playCached = list[0].videoId;
     playSong(list[0], list, 0);
+    // L34: di-set SETELAH playSong karena playSong reset ke false utk
+    // sumber lain; true harus jadi nilai terakhir sebelum startCurrent.
+    Player._offlineMode = true;
   } catch {}
 }
 let _offlineNetBound = false;
