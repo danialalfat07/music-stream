@@ -2660,9 +2660,12 @@ async function refillRadio() {
     if (Player._offlineMode) return;
     if (Player._queueFetching) return;  // Mix sedang jalan
     if (Player._radioRefillInFlight) return;
-    if (Date.now() - (Player._lastRefillAt || 0) < 30000) return;
     const seed = Player.current;
     if (!seed || !seed.videoId) return;
+
+    // L34f: per-seed cooldown (izinkan refill bila seed berubah)
+    if (Player._lastRefillSeed === seed.videoId
+        && Date.now() - (Player._lastRefillAt || 0) < 30000) return;
 
     const upcoming = Player.queue.slice(Player.index + 1);
     const radioUpcoming = upcoming.filter((q) => q && !q._user);
@@ -2694,6 +2697,7 @@ async function refillRadio() {
       newRadio.forEach((q) => { q._user = false; });
       Player.queue.push(...newRadio);  // APPEND
       Player._lastRefillAt = Date.now();
+      Player._lastRefillSeed = seed.videoId;
 
       try { markDirty(); } catch {}
       try { pushIfDirty('radio'); } catch {}
@@ -4066,9 +4070,18 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
     ${(() => {
       if (!it.duration) return '';
       const s = String(it.duration);
-      if (s.includes(':')) return `<span class="tdur">${esc(s)}</span>`;
+      if (s.includes(':')) {
+        // L34f: validate colon string (hide impossible durations)
+        const parts = s.split(':').map((p) => Number(p));
+        if (!parts.length || parts.some((p) => !Number.isFinite(p) || p < 0)) return '';
+        let total = 0;
+        for (const p of parts) total = total * 60 + p;
+        if (total < 10 || total > 3600) return '';
+        return `<span class="tdur">${esc(s)}</span>`;
+      }
       const n = Number(it.duration);
-      if (!Number.isFinite(n) || n <= 0) return '';
+      // L34f: hide numeric impossible (10s-1h only = valid music duration)
+      if (!Number.isFinite(n) || n < 10 || n > 3600) return '';
       return `<span class="tdur">${esc(fmtTime(n))}</span>`;
     })()}
     <button class="tbtn btn-fav" title="Favorite">${icon(Library.isFav(it.videoId) ? 'i-heart-f' : 'i-heart-o')}</button>
