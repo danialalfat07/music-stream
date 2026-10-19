@@ -799,6 +799,9 @@ body:not(.paused) .np-art-wrap { transform: scale(1.01); }
 #np-artist { font-size: 15px; color: rgba(255,255,255,.72); margin-top: 5px; font-weight: 500; }
 #np-artist.linkish { cursor: pointer; }
 #np-artist.linkish:hover { color: #fff; text-decoration: underline; }
+/* L48: sembunyikan badge metode (iFrame/VisionOS/...) di panel kanan — cukup judul + artis.
+   Elemen tetap ada di DOM supaya diag (setPlayMethod/__vosDiag) masih bisa baca textContent. */
+#nowplaying #np-method { display: none !important; }
 .np-seek { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 520px; font-size: 11.5px; color: rgba(255,255,255,.65); font-variant-numeric: tabular-nums; }
 #np-player .np-seek { cursor: pointer; }
 .np-range-wrap {
