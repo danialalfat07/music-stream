@@ -3471,6 +3471,16 @@ function updateLyricHighlight(cur) {
       // auto scroll without smooth queue (instant, CSS smooth will handle)
       try { active.scrollIntoView({ block: 'center', behavior: 'auto' }); } catch {}
     }
+    // L41: mirror highlight + auto-scroll ke overlay tengah (#main-lyrics-body)
+    const ovBody = $('#main-lyrics-body');
+    if (ovBody && $('#main-lyrics-overlay')?.classList.contains('active')) {
+      $$('.lyric-line', ovBody).forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+        el.classList.toggle('past', i < idx);
+      });
+      const oa = ovBody.querySelector('.lyric-line.active');
+      if (oa) { try { oa.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch {} }
+    }
   });
   const line = idx >= 0 ? L.lines[idx].text : '';
   $('#np-lyric-preview').textContent = line;
@@ -7594,6 +7604,8 @@ $('#np-artist').addEventListener('click', (e) => {
 // L40: lyrics overlay di area tengah (#main) — tampil hanya desktop (CSS >=1024px)
 function openMainLyrics() {
   try {
+    // L41: kunci scrollbar #view selama overlay terbuka
+    document.body.classList.add('lyrics-mode-active');
     const ov = $('#main-lyrics-overlay');
     if (ov) ov.classList.add('active');
     const src = $('#lyrics-container');
@@ -7602,10 +7614,26 @@ function openMainLyrics() {
   } catch {}
 }
 function closeMainLyrics() {
+  try { document.body.classList.remove('lyrics-mode-active'); } catch {}
   try { $('#main-lyrics-overlay')?.classList.remove('active'); } catch {}
 }
 $('#np-show-lyrics-btn')?.addEventListener('click', openMainLyrics);
 $('#close-main-lyrics')?.addEventListener('click', closeMainLyrics);
+// L41: klik baris lirik overlay tengah -> seek (delegation; data-t = detik, sama dgn handler lirik asli)
+$('#main-lyrics-body')?.addEventListener('click', (e) => {
+  const line = e.target.closest('.lyric-line');
+  if (!line) return;
+  const t = parseFloat(line.dataset.t);
+  if (!isFinite(t)) return;
+  if (Player.cued || isPreviewing()) return;
+  // Engine B first: seek engine yang audible, jangan bangunkan iFrame
+  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+    try { NativePlayback.nativeSeek(t); } catch {}
+    return;
+  }
+  if (!Player.yt || !Player.ready) return;
+  try { Player.yt.seekTo(t, true); Player.yt.playVideo(); } catch {}
+});
 
 let seekDragging = false;
 const range = $('#np-range');

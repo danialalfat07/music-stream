@@ -1928,7 +1928,9 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         background: #121212; padding: 32px;
         display: none; flex-direction: column;
     }
-    #main-lyrics-overlay.active { display: flex; }
+    #main-lyrics-overlay.active { display: flex; overflow: hidden; }
+    /* L41: cegah scrollbar #view menembus di balik overlay */
+    body.lyrics-mode-active #view { overflow: hidden !important; }
     #main { position: relative; }
 }
 
