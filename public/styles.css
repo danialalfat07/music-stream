@@ -1946,9 +1946,11 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
     #main-lyrics-body { overflow-y: auto; overflow-x: hidden; height: 100%; }
     #main { position: relative; }
 
-    /* L43: layout baris antrean di right panel desktop */
-    /* 1. Container Baris Antrean */
-    #nowplaying .track {
+    /* L43+L44: layout baris antrean di right panel desktop */
+    /* L44.2 Posisi Baris Antrean (L43 + position:relative) */
+    #nowplaying .track,
+    #nowplaying .q-item { /* .q-item: inert, tidak ada di repo */
+        position: relative;
         display: flex;
         align-items: center;
         gap: 12px;
@@ -1958,15 +1960,16 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         cursor: pointer;
         box-sizing: border-box;
     }
-    /* 2. Container Teks (Judul & Artis) */
-    #nowplaying .track .tmeta {
+    /* L44.3 Container Teks (Judul & Artis) - tidak berubah dari L43 */
+    #nowplaying .track .tmeta,
+    #nowplaying .track .t-info { /* .t-info: inert, tidak ada di repo */
         flex: 1;
         min-width: 0; /* Mencegah teks meluber */
         display: flex;
         flex-direction: column;
         justify-content: center;
     }
-    /* 3. Teks Judul dan Artis */
+    /* Tulisan Judul dan Artis (dipertahankan dari L43) */
     #nowplaying .track .tt {
         font-size: 14px;
         font-weight: 600;
@@ -1984,14 +1987,40 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         text-overflow: ellipsis;
         display: block;
     }
-    /* 4. Sembunyikan elemen yang bikin berantakan di panel sempit */
+    /* L44.1 Kunci Container List agar bisa di-scroll
+       (.right-content/.np-queue: inert, tidak ada di repo; container queue
+       nyata = #queue-list. .np-pane sudah height:100% + overflow-y:auto
+       di :787, .np-body sudah flex:1 + min-height:0 di :786/:1337) */
+    #nowplaying .right-content,
+    #nowplaying .np-queue,
+    #nowplaying #queue-list {
+        flex: 1;
+        min-height: 0; /* Sangat penting agar flexbox bisa scroll */
+        overflow-y: auto !important;
+    }
+    /* L44.4-5 Tombol Aksi (Hover): default sembunyi, muncul saat hover.
+       Mapping: repo memakai tombol individual .tbtn tanpa wrapper, jadi
+       dipakai reveal in-flow + pill bg per tombol (var --bg-highlight
+       tidak ada di repo -> var --hover-strong). Tanpa posisi absolute
+       (5 default + 3 extras bakal numpuk di titik yang sama). */
+    #nowplaying .track .tbtn,
+    #nowplaying .track .q-actions {
+        display: none;
+        flex-shrink: 0;
+        align-items: center;
+        gap: 8px;
+        background: var(--hover-strong);
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+    #nowplaying .track:hover .tbtn,
+    #nowplaying .track:hover .q-actions { display: flex; }
+    /* L44.6 Sembunyikan durasi saat hover agar tidak tabrakan */
+    #nowplaying .track:hover .tdur,
+    #nowplaying .track:hover .duration {
+        opacity: 0;
+        pointer-events: none;
+    }
     #nowplaying .track .t-num { display: none; }
-    #nowplaying .track .btn-fav,
-    #nowplaying .track .btn-queue,
-    #nowplaying .track .btn-addpl,
-    #nowplaying .track .btn-dl,
-    #nowplaying .track .btn-more { display: none; }
-    /* 5. Tombol Aksi (Hover) */
-    #nowplaying .track .tbtn { flex-shrink: 0; }
 }
 
