@@ -3433,16 +3433,16 @@ function renderLyrics() {
         const t = parseFloat(el.dataset.t);
         if (!isFinite(t)) return;
         if (Player.cued || isPreviewing()) return;
-        // Engine B first: lyric tap seeks the AUDIBLE engine, never wakes iFrame
-        if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+        // L50: routing engine lengkap (native -> audio -> yt), tanpa playVideo
+        if (typeof window.nativeSeek === 'function') {
+          window.nativeSeek(t);
+        } else if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
           try { NativePlayback.nativeSeek(t); } catch {}
-          return;
+        } else if (Player.useAudio && Player.audio) {
+          try { Player.audio.currentTime = t; } catch {}
+        } else if (Player.yt && Player.yt.seekTo) {
+          try { Player.yt.seekTo(t, true); } catch {}
         }
-        if (!Player.yt || !Player.ready) return;
-        try {
-          Player.yt.seekTo(t, true);
-          Player.yt.playVideo();
-        } catch {}
       }),
     );
   } else if (L.plain) {
@@ -3477,6 +3477,14 @@ function renderLyrics() {
   pushNativeLyrics();
   pushNativeLyricWindow();
   renderPipLyricWindow();
+  // L50: kalau overlay lirik sedang terbuka, salin ulang supaya data-t tidak basi saat lagu ganti
+  try {
+    const ov = $('#main-lyrics-overlay');
+    if (ov && ov.classList.contains('active')) {
+      const body = $('#main-lyrics-body');
+      if (body) body.innerHTML = c.innerHTML;
+    }
+  } catch {}
 }
 let lastLyricIdx = -1;
 function updateLyricHighlight(cur) {
@@ -3499,8 +3507,8 @@ function updateLyricHighlight(cur) {
     });
     const active = c.querySelector('.lyric-line.active');
     if (active && $('#np-lyrics').classList.contains('active')) {
-      // auto scroll without smooth queue (instant, CSS smooth will handle)
-      try { active.scrollIntoView({ block: 'center', behavior: 'auto' }); } catch {}
+      // L50: geser container lirik saja (tanpa scrollIntoView, agar #main di belakang tidak ikut)
+      try { c.scrollTop = active.offsetTop - (c.clientHeight - active.offsetHeight) / 2; } catch {}
     }
     // L41: mirror highlight + auto-scroll ke overlay tengah (#main-lyrics-body)
     const ovBody = $('#main-lyrics-body');
@@ -3510,7 +3518,10 @@ function updateLyricHighlight(cur) {
         el.classList.toggle('past', i < idx);
       });
       const oa = ovBody.querySelector('.lyric-line.active');
-      if (oa) { try { oa.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch {} }
+      if (oa) {
+        // L50: hanya container lirik overlay yang bergeser, bukan #main di belakangnya
+        try { ovBody.scrollTop = oa.offsetTop - (ovBody.clientHeight - oa.offsetHeight) / 2; } catch {}
+      }
     }
   });
   const line = idx >= 0 ? L.lines[idx].text : '';
@@ -7642,6 +7653,8 @@ function openMainLyrics() {
     const src = $('#lyrics-container');
     const body = $('#main-lyrics-body');
     if (src && body) body.innerHTML = src.innerHTML;
+    // L50: simpan videoId saat overlay dibuka, dipakai untuk validasi klik lirik
+    Player._lyricsOverlayVideoId = (Player.current && Player.current.videoId) || '';
   } catch {}
 }
 function closeMainLyrics() {
@@ -7657,13 +7670,19 @@ $('#main-lyrics-body')?.addEventListener('click', (e) => {
   const t = parseFloat(line.dataset.t);
   if (!isFinite(t)) return;
   if (Player.cued || isPreviewing()) return;
-  // Engine B first: seek engine yang audible, jangan bangunkan iFrame
-  if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
+  // L50: jangan seek bila lagu sudah berganti sejak overlay dibuka (data-t basi)
+  const curVid = (Player.current && Player.current.videoId) || '';
+  if (Player._lyricsOverlayVideoId && curVid && curVid !== Player._lyricsOverlayVideoId) return;
+  // L50: routing engine lengkap (native -> audio -> yt), tanpa playVideo
+  if (typeof window.nativeSeek === 'function') {
+    window.nativeSeek(t);
+  } else if (Player.nativeActive && window.NativePlayback && NativePlayback.nativeSeek) {
     try { NativePlayback.nativeSeek(t); } catch {}
-    return;
+  } else if (Player.useAudio && Player.audio) {
+    try { Player.audio.currentTime = t; } catch {}
+  } else if (Player.yt && Player.yt.seekTo) {
+    try { Player.yt.seekTo(t, true); } catch {}
   }
-  if (!Player.yt || !Player.ready) return;
-  try { Player.yt.seekTo(t, true); Player.yt.playVideo(); } catch {}
 });
 
 let seekDragging = false;
