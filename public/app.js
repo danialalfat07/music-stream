@@ -4367,6 +4367,24 @@ function previewSong(song) {
   resetNpSeek(song);
   // keep Related for the song that's actually playing
 }
+// L59: di desktop, Mini Bar tampil dulu lalu Right Panel dibuka setelah jeda singkat.
+// Klik cepat berturut-turut: timer lama dibatalkan supaya panel tetap muncul sekali.
+let _npOpenTimer = null;
+function openNowPlayingAfterDelay() {
+  if (window.innerWidth >= 1024) {
+    if (_npOpenTimer) clearTimeout(_npOpenTimer);
+    _npOpenTimer = setTimeout(() => {
+      _npOpenTimer = null;
+      openNowPlaying();
+    }, 350);
+  } else {
+    if (_npOpenTimer) {
+      clearTimeout(_npOpenTimer);
+      _npOpenTimer = null;
+    }
+    openNowPlaying();
+  }
+}
 function openSongNowPlaying(song) {
   if (!song || !song.videoId) return;
   const same = Player.current && Player.current.videoId === song.videoId;
@@ -4379,7 +4397,7 @@ function openSongNowPlaying(song) {
     updateLikeButtons();
     renderPlayButtons();
   }
-  openNowPlaying();
+  openNowPlayingAfterDelay();
   switchNPTab('player');
 }
 
