@@ -2173,3 +2173,28 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
 /* L52: tombol Playlist lama di tab Song disembunyikan (global) —
    Add sudah pindah ke baris .rp-actions-row agar tidak dobel ikon "+" */
 #nowplaying #np-addpl { display: none; }
+
+/* ===== L57: mini bar widget/add split + urutan Now Playing mobile ===== */
+/* TUGAS 4: Widget (PiP) hanya Mobile/Tablet, Add to Queue hanya Desktop */
+@media (max-width: 1023px) {
+    #mini-add-queue { display: none !important; }
+}
+@media (min-width: 1024px) {
+    #mini-float { display: none !important; }
+}
+
+/* TUGAS 3: revert tampilan Now Playing MOBILE (desktop tidak tersentuh)
+   ATAS  : judul + artis + client (iFrame/VisionOS/Offline)
+   TENGAH: progress bar + media controls
+   BAWAH : Like / Add / More */
+@media (max-width: 1023px) {
+    #np-player.active { flex-direction: column; }
+    #np-player .np-meta { order: 1; }
+    #np-player .np-seek { order: 2; }
+    #np-player .np-controls { order: 3; }
+    #np-player .np-actions { order: 4; }
+    /* baris aksi ringkas milik right panel desktop tidak dipakai di mobile */
+    #np-player .rp-actions-row { display: none !important; }
+    /* client badge tampil lagi di mobile (L48 hanya menyembunyikan di panel kanan) */
+    #nowplaying #np-method { display: block !important; }
+}

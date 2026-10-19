@@ -558,6 +558,8 @@ function closePlayer() {
     }
   } catch {}
   closeNowPlaying();
+  // L57: stop total -> tutup overlay lirik juga (aman bila state sudah kosong)
+  try { closeMainLyrics(); } catch {}
   $('#miniplayer').classList.add('hidden');
   document.body.classList.remove('has-player', 'paused');
   $('#mini-progress-fill').style.width = '0%';
@@ -6638,6 +6640,8 @@ function songArtistBrowseId(s) {
   return (a && a.browseId) || '';
 }
 function goToArtist(song) {
+  // L57: klik nama artis saat overlay lirik terbuka -> tutup lirik dulu
+  try { closeMainLyrics(); } catch {}
   const s = song || focusedSong();
   if (!s) return;
   const id = songArtistBrowseId(s);
@@ -7652,6 +7656,14 @@ if (miniAddQueue) {
     if (!s) { toast('Nothing playing'); return; }
     queueSong(s, false);
     toast('Added to queue');
+  });
+}
+// L57: tombol Widget (PiP) di mini bar kiri — hanya tampil di mobile (CSS <1024px)
+const miniFloatBtn = $('#mini-float');
+if (miniFloatBtn) {
+  miniFloatBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showPipOnce();
   });
 }
 $('#np-quality').addEventListener('click', toggleQuality);
