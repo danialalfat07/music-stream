@@ -1928,9 +1928,22 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         background: #121212; padding: 32px;
         display: none; flex-direction: column;
     }
-    #main-lyrics-overlay.active { display: flex; overflow: hidden; }
+    #main-lyrics-overlay.active {
+        display: flex;
+        position: absolute;
+        inset: 0;
+        z-index: 50;
+        background: var(--bg);
+        overflow: hidden; /* Penting */
+    }
     /* L41: cegah scrollbar #view menembus di balik overlay */
-    body.lyrics-mode-active #view { overflow: hidden !important; }
+    /* L42: bekukan panel di belakang overlay (#view + #main) */
+    body.lyrics-mode-active #view,
+    body.lyrics-mode-active #main {
+        overflow: hidden !important;
+    }
+    /* L42: hanya scrollbar di dalam area lirik */
+    #main-lyrics-body { overflow-y: auto; overflow-x: hidden; height: 100%; }
     #main { position: relative; }
 }
 
