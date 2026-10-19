@@ -479,9 +479,12 @@ function syncPanelToggleIcon() {
 function toggleRightPanel() {
   const isOpen = !$('#nowplaying').classList.contains('hidden');
   if (isOpen) {
+    // L52: overlay lirik melebar penuh saat panel kanan ditutup
+    document.body.classList.add('panel-collapsed');
     closeNowPlaying();
     return;
   }
+  document.body.classList.remove('panel-collapsed');
   Player.pending = null;
   renderNowPlaying();
   renderPlayButtons();
@@ -492,12 +495,14 @@ window.toggleRightPanel = toggleRightPanel;
 function openNowPlaying() {
   $('#nowplaying').classList.remove('hidden');
   document.body.classList.add('np-open');
+  document.body.classList.remove('panel-collapsed'); // L52
   syncPanelToggleIcon();
 }
 function closeNowPlaying() {
   Player.pending = null;
   $('#nowplaying').classList.add('hidden');
   document.body.classList.remove('np-open');
+  document.body.classList.add('panel-collapsed'); // L52
   renderNowPlaying();
   renderPlayButtons();
   updateLikeButtons();
@@ -5134,7 +5139,7 @@ async function viewSearch(view, q = '', filter = null) {
   view.innerHTML = `
     ${q ? '' : '<div class="page-title">Search</div>'}
     <div class="search-wrap" style="position:relative">
-      <div class="search-bar${q ? ' has-q' : ''}">${icon('i-search', 'ic search-ic')}<input id="search-input" placeholder="What do you want to play?" value="${esc(q)}" autocomplete="off" spellcheck="false"><button type="button" class="search-clear" id="search-clear" title="Clear">${icon('i-x')}</button></div>
+      <div class="search-bar${q ? ' has-q' : ''}">${icon('i-search', 'ic search-ic')}<input id="search-input" type="search" placeholder="What do you want to play?" value="${esc(q)}" autocapitalize="sentences" autocorrect="on" spellcheck="true"><button type="button" class="search-clear" id="search-clear" title="Clear">${icon('i-x')}</button></div>
       <div class="suggest" id="suggest"></div>
     </div>
     ${q ? `<div class="search-chips">${filters.map((f) => `<button type="button" class="chip ${(filter || 'all') === f ? 'active' : ''}" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>` : ''}
@@ -7626,18 +7631,36 @@ $('#np-repeat').addEventListener('click', function () {
 });
 $('#np-speed').addEventListener('click', cycleSpeed);
 $('#np-float').addEventListener('click', () => showPipOnce());
-$('#mini-float').disabled = !window.NativePlayback; // L35c: lock on web
-$('#mini-float').addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (!window.NativePlayback) return; // L35c: web locked, native clickable
-  showPipOnce();
-});
+// L52: tombol Widget (PiP) di mini bar kiri diganti tombol "Add to Queue"
+const miniAddQueue = $('#mini-add-queue');
+if (miniAddQueue) {
+  miniAddQueue.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = Player.current || focusedSong();
+    if (!s) { toast('Nothing playing'); return; }
+    queueSong(s, false);
+    toast('Added to queue');
+  });
+}
 $('#np-quality').addEventListener('click', toggleQuality);
 $('#np-sb').addEventListener('click', toggleSB);
 $('#np-lyric-preview').addEventListener('click', () => switchNPTab('lyrics'));
 $('#np-sleep').addEventListener('click', openSleepTimer);
 const npShare = $('#np-share');
 if (npShare) npShare.addEventListener('click', () => shareSong(focusedSong()));
+// L52: tombol aksi ringkas di tab Song (right panel) — teruskan ke handler lama
+(function bindRpActions() {
+  const pairs = [
+    ['#rp-add', '#np-addpl'],
+    ['#rp-download', '#np-download'],
+    ['#rp-share', '#np-share'],
+  ];
+  for (const [id, targetSel] of pairs) {
+    const b = $(id);
+    const t = $(targetSel);
+    if (b && t) b.addEventListener('click', () => t.click());
+  }
+})();
 const npMore = $('#np-more');
 if (npMore) npMore.addEventListener('click', openNowPlayingMore);
 $('#np-artist').addEventListener('click', (e) => {

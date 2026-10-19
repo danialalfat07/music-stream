@@ -1953,6 +1953,10 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         overflow: hidden;
         box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
     }
+    /* L52: panel kanan ditutup -> overlay lirik melebar penuh menutupi panel kanan */
+    body.panel-collapsed #main-lyrics-overlay.active {
+        right: 8px !important;
+    }
     /* L51: header overlay (art bulat + judul + artis + tombol tutup) */
     .lyrics-header {
         display: flex;
@@ -2138,3 +2142,7 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         padding: 24px;
     }
 }
+
+/* L52: tombol Playlist lama di tab Song disembunyikan (global) —
+   Add sudah pindah ke baris .rp-actions-row agar tidak dobel ikon "+" */
+#nowplaying #np-addpl { display: none; }
