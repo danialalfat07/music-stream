@@ -2137,6 +2137,25 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         white-space: nowrap;
     }
     #nowplaying .track:hover { gap: 6px; }
+    /* L56: PAKSA durasi tampil. Mapping: --text-secondary tidak ada di repo
+       -> var(--muted) (pola warna sekunder repo, cth :476/:884).
+       span[class*="dur"] ikut menangkap .tdur.is-empty dan alias lain. */
+    #nowplaying .track .tdur,
+    #nowplaying .track .t-dur,
+    #nowplaying .track span[class*="dur"] {
+        display: inline-block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        width: auto !important;
+        min-width: 35px !important;
+        flex-shrink: 0 !important;
+        color: var(--muted) !important;
+        font-size: 12px !important;
+        text-align: right;
+        margin-left: 8px;
+    }
+    /* Pastikan teks judul/artis tidak menabrak durasi */
+    #nowplaying .track .tmeta { overflow: hidden; }
     #nowplaying .track .t-num { display: none; }
 }
 

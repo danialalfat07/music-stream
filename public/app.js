@@ -4127,21 +4127,33 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
     <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
     <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || it.subtitle || '')}</div></div>
     ${(() => {
-      if (!it.duration) return '';
-      const s = String(it.duration);
-      if (s.includes(':')) {
-        // L34f: validate colon string (hide impossible durations)
-        const parts = s.split(':').map((p) => Number(p));
-        if (!parts.length || parts.some((p) => !Number.isFinite(p) || p < 0)) return '';
-        let total = 0;
-        for (const p of parts) total = total * 60 + p;
-        if (total < 10 || total > 3600) return '';
-        return `<span class="tdur">${esc(s)}</span>`;
+      // L56: durasi baris queue WAJIB tampil. Ambil dari semua nama field yang
+      // dipakai repo (duration/dur/lengthSeconds/length), parse ke detik, dan
+      // JANGAN pernah mengembalikan '' (dulu guard L34f membuang span sama
+      // sekali saat data kosong/0 -> kolom durasi hilang total).
+      const raw =
+        it.duration != null && it.duration !== ''
+          ? it.duration
+          : it.dur != null && it.dur !== ''
+            ? it.dur
+            : it.lengthSeconds != null
+              ? it.lengthSeconds
+              : it.length;
+      const secs = parseDurationSec(raw);
+      let label = '';
+      if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
+      else if (secs > 43200) label = ''; // >12 jam = data rusak
+      else if (raw) label = String(raw).trim(); // string non-standar: tampil apa adanya
+      if (!label && it.qi === Player.index) {
+        // Baris "Now playing": fallback ke durasi engine yang sedang berjalan.
+        const live =
+          (Player.native && Player.native.dur && Number(Player.native.dur)) ||
+          (Player.audio && Number(Player.audio.duration)) ||
+          0;
+        if (live > 0 && live <= 43200) label = fmtTime(live);
       }
-      const n = Number(it.duration);
-      // L34f: hide numeric impossible (10s-1h only = valid music duration)
-      if (!Number.isFinite(n) || n < 10 || n > 3600) return '';
-      return `<span class="tdur">${esc(fmtTime(n))}</span>`;
+      const empty = !label;
+      return `<span class="tdur${empty ? ' is-empty' : ''}">${esc(empty ? '--:--' : label)}</span>`;
     })()}
     <button class="tbtn btn-fav" title="Favorite">${icon(Library.isFav(it.videoId) ? 'i-heart-f' : 'i-heart-o')}</button>
     <button class="tbtn btn-queue" title="Add to queue">${icon('i-queue')}</button>
