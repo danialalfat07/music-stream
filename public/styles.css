@@ -2170,9 +2170,13 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
     }
 }
 
-/* L52: tombol Playlist lama di tab Song disembunyikan (global) —
-   Add sudah pindah ke baris .rp-actions-row agar tidak dobel ikon "+" */
-#nowplaying #np-addpl { display: none; }
+/* L52/L58: tombol Playlist lama di tab Song disembunyikan HANYA di desktop —
+   Add sudah pindah ke baris .rp-actions-row agar tidak dobel ikon "+".
+   Di mobile baris .rp-actions-row tidak dipakai, jadi Add harus tetap tampil
+   (Like / Add / More = 3 tombol). */
+@media (min-width: 1024px) {
+    #nowplaying #np-addpl { display: none; }
+}
 
 /* ===== L57: mini bar widget/add split + urutan Now Playing mobile ===== */
 /* TUGAS 4: Widget (PiP) hanya Mobile/Tablet, Add to Queue hanya Desktop */
