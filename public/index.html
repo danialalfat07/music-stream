@@ -157,6 +157,13 @@ try {
       </div>
     </div>
     <div id="view"></div>
+    <div id="main-lyrics-overlay">
+        <div style="display:flex; justify-content:space-between; margin-bottom:24px;">
+            <h2>Lyrics</h2>
+            <button id="close-main-lyrics" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer;">✕</button>
+        </div>
+        <div id="main-lyrics-body" style="flex:1; overflow-y:auto; font-size:28px; font-weight:700; line-height:1.5; text-align:center; color:#a7a7a7;"></div>
+    </div>
   </main>
 
   <!-- Player bar -->
@@ -220,6 +227,7 @@ try {
             <div id="np-artist">-</div>
             <div id="np-method" class="method-badge" style="display:none"></div>
           </div>
+          <button id="np-show-lyrics-btn">🎤 Show Lyrics</button>
           <div class="np-seek">
             <span id="np-cur">0:00</span>
             <div class="np-range-wrap">

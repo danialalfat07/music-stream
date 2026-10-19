@@ -7591,6 +7591,22 @@ $('#np-artist').addEventListener('click', (e) => {
   goToArtist(focusedSong());
 });
 
+// L40: lyrics overlay di area tengah (#main) — tampil hanya desktop (CSS >=1024px)
+function openMainLyrics() {
+  try {
+    const ov = $('#main-lyrics-overlay');
+    if (ov) ov.classList.add('active');
+    const src = $('#lyrics-container');
+    const body = $('#main-lyrics-body');
+    if (src && body) body.innerHTML = src.innerHTML;
+  } catch {}
+}
+function closeMainLyrics() {
+  try { $('#main-lyrics-overlay')?.classList.remove('active'); } catch {}
+}
+$('#np-show-lyrics-btn')?.addEventListener('click', openMainLyrics);
+$('#close-main-lyrics')?.addEventListener('click', closeMainLyrics);
+
 let seekDragging = false;
 const range = $('#np-range');
 function npSeekDuration(){

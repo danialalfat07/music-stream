@@ -1891,3 +1891,44 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
   gap: 8px;
 }
 
+/* L40: desktop-only panel kanan — base hidden, aktif >=1024px */
+#np-show-lyrics-btn { display: none; }
+@media (min-width: 1024px) {
+    /* 1. Sembunyikan tab Lyrics di panel kanan desktop */
+    #nowplaying .np-tabs [data-nptab="lyrics"] {
+        display: none !important;
+    }
+
+    /* 2. Sembunyikan kontrol player di tab Song panel kanan */
+    #nowplaying .np-player .np-seek,
+    #nowplaying .np-player .np-controls {
+        display: none !important;
+    }
+
+    /* 3. Styling tombol Show Lyrics di panel kanan */
+    #np-show-lyrics-btn {
+        display: flex;
+        width: 100%;
+        background: var(--accent);
+        color: #000;
+        padding: 12px;
+        border-radius: 8px;
+        font-weight: 700;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        margin-top: 16px;
+        border: none;
+        cursor: pointer;
+    }
+
+    /* 4. Overlay Lirik di Area Tengah */
+    #main-lyrics-overlay {
+        position: absolute; inset: 0; z-index: 50;
+        background: #121212; padding: 32px;
+        display: none; flex-direction: column;
+    }
+    #main-lyrics-overlay.active { display: flex; }
+    #main { position: relative; }
+}
+
