@@ -1945,5 +1945,53 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
     /* L42: hanya scrollbar di dalam area lirik */
     #main-lyrics-body { overflow-y: auto; overflow-x: hidden; height: 100%; }
     #main { position: relative; }
+
+    /* L43: layout baris antrean di right panel desktop */
+    /* 1. Container Baris Antrean */
+    #nowplaying .track {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        box-sizing: border-box;
+    }
+    /* 2. Container Teks (Judul & Artis) */
+    #nowplaying .track .tmeta {
+        flex: 1;
+        min-width: 0; /* Mencegah teks meluber */
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    /* 3. Teks Judul dan Artis */
+    #nowplaying .track .tt {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+    }
+    #nowplaying .track .ts {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+    }
+    /* 4. Sembunyikan elemen yang bikin berantakan di panel sempit */
+    #nowplaying .track .t-num { display: none; }
+    #nowplaying .track .btn-fav,
+    #nowplaying .track .btn-queue,
+    #nowplaying .track .btn-addpl,
+    #nowplaying .track .btn-dl,
+    #nowplaying .track .btn-more { display: none; }
+    /* 5. Tombol Aksi (Hover) */
+    #nowplaying .track .tbtn { flex-shrink: 0; }
 }
 
