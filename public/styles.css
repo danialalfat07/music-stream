@@ -2111,6 +2111,8 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         display: none;
         flex-shrink: 0;
         align-items: center;
+        justify-content: center;
+        width: 18px; /* L55: ringkas agar tidak mendorong durasi keluar panel */
         gap: 8px;
         background: transparent; /* HAPUS KOTAK/BACKGROUND */
         padding: 0; /* HAPUS PADDING */
@@ -2122,12 +2124,19 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
     #nowplaying .track:hover .tbtn,
     #nowplaying .track:hover .q-actions { display: flex; }
     #nowplaying .track .tbtn:hover { color: var(--text); }
-    /* L44.6 Sembunyikan durasi saat hover agar tidak tabrakan */
-    #nowplaying .track:hover .tdur,
-    #nowplaying .track:hover .duration {
-        opacity: 0;
-        pointer-events: none;
+    /* L55: durasi di queue HARUS selalu terlihat.
+       Rule L44.6 (opacity:0 saat hover) dihapus — itulah yang membuat semua
+       durasi "hilang" begitu kursor berada di atas daftar antrean. Durasi
+       sekarang tidak boleh menyusut, didorong ke kanan, dan tombol aksi hover
+       dibuat ringkas (width 18px + gap baris 6px) supaya durasi tidak
+       terpotong keluar panel 340px. */
+    #nowplaying .track .tdur,
+    #nowplaying .track .duration { /* .duration: inert, tidak ada di repo */
+        flex-shrink: 0;
+        margin-left: auto;
+        white-space: nowrap;
     }
+    #nowplaying .track:hover { gap: 6px; }
     #nowplaying .track .t-num { display: none; }
 }
 
