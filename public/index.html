@@ -323,6 +323,7 @@ try {
           <div class="settings-section" id="sec-appearance">
             <div class="settings-section-title">Appearance</div>
             <div class="settings-row"><span class="s-label">Theme</span><button id="set-theme" class="pill-btn"><svg class="ic"><use href="#i-sun"/></svg><span>Toggle</span></button></div>
+            <div class="settings-row"><span class="s-label">Your name</span><button id="set-name" class="pill-btn"><span id="set-name-value">Set name</span></button></div>
           </div>
           <div class="settings-section" id="sec-playback">
             <div class="settings-section-title">Playback</div>
@@ -589,6 +590,15 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
 </script>
+<!-- L58: modal input nama user (di luar #app, level body) -->
+<div id="username-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>Siapa nama kamu?</h2>
+    <p>Nama ini akan ditampilkan di halaman Home.</p>
+    <input type="text" id="username-input" placeholder="Masukkan nama..." maxlength="20" autocomplete="off">
+    <button id="save-username-btn" class="btn-primary">Simpan</button>
+  </div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

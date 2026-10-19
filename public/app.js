@@ -4666,8 +4666,9 @@ async function viewHome(view) {
   if (!cacheGet(_ck)) view.innerHTML = skeletonHTML;
   const now = new Date();
   const h = now.getHours();
-  const greet =
-    h < 11 ? 'Good morning' : h < 16 ? 'Good afternoon' : 'Good evening';
+  // L58: sapaan dinamis 04:00-11:59 morning / 12:00-17:59 afternoon / 18:00-03:59 evening
+  const greet = greetingForHour(h);
+  const userName = getUserName();
   applyTint(greet);
   const d = await api('/api/home');
   const hist = Library.history.slice(0, 16);
@@ -4679,7 +4680,10 @@ async function viewHome(view) {
     day: 'numeric',
     month: 'long',
   });
-  let html = `<div class="hello-row"><div><div class="greeting">${esc(dateLine)}</div><h1 class="page-title">${greet}</h1></div></div>`;
+  const greetHTML = userName
+    ? `${greet}, <span style="color:var(--accent)">${esc(userName)}</span>`
+    : greet;
+  let html = `<div class="hello-row"><div><div class="greeting">${esc(dateLine)}</div><h1 class="page-title">${greetHTML}</h1></div></div>`;
   html += `<div id="offline-banner" class="offline-banner" hidden><div class="offline-banner-text"><div class="offline-banner-title">You're offline</div><div class="offline-banner-sub">Play your downloaded music</div></div><button type="button" id="offline-play-btn" class="offline-banner-btn">${icon('i-play')}<span>Play Offline Queue</span></button></div>`;
   // L34: Offline Library shortcut card (only when has offline tracks)
   try {
@@ -8493,6 +8497,63 @@ setInterval(() => {
   }
 }, 1500);
 
+/* ===== L58: nama user (localStorage) + sapaan dinamis ===== */
+const USERNAME_KEY = 'smw_username';
+
+function getUserName() {
+  try { return (localStorage.getItem(USERNAME_KEY) || '').trim(); } catch { return ''; }
+}
+
+// Jam 04:00-11:59 morning, 12:00-17:59 afternoon, 18:00-03:59 evening
+function greetingForHour(h) {
+  const hr = Number.isFinite(h) ? h : new Date().getHours();
+  if (hr >= 4 && hr < 12) return 'Good morning';
+  if (hr >= 12 && hr < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function syncNameSettingLabel() {
+  const el = $('#set-name-value');
+  if (!el) return;
+  el.textContent = getUserName() || 'Set name';
+}
+
+function openUsernameModal() {
+  const m = $('#username-modal');
+  if (!m) return;
+  const inp = $('#username-input');
+  if (inp) {
+    inp.value = getUserName(); // pre-fill nama lama saat edit
+    setTimeout(() => { try { inp.focus(); } catch {} }, 60);
+  }
+  m.classList.remove('hidden');
+}
+
+function closeUsernameModal() {
+  try { $('#username-modal')?.classList.add('hidden'); } catch {}
+}
+
+function saveUsername() {
+  const inp = $('#username-input');
+  const name = (inp?.value || '').trim().slice(0, 20);
+  if (!name) { alert('Nama tidak boleh kosong'); return; }
+  try { localStorage.setItem(USERNAME_KEY, name); } catch {}
+  syncNameSettingLabel();
+  closeUsernameModal();
+  try { route(); } catch {}
+}
+
+function ensureUsername() {
+  syncNameSettingLabel();
+  if (!getUserName()) openUsernameModal();
+}
+
+$('#save-username-btn')?.addEventListener('click', saveUsername);
+$('#username-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); saveUsername(); }
+});
+$('#set-name')?.addEventListener('click', () => openUsernameModal());
+
 /* boot */
 (() => {
   const splash = $('#splash');
@@ -8618,4 +8679,5 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) persistQueue();
 });
 restoreQueue();
+ensureUsername();
 route();
