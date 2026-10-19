@@ -7651,7 +7651,6 @@ if (npShare) npShare.addEventListener('click', () => shareSong(focusedSong()));
 // L52: tombol aksi ringkas di tab Song (right panel) — teruskan ke handler lama
 (function bindRpActions() {
   const pairs = [
-    ['#rp-add', '#np-addpl'],
     ['#rp-download', '#np-download'],
     ['#rp-share', '#np-share'],
   ];
@@ -7660,6 +7659,9 @@ if (npShare) npShare.addEventListener('click', () => shareSong(focusedSong()));
     const t = $(targetSel);
     if (b && t) b.addEventListener('click', () => t.click());
   }
+  // L53: tombol ikon lirik di tab Song -> buka overlay lirik (sama seperti Show Lyrics)
+  const lb = $('#rp-lyrics');
+  if (lb) lb.addEventListener('click', () => openMainLyrics());
 })();
 const npMore = $('#np-more');
 if (npMore) npMore.addEventListener('click', openNowPlayingMore);
