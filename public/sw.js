@@ -1,4 +1,4 @@
-const CACHE='dnialify-assets-v3.4.8';
+const CACHE='dnialify-assets-v3.4.9';
 const ASSETS=['/','/index.html','/styles.css','/app.js','/logo.png','/logo-192.png','/manifest.json'];
 self.addEventListener('message',e=>{
   if(e.data && e.data.type==='SKIP_WAITING') self.skipWaiting();
