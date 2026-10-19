@@ -460,9 +460,39 @@ function toggleTheme() {
   store.set('theme', next);
   updateThemeIcon();
 }
+// L48b: sinkronisasi ikon tombol toggle panel kanan (pojok kanan bawah player).
+// CATATAN: repo tidak punya #btn-toggle-panel / #appGrid / class hide-right
+// (refactor app-grid L39 sudah di-revert), jadi target nyata = #mini-open
+// dan state panel = #nowplaying.hidden. Ukuran ikon 16px mengikuti
+// .icon-btn.sm .ic agar tidak menggeser layout.
+const PANEL_ICON_MAX =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+const PANEL_ICON_MIN =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
+function syncPanelToggleIcon() {
+  const btn = $('#mini-open');
+  if (!btn) return;
+  const isOpen = !$('#nowplaying').classList.contains('hidden');
+  btn.innerHTML = isOpen ? PANEL_ICON_MIN : PANEL_ICON_MAX;
+  btn.title = isOpen ? 'Minimize Panel' : 'Maximize Panel';
+}
+function toggleRightPanel() {
+  const isOpen = !$('#nowplaying').classList.contains('hidden');
+  if (isOpen) {
+    closeNowPlaying();
+    return;
+  }
+  Player.pending = null;
+  renderNowPlaying();
+  renderPlayButtons();
+  updateLikeButtons();
+  openNowPlaying();
+}
+window.toggleRightPanel = toggleRightPanel;
 function openNowPlaying() {
   $('#nowplaying').classList.remove('hidden');
   document.body.classList.add('np-open');
+  syncPanelToggleIcon();
 }
 function closeNowPlaying() {
   Player.pending = null;
@@ -471,6 +501,7 @@ function closeNowPlaying() {
   renderNowPlaying();
   renderPlayButtons();
   updateLikeButtons();
+  syncPanelToggleIcon();
 }
 function closePlayer() {
   // true clear: no song queued, block autoplay until next explicit play
@@ -7341,7 +7372,7 @@ const openNP = (e) => {
 };
 $('#mini-art').addEventListener('click', openNP);
 $('.mini-meta').addEventListener('click', openNP);
-$('#mini-open').addEventListener('click', openNP);
+$('#mini-open').addEventListener('click', (e) => { e.stopPropagation(); toggleRightPanel(); });
 const openQueue = (e) => {
   e.stopPropagation();
   openNowPlaying();
@@ -7451,7 +7482,7 @@ miniBar.addEventListener('pointerdown', (e) => {
 miniBar.addEventListener('pointermove', onMiniSeekMove, { passive: false });
 miniBar.addEventListener('pointerup', stopMiniSeek);
 miniBar.addEventListener('pointercancel', stopMiniSeek);
-$('#np-close').addEventListener('click', closeNowPlaying);
+$('#np-close').addEventListener('click', toggleRightPanel);
 $('#mini-close').addEventListener('click', (e) => {
   e.stopPropagation();
   closePlayer();
