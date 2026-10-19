@@ -1948,7 +1948,8 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         z-index: 50;
         background: linear-gradient(180deg, #1db954 0%, #121212 100%);
         border-radius: 8px;
-        padding: 32px;
+        /* L54: margin kiri & kanan sama (tidak terlalu lebar, tidak tipis) */
+        padding: 32px clamp(28px, 6vw, 88px);
         flex-direction: column;
         overflow: hidden;
         box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
@@ -1958,6 +1959,7 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         right: 8px !important;
     }
     /* L51: header overlay (art bulat + judul + artis + tombol tutup) */
+    /* L54: konten rata kiri, tombol tutup rata kanan (space-between) */
     .lyrics-header {
         display: flex;
         justify-content: space-between;
@@ -1965,9 +1967,6 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         gap: 16px;
         margin-bottom: 32px;
         width: 100%;
-        max-width: 800px;
-        margin-left: auto;
-        margin-right: auto;
         flex-shrink: 0;
     }
     .lyrics-header-left {
@@ -1994,7 +1993,7 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 560px;
+        max-width: 100%;
     }
     .lo-artist {
         font-size: 16px;
@@ -2026,11 +2025,9 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         overflow: hidden !important;
     }
     /* L51: area teks lirik = satu-satunya scroll container di dalam overlay */
+    /* L54: rata kiri; scrollbar menempel di tepi kanan area konten */
     #main-lyrics-body {
         width: 100%;
-        max-width: 800px;
-        margin-left: auto;
-        margin-right: auto;
         flex: 1;
         min-height: 0;
         overflow-y: auto;
@@ -2040,7 +2037,8 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         font-size: 28px;
         font-weight: 700;
         line-height: 1.5;
-        text-align: center;
+        text-align: left;
+        padding-right: 10px;
     }
     #main-lyrics-body .lyric-line.active {
         color: #fff;
@@ -2139,7 +2137,8 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
     #main-lyrics-overlay.active {
         top: 0; left: 0; right: 0; bottom: 0;
         border-radius: 0;
-        padding: 24px;
+        /* L54: margin kiri-kanan tetap sama di layar sempit */
+        padding: 24px clamp(24px, 5vw, 56px);
     }
 }
 
