@@ -1998,23 +1998,30 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         min-height: 0; /* Sangat penting agar flexbox bisa scroll */
         overflow-y: auto !important;
     }
-    /* L44.4-5 Tombol Aksi (Hover): default sembunyi, muncul saat hover.
-       Mapping: repo memakai tombol individual .tbtn tanpa wrapper, jadi
-       dipakai reveal in-flow + pill bg per tombol (var --bg-highlight
-       tidak ada di repo -> var --hover-strong). Tanpa posisi absolute
-       (5 default + 3 extras bakal numpuk di titik yang sama). */
+    /* L45 Tombol Aksi (Hover): KOTAK DIHAPUS ala prompt. Mapping:
+       repo memakai tombol individual .tbtn tanpa wrapper, jadi
+       position:absolute per tombol (verbatim prompt) akan menumpuk
+       semua tombol di satu titik -> reveal tetap in-flow (keputusan
+       L44); jarak antar ikon 12px tetap lewat gap .track (:1956).
+       Warna: --text-secondary/--text-primary tidak ada di repo ->
+       var(--muted)/var(--text). Tanpa posisi absolute (5 default +
+       extras bakal numpuk di titik yang sama). */
     #nowplaying .track .tbtn,
-    #nowplaying .track .q-actions {
+    #nowplaying .track .q-actions { /* .q-actions: inert, tidak ada di repo */
         display: none;
         flex-shrink: 0;
         align-items: center;
         gap: 8px;
-        background: var(--hover-strong);
-        padding: 4px 8px;
-        border-radius: 4px;
+        background: transparent; /* HAPUS KOTAK/BACKGROUND */
+        padding: 0; /* HAPUS PADDING */
+        border-radius: 0; /* HAPUS SUDUT MELENGKUNG */
+        color: var(--muted);
+        cursor: pointer;
+        transition: color 0.2s;
     }
     #nowplaying .track:hover .tbtn,
     #nowplaying .track:hover .q-actions { display: flex; }
+    #nowplaying .track .tbtn:hover { color: var(--text); }
     /* L44.6 Sembunyikan durasi saat hover agar tidak tabrakan */
     #nowplaying .track:hover .tdur,
     #nowplaying .track:hover .duration {
