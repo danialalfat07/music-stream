@@ -3483,6 +3483,8 @@ function renderLyrics() {
     if (ov && ov.classList.contains('active')) {
       const body = $('#main-lyrics-body');
       if (body) body.innerHTML = c.innerHTML;
+      // L51: header overlay ikut ganti lagu (art/judul/artis)
+      if (typeof syncLyricsOverlayHeader === 'function') syncLyricsOverlayHeader();
     }
   } catch {}
 }
@@ -7644,12 +7646,27 @@ $('#np-artist').addEventListener('click', (e) => {
 });
 
 // L40: lyrics overlay di area tengah (#main) — tampil hanya desktop (CSS >=1024px)
+// L51: isi header overlay (art bulat + judul + artis) dari lagu yang sedang diputar
+function syncLyricsOverlayHeader() {
+  try {
+    const song = Player.current;
+    if (!song) return;
+    const art = $('#lo-art');
+    if (art) art.src = safeCover(song.thumbnail) || COVER_PH;
+    const title = $('#lo-title');
+    if (title) title.textContent = displayTitle(song.title) || song.title || '-';
+    const artist = $('#lo-artist');
+    if (artist) artist.textContent = song.artist || song.subtitle || '';
+  } catch {}
+}
 function openMainLyrics() {
   try {
     // L41: kunci scrollbar #view selama overlay terbuka
     document.body.classList.add('lyrics-mode-active');
     const ov = $('#main-lyrics-overlay');
     if (ov) ov.classList.add('active');
+    // L51: header overlay (art/artist/title)
+    syncLyricsOverlayHeader();
     const src = $('#lyrics-container');
     const body = $('#main-lyrics-body');
     if (src && body) body.innerHTML = src.innerHTML;

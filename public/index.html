@@ -158,11 +158,17 @@ try {
     </div>
     <div id="view"></div>
     <div id="main-lyrics-overlay">
-        <div style="display:flex; justify-content:space-between; margin-bottom:24px;">
-            <h2>Lyrics</h2>
-            <button id="close-main-lyrics" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer;">✕</button>
+        <div class="lyrics-header">
+            <div class="lyrics-header-left">
+                <img class="lo-circle-art" id="lo-art" alt="" />
+                <div class="lo-meta">
+                    <div class="lo-title" id="lo-title">-</div>
+                    <div class="lo-artist" id="lo-artist">-</div>
+                </div>
+            </div>
+            <button id="close-main-lyrics" class="lo-close-btn" title="Close">✕</button>
         </div>
-        <div id="main-lyrics-body" style="flex:1; overflow-y:auto; font-size:28px; font-weight:700; line-height:1.5; text-align:center; color:#a7a7a7;"></div>
+        <div id="main-lyrics-body"></div>
     </div>
   </main>
 
