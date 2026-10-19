@@ -1921,6 +1921,13 @@ body.has-select-toolbar #main { padding-bottom: 80px; }
         border: none;
         cursor: pointer;
     }
+    /* L47: ikon SVG di tombol Show Lyrics (pengganti emoji mic) */
+    #np-show-lyrics-btn .ic {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+        flex-shrink: 0;
+    }
 
     /* 4. Overlay Lirik di Area Tengah */
     #main-lyrics-overlay {
