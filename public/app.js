@@ -917,29 +917,44 @@ async function ensureAppVersionBeforePlay() {
   return true;
 }
 
-// FE gate: block UI total kalau versi native device < MIN (fail-open kalau bridge gagal).
+// FE gate: block UI total kalau versi native device < MIN.
 // Bridge: window.AppInfo.getVersionName() (sinkron, string versionName) — MainActivity.java:978.
+// L60: versi kosong / "n/a" / "null" / "undefined" / bukan semver TIDAK lagi lolos gate.
+let _gateCheckCount = 0;
 function enforceNativeMinVersion() {
   try {
     if (document.getElementById('native-update-gate')) return; // sudah di-block
+    _gateCheckCount++;
     const MIN = '3.0.0';
+    // Web murni (tanpa bridge native) tetap jalan normal: tak ada versi native untuk digate.
+    const hasBridge = !!(window.AppInfo && typeof AppInfo.getVersionName === 'function');
+    if (!hasBridge && !window.NativePlayback) return;
     let native = '';
     try {
-      if (window.AppInfo && typeof AppInfo.getVersionName === 'function') {
-        native = AppInfo.getVersionName() || '';
-      }
+      if (hasBridge) native = AppInfo.getVersionName() || '';
     } catch {}
-    if (!native) return; // bridge gagal / belum ready -> fail-open, jangan block
-    const cmp = (a, b) => {
-      const pa = String(a).split('.').map(Number);
-      const pb = String(b).split('.').map(Number);
-      for (let i = 0; i < 3; i++) {
-        if ((pa[i] || 0) < (pb[i] || 0)) return -1;
-        if ((pa[i] || 0) > (pb[i] || 0)) return 1;
-      }
-      return 0;
-    };
-    if (cmp(native, MIN) >= 0) return;
+    // L60: normalisasi lalu deteksi versi invalid (termasuk "n/a"/"null"/tanpa titik)
+    const raw = String(native == null ? '' : native).trim();
+    const low = raw.toLowerCase();
+    const invalid = !raw
+      || low === 'n/a' || low === 'null' || low === 'undefined'
+      || !raw.includes('.');
+    if (invalid) {
+      // Bridge native kadang belum siap saat parse: beri 1 kesempatan (cek ulang 2s).
+      // Kalau tetap kosong, versi tidak bisa diverifikasi -> tetap picu gate.
+      if (!raw && _gateCheckCount < 2) return;
+    } else {
+      // L60: perbandingan major/minor/patch yang ketat (NaN tidak dianggap 0)
+      const parts = raw.split('.').map((n) => parseInt(n, 10));
+      const major = isFinite(parts[0]) ? parts[0] : -1;
+      const minor = isFinite(parts[1]) ? parts[1] : 0;
+      const patch = isFinite(parts[2]) ? parts[2] : 0;
+      const minParts = MIN.split('.').map(Number);
+      const diff = major !== minParts[0] ? major - minParts[0]
+        : minor !== minParts[1] ? minor - minParts[1]
+          : patch - minParts[2];
+      if (diff >= 0) return; // 3.0.0 ke atas (termasuk 3.1.0) lolos
+    }
     const DRIVE = 'https://drive.google.com/drive/folders/1ppIjUKCUcVBc6V24jf7TlVAMFTraquKT?usp=drive_link';
     const el = document.createElement('div');
     el.id = 'native-update-gate';
