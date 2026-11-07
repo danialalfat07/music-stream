@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.5.2";
+const APP_VERSION = "3.5.3";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -707,24 +707,43 @@ const Library = {
   },
   pushHistory(song) {
     let h = this.history.filter((s) => s.videoId !== song.videoId);
-    // L61: pastikan durasi ikut tersimpan supaya "Recently played" tidak
-    // menampilkan --:--. Fallback ke stats lokal / engine yang berjalan bila
-    // song tidak membawa field duration.
-    let dur = song.duration;
+    // L62 (F3): durasi SERING kosong di sini. Urutan pengambilan:
+    //   1) field song.duration/dur/lengthSeconds/length
+    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")  <-- F1
+    //   3) segmen durasi di dalam song.title (jika ada)
+    //   4) stats lokal
+    //   5) durasi engine yang sedang berjalan
+    let dur = song.duration ?? song.dur ?? song.lengthSeconds ?? song.length;
+    if (dur == null || dur === '') {
+      const dsub = durationFromSubtitle(song.subtitle);
+      if (dsub) dur = dsub;
+    }
+    if (dur == null || dur === '') {
+      const dtitle = durationFromSubtitle(song.title);
+      if (dtitle) dur = dtitle;
+    }
     if (dur == null || dur === '') {
       try {
         const st = this.stats[song.videoId];
         if (st && st.duration) dur = st.duration;
       } catch {}
     }
-    if ((dur == null || dur === '') && song.videoId) {
+    if (dur == null || dur === '') {
       const live =
         (Player.native && Player.native.dur && Number(Player.native.dur)) ||
         (Player.audio && Number(Player.audio.duration)) ||
         0;
       if (live > 0 && live <= 43200) dur = live;
     }
-    const rec = dur == null || dur === '' ? { ...song } : { ...song, duration: dur };
+    // Normalisasi "3.22" -> "3:22" agar konsisten saat dibaca ulang.
+    const rec = { ...song };
+    if (dur != null && dur !== '') rec.duration = normalizeDuration(dur);
+    // Subtitle dibersihkan dari segmen durasi supaya baris bawah Recently
+    // Played tidak menampilkan "3.22" lagi (F4, konsisten dgn Search Results).
+    if (rec.subtitle) {
+      const { rest, plays } = splitSubtitle(rec.subtitle);
+      rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
+    }
     h.unshift({ ...rec, playedAt: Date.now() });
     store.set('hist', h.slice(0, 100));
     // play stats (local scrobble)
@@ -4056,26 +4075,66 @@ async function downloadMp3(song) {
 function looksLikePlays(s) {
   return /pemutaran|plays|ditonton|views|x ditonton/i.test(String(s || ''));
 }
-// L61: Search UI — pisahkan subtitle "Artist • 844 jt pemutaran • 3:45"
-// menjadi bagian artist dan bagian view-count. Dipakai supaya baris bawah
-// hasil pencarian hanya menampilkan artist + jumlah tayang (durasi tidak
-// lagi ikut di baris bawah; durasi punya kolom sendiri di ujung kanan).
-function splitPlays(subtitle) {
+// L62: segmen durasi di dalam subtitle. Format dari API memakai TITIK
+// (mis. "3.22" = 3 menit 22 detik) maupun titik dua ("3:22"/"1:02:30").
+const DUR_SEG_RE = /^\d{1,2}[:.]\d{2}([:.]\d{2})?$/;
+function looksLikeDuration(s) {
+  return DUR_SEG_RE.test(String(s || '').trim());
+}
+// L62: pecah subtitle "Artist • 844 jt pemutaran • 3.22" menjadi bagian
+// artist/plays (rest) + durasi mentah + segmen mentah. Dipakai BERSAMA oleh
+// trackRowHTML (F1/F2/F4) dan Library.pushHistory (F3) supaya durasi tidak
+// pernah lagi nyangkut di baris bawah dan kolom .tdur selalu terisi.
+function splitSubtitle(subtitle) {
   const parts = String(subtitle || '')
     .split('\u2022')
     .map((x) => x.trim())
     .filter(Boolean);
+  const durRaw = parts.find((p) => looksLikeDuration(p)) || '';
   const plays = parts.find((p) => looksLikePlays(p)) || '';
-  const rest = parts.filter((p) => p !== plays).join(' \u2022 ');
+  const rest = parts.filter((p) => p !== durRaw && p !== plays).join(' \u2022 ');
+  return { durRaw, plays, rest, parts };
+}
+// Backward-compat alias (dipakai juga oleh resolveLyrics & songFromItem).
+function splitPlays(subtitle) {
+  const { plays, rest } = splitSubtitle(subtitle);
   return { plays, rest };
 }
-// L61: jumlah tayang untuk baris bawah Search Results. Ambil dari subtitle
+// L62: durasi (detik) hasil parsing dari subtitle. Prioritas: segmen durasi
+// eksplisit, lalu scan seluruh segmen dengan parseDurationSec.
+function durationFromSubtitle(subtitle) {
+  const { durRaw, parts } = splitSubtitle(subtitle);
+  let secs = durRaw ? parseDurationSec(durRaw) : 0;
+  if (!(secs >= 1 && secs <= 43200)) {
+    for (const p of parts) {
+      if (looksLikeDuration(p)) {
+        const s = parseDurationSec(p);
+        if (s >= 1 && s <= 43200) { secs = s; break; }
+      }
+    }
+  }
+  return secs >= 1 && secs <= 43200 ? secs : 0;
+}
+// L62: jumlah tayang untuk baris bawah Search Results. Ambil dari subtitle
 // (segment "844 jt pemutaran") atau field eksplisit bila API mengirimnya.
 function viewCountText(it) {
   const direct =
     it.viewCount || it.views || it.viewCountText || it.playCount || '';
   if (direct) return String(direct);
-  return splitPlays(it.subtitle).plays;
+  return splitSubtitle(it.subtitle).plays;
+}
+// L62: baris bawah (.ts) = Artist + Views saja. Durasi DIBUANG dari sini
+// (segmen durasi difilter oleh splitSubtitle). Artist diprioritaskan dari
+// field eksplisit, kalau tidak ada pakai sisa segmen subtitle.
+function cleanSubtitleText(it) {
+  const { rest, plays } = splitSubtitle(it.subtitle);
+  const artist = String(it.artist || '').trim();
+  let text = artist || rest;
+  // Kalau artist eksplisit dipakai, jangan tampilkan durasi apa pun di rest.
+  if (artist && plays && !/ditonton|pemutaran|views/i.test(text)) {
+    text = artist;
+  }
+  return text.replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
 }
 function normalizeDuration(s) {
   const t = String(s || '').trim();
@@ -4191,12 +4250,12 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
     <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
     ${tn}${qn}
     <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
-    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || splitPlays(it.subtitle).rest || it.subtitle || '')}${viewCountText(it) ? `<span class="tvc">${esc(viewCountText(it))}</span>` : ''}</div></div>
+    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(cleanSubtitleText(it))}</div></div>
     ${(() => {
-      // L56: durasi baris queue WAJIB tampil. Ambil dari semua nama field yang
-      // dipakai repo (duration/dur/lengthSeconds/length), parse ke detik, dan
-      // JANGAN pernah mengembalikan '' (dulu guard L34f membuang span sama
-      // sekali saat data kosong/0 -> kolom durasi hilang total).
+      // L62: kolom durasi. Prioritas: field eksplisit (duration/dur/
+      // lengthSeconds/length) -> segmen durasi DI DALAM subtitle ("3.22"
+      // atau "3:22") -> stats lokal -> durasi engine yang sedang berjalan.
+      // "--:--" hanya tersisa bila benar-benar tidak ada data durasi.
       const raw =
         it.duration != null && it.duration !== ''
           ? it.duration
@@ -4206,18 +4265,7 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
               ? it.lengthSeconds
               : it.length;
       let secs = parseDurationSec(raw);
-      if (!(secs >= 1 && secs <= 43200)) {
-        // L61: fallback — subtitle sering memuat durasi ("Artist • 844 jt
-        // pemutaran • 3:45") atau record history lama tidak menyimpan durasi.
-        // Ambil dari segment subtitle, lalu dari stats lokal.
-        const sub = splitPlays(it.subtitle).rest;
-        const m = String(sub).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-        if (m) {
-          secs = m[3]
-            ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
-            : Number(m[1]) * 60 + Number(m[2]);
-        }
-      }
+      if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
       if (!(secs >= 1 && secs <= 43200) && it.videoId) {
         try {
           const st = Library.stats[it.videoId];
@@ -4226,13 +4274,11 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
       }
       let label = '';
       if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
-      else if (secs > 43200) label = ''; // >12 jam = data rusak
-      else if (raw) label = String(raw).trim(); // string non-standar: tampil apa adanya
-      if (!label && it.qi === Player.index) {
-        // Baris "Now playing": fallback ke durasi engine yang sedang berjalan.
+      if (!label) {
         const live =
-          (Player.native && Player.native.dur && Number(Player.native.dur)) ||
-          (Player.audio && Number(Player.audio.duration)) ||
+          (it.qi === Player.index &&
+            ((Player.native && Player.native.dur && Number(Player.native.dur)) ||
+              (Player.audio && Number(Player.audio.duration)))) ||
           0;
         if (live > 0 && live <= 43200) label = fmtTime(live);
       }

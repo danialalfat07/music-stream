@@ -1,423 +1,107 @@
 ﻿================================================================
-WORK ORDER - FIX UI SEARCH PAGE + VERSION BUMP 3.5.2 + PUSH
+WORK ORDER - FIX TOTAL DURASI & SUBTITLE SEARCH (REVISI V2)
 ================================================================
 
 GUARD
 1. Root project: C:\Project\music-stream
-2. JANGAN baca file bernama opencode.txt di folder manapun
-3. Project ini murni JS (Capacitor). Source yang boleh diubah
-   HANYA file di folder public/ (terutama public/app.js,
-   public/styles.css, public/index.html). File native
-   (.java), server.js, AndroidManifest.xml, build.gradle
-   JANGAN disentuh.
-4. Sebelum eksekusi, jalankan `git status` dan `git branch`
-   di C:\Project\music-stream. Laporkan hasilnya di report:
-   - Branch saat ini harus `main` (atau master, sesuai repo).
-     Kalau BUKAN main: STOP, tulis error ke report, jangan
-     lanjut - karena instruksi user push ke main.
-   - Kalau ada uncommitted changes dari task sebelumnya
-     (Play Protect fix, Mix/refill fix), CATAT di report.
-     Nanti semua akan di-commit sekaligus (lihat FASE 4).
-5. Cek versi saat ini di package.json root. Log di report
-   sebelum bump. Kalau versi saat ini LEBIH TINGGI dari
-   3.5.2 (misal typo user), STOP dan lapor - jangan
-   downgrade tanpa konfirmasi.
-6. Kalau ambigu saat investigasi, LAPORKAN dulu di report.
-   JANGAN langsung fix dengan asumsi yang tidak pasti.
+2. JANGAN baca file opencode.txt di subfolder manapun.
+3. Ini adalah REVISI. Percobaan sebelumnya GAGAL (durasi masih
+   "--:--" dan durasi masih nyangkut di teks subtitle).
+4. Fokus HANYA di public/app.js (JS FE). JANGAN sentuh file native
+   atau server.js.
+5. JANGAN halusinasi. Kalau kode tidak berubah sesuai instruksi,
+   JANGAN klaim berhasil di report. Gunakan `node --check` untuk
+   verifikasi syntax.
+6. Sebelum build, JANGAN LUPA jalankan `npx cap copy android`
+   (wajib agar perubahan masuk APK).
+7. Versi APK saat ini 3.2.0. Jalankan `npm run bump 3.2.1` (atau
+   edit manual package.json -> version menjadi 3.2.1 DAN webVersion
+   menjadi 3.5.3) agar APK benar-benar ter-update versinya.
 
 ================================================================
-KONTEKS - 3 ISSUE UI DI SEARCH PAGE
+MASALAH BERDASARKAN SCREENSHOT USER
 ================================================================
-
-Aplikasi: DBOT / music-stream
-Access: bottom bar -> tombol Search -> masuk Search Page
-
-ISSUE 1 - Recently Played: durasi tampil "--:--"
-  Di section Recently Played (bagian atas Search Page),
-  setiap item menampilkan durasi "--:--" (bukan durasi
-  sebenarnya). Seharusnya tampil seperti "3:45" atau
-  "1:02:30".
-
-ISSUE 2 - Searchbox: ada 2 tombol X (clear)
-  Di search input ada 2 tombol clear (X). Keduanya
-  berfungsi menghapus teks. User ingin:
-  - PERTAHANKAN tombol X di pojok KANAN
-  - HAPUS tombol X di sisi KIRI
-  (Jangan menebak mana kiri-kanan tanpa cek kode. Kalau
-   tidak yakin, laporkan keduanya dulu di investigation.)
-
-ISSUE 3 - Search Results: layout baris
-  Setiap hasil pencarian (tiap lagu) punya layout:
-  - Sebelah KIRI: artwork (thumbnail)
-  - Sebelah KANAN artwork: 2 baris teks
-    - Baris ATAS: judul lagu
-    - Baris BAWAH: artist, view count, dan DURASI
-      (durasi tampil "--:--" juga, sama bug dengan Issue 1)
-
-  User ingin:
-  - HAPUS durasi dari baris bawah
-  - PINDAHKAN durasi ke UJUNG KANAN baris (kolom kanan,
-    rata kanan vertikal center, format seperti "3:45")
-  - Baris bawah hanya berisi: artist, view count
-  - Bug durasi "--:--" juga harus diperbaiki (kalau
-    root cause sama dengan Issue 1, fix sekali jalan)
+1. Di Recently Played, durasi masih "--:--".
+2. Di Search Results (Lagu/Video), durasi masih "--:--" di ujung
+   kanan, DAN teks durasi masih menempel di baris bawah (subtitle).
+   Contoh format subtitle dari API:
+   - "Erlangg a • sesi potret • 3.22 • ..."
+   - "éñau • 5.06 • 102 ... x ditonton"
+   - "Tulus • Teh Hijau • 3.33 • ..."
+   Perhatikan pemisahnya adalah " • " (spasi, bullet, spasi).
+   Durasi menggunakan titik (3.22), bukan titik dua (3:22).
 
 ================================================================
-FASE 1 - INVESTIGASI (WAJIB DULU, JANGAN LANGSUNG FIX)
+TUGAS FIX (public/app.js)
 ================================================================
 
-Sebelum ubah apapun, cari dan laporkan:
+F1. PERBAIKI PARSING SUBTITLE (trackRowHTML)
+    Cari fungsi `trackRowHTML` (sekitar baris 4164).
+    Saat ini agent sebelumnya gagal memisahkan durasi dari subtitle.
+    Lakukan logika berikut di dalam `trackRowHTML`:
+    
+    1. Ambil `it.subtitle`.
+    2. Pecah string berdasarkan pemisah " • ".
+    3. Cari segmen yang berbentuk durasi. Regex durasi:
+       /^\d{1,2}[:.]\d{2}$/  (mendeteksi 3:22, 3.22, 1:02:30)
+    4. Simpan durasi yang ditemukan ke variabel `parsedDuration`.
+    5. Buang segmen durasi tersebut dari array hasil split.
+    6. Gabungkan kembali sisa segmen dengan " • ".
+       -> Ini akan menjadi subtitle baru TANPA durasi.
+    7. Tampilkan sisa segmen ini di baris bawah (artist & views).
+    
+    *Catatan*: Jika API mengirim `it.duration` secara terpisah,
+    prioritaskan `it.duration`. Jika kosong, gunakan
+    `parsedDuration` dari dalam subtitle.
 
-I1. LOKASI KODE RECENTLY PLAYED
-    - Fungsi / method mana yang render Recently Played di
-      public/app.js
-    - Line number
-    - Dari mana data recently played diambil
-      (localStorage? state Player? API?)
-    - Field `duration` / `durasi` / `length` / `durationMs`
-      ada di data atau tidak?
-    - Kalau ada, kenapa tampil "--:--"?
-      (a) data duration kosong/0/null
-      (b) formatting salah
-      (c) nama field beda
-      (d) durasi tidak disimpan sama sekali saat play
-    - Report penyebab persis
+F2. UPDATE RENDER DURASI (.tdur)
+    - Pastikan variabel durasi (dari `it.duration` atau
+      `parsedDuration`) di-format dengan benar (ubah titik menjadi
+      titik dua jika perlu, misal "3.22" -> "3:22").
+    - Render di `<span class="tdur">...</span>`.
+    - HAPUS fallback "--:--" JIKA durasi berhasil di-parse.
+      (Biarkan "--:--" hanya jika benar-benar tidak ada durasi
+      sama sekali).
 
-I2. LOKASI KODE SEARCHBOX (2 TOMBOL X)
-    - Grep `search` dan `clear` di public/app.js dan
-      public/index.html
-    - Cari semua elemen yang render tombol X / clear /
-      cancel di searchbox
-    - Untuk tiap tombol, laporkan:
-      - ID / class / selector
-      - Posisi (kiri / kanan) - dari CSS (float, flex
-        order, position) atau urutan DOM
-      - Handler onClick / addEventListener
-      - Parent container
-    - Tentukan: mana yang kiri, mana yang kanan
-    - Kalau TIDAK yakin mana kiri/kanan, STOP dan
-      laporkan di report - jangan hapus salah satu
+F3. FIX RECENTLY PLAYED (Library.pushHistory)
+    - Saat lagu dimasukkan ke history, durasi mungkin kosong.
+    - Di `Library.pushHistory(song)` (sekitar baris 708):
+      Sebelum menyimpan object song ke localStorage, LAKUKAN:
+      1. Cek apakah `song.duration` ada.
+      2. Jika KOSONG/TIDAK ADA, panggil logika parsing F1 untuk
+         mengambil durasi dari `song.subtitle` atau `song.title`.
+      3. Simpan hasilnya ke `song.duration`.
+    - Saat render Recently Played (`viewSearch` -> baris ~5267),
+      pastikan data history dibaca dengan benar dan durasi
+      ditampilkan.
 
-I3. LOKASI KODE SEARCH RESULTS
-    - Fungsi / method render hasil pencarian di
-      public/app.js
-    - Line number
-    - Struktur HTML tiap item (class / id / DOM tree)
-    - Baris bawah (artist + view count + duration) -
-      apa tag-nya? Satu span atau multiple?
-    - Durasi di baris bawah - class apa?
-    - Data duration dari API: field apa, dalam satuan apa
-      (detik / ms / string)?
-
-I4. ROOT CAUSE DURASI "--:--"
-    - Bandingkan 3 tempat (Recently Played, Search
-      Results, dan mungkin queue/player) - apakah
-      duration di-baca dari field yang sama?
-    - Format function durasi: apakah sudah ada helper
-      seperti `formatDuration()` / `formatTime()` di
-      public/app.js? Kalau ada, dipanggil atau tidak?
-    - Report: kenapa "--:--" muncul - format fallback
-      atau data kosong?
-
-Setelah investigasi selesai, TULIS dulu temuan di
-report.txt bagian "INVESTIGASI" SEBELUM lanjut ke
-FASE 2. Ini untuk traceability.
+F4. HAPUS DURASI DARI BARIS BAWAH
+    - Di render `.ts` (subtitle), pastikan hanya ada Artist dan
+      Views. Tidak boleh ada angka "3.22" atau "5.06" lagi.
+    - Gunakan logika dari F1 untuk membuang segmen durasi.
 
 ================================================================
-FASE 2 - FIX
+FASE BUILD & DEPLOY
 ================================================================
 
-F2.1 - FIX DURASI (Issue 1 + Issue 3)
-    Berdasarkan I4, terapkan fix yang sesuai:
-
-    KASUS A - Data ada tapi formatting salah:
-      - Pakai / perbaiki helper formatDuration yang ada
-      - Pastikan detik -> "M:SS" atau "H:MM:SS"
-      - Terapkan di Recently Played DAN Search Results
-
-    KASUS B - Data duration tidak ada di recently played:
-      - Saat user play lagu, simpan duration ke payload
-        recently played di localStorage
-      - Saat render recently played, baca dari payload
-      - Backward-compatible: kalau record lama tidak
-        punya duration, biarkan "--:--" atau kosong
-        (jangan crash)
-
-    KASUS C - Nama field beda:
-      - Mapping field yang benar (misal durationMs /
-        lengthSeconds / dll) -> convert ke detik
-      - Terapkan di kedua tempat
-
-    Kalau root cause > 1 (misal recently played butuh
-    fix di penyimpanan, search results butuh fix di
-    format), kerjakan keduanya.
-
-    JANGAN ubah data lama di localStorage user secara
-    massal (jangan migrate). Cukup handle gracefully
-    kalau record lama tidak ada duration.
-
-F2.2 - HAPUS 1 TOMBOL X (Issue 2)
-    Berdasarkan I2:
-    - Identifikasi tombol X di KIRI (yang harus dihapus)
-    - Hapus rendering / hide dengan display:none / hapus
-      elemen dari DOM
-    - Pastikan tombol X di KANAN tetap berfungsi
-      (clear input + re-trigger search atau sesuai
-      perilaku existing)
-    - Kalau ada handler duplikat, jangan sampai kehapus
-      keduanya
-
-    Kalau ternyata ada 2 tombol X yang punya class sama
-    dan sulit dibedakan di CSS, bisa pakai selector
-    :first-child / :last-child di parent. Tapi
-    prefer hapus dari HTML/JS supaya DOM bersih.
-
-    JANGAN hapus tombol X yang kanan.
-
-F2.3 - PINDAHKAN DURASI KE UJUNG KANAN (Issue 3)
-    Berdasarkan I3:
-    - Hapus durasi dari baris bawah (baris artist + view
-      count)
-    - Tambah elemen durasi baru di ujung kanan baris:
-      - Posisi: right-aligned
-      - Vertikal: center dengan artwork / row
-      - Format: "M:SS" atau "H:MM:SS" (dari F2.1)
-      - Class baru misal `.result-duration` atau pakai
-        yang sudah ada
-    - Update CSS di public/styles.css:
-      - Pastikan row pakai flexbox (kalau belum)
-      - `.result-duration` di-push ke kanan
-        (margin-left: auto atau flex-end di container)
-      - Pastikan tidak overflow di layar kecil
-
-    Kalau baris bawah artist + view count jadi terlalu
-    panjang karena durasi dihapus, biarkan - jangan
-    redesign total. Fokus: durasi pindah ke kanan,
-    baris bawah bersih dari durasi.
-
-    JANGAN ubah layout artwork, judul, atau artist.
-    JANGAN ubah spacing di luar yang perlu untuk
-    menempatkan durasi.
+1. `npm run bump 3.2.1` (untuk update versi APK & Web).
+2. `npx cap copy android` (WAJIB).
+3. `cd android ; .\gradlew.bat assembleDebug`
+4. `adb install -r android\app\build\outputs\apk\debug\app-debug.apk`
+5. `adb push android\app\build\outputs\apk\debug\app-debug.apk /sdcard/Download/Dnialify/dnialify-3.2.1.apk`
+6. Verifikasi `adb shell dumpsys package com.dnialify.musicstream | grep versionName` harus menunjukkan `3.2.1`.
+7. Git commit & push:
+   `git add -A`
+   `git commit -m "fix(ui): properly parse duration from subtitle and fix recently played"`
+   `git push origin main`
 
 ================================================================
-FASE 3 - VERSION BUMP + BUILD + INSTALL
+OUTPUT REPORT (OVERWRITE report.txt)
 ================================================================
-
-F3.1 - Bump versi
-    Jalankan dari root project:
-
-        npm run bump 3.5.2
-
-    Verifikasi setelahnya:
-        grep version package.json
-
-    Harus menampilkan "3.5.2". Kalau tidak, laporkan error.
-
-    Kalau script `bump` tidak ada (npm error "missing
-    script"), STOP dan laporkan - jangan manual edit
-    package.json tanpa konfirmasi (mungkin ada file lain
-    yang ikut harus diupdate oleh script bump).
-
-F3.2 - Copy web assets ke Android (WAJIB)
-
-        npx cap copy android
-
-    Ini WAJIB karena perubahan di public/app.js dan
-    public/styles.css tidak akan masuk ke APK tanpa
-    langkah ini. Tanpa cap copy, build akan sukses tapi
-    APK berisi JS/CSS lama.
-
-    Verifikasi: cek android/app/src/main/assets/public/app.js
-    punya timestamp baru (lebih baru dari sebelumnya).
-
-F3.3 - Build APK debug
-
-        cd android
-        .\gradlew.bat assembleDebug
-
-    Kalau gagal: capture error, tulis ke report, STOP.
-    Kalau sukses: catat path + ukuran.
-
-F3.4 - Install via adb
-
-        adb -s <device> install -r android\app\build\outputs\apk\debug\app-debug.apk
-
-    Kalau "Success": lanjut FASE 4.
-    Kalau error: STOP, laporkan.
-
-F3.5 - Push ke sdcard
-
-        adb shell mkdir -p /sdcard/Download/Dnialify
-        adb push android\app\build\outputs\apk\debug\app-debug.apk /sdcard/Download/Dnialify/dnialify-3.5.2.apk
-
-    Verifikasi:
-        adb shell ls -l /sdcard/Download/Dnialify/dnialify-3.5.2.apk
-        adb shell dumpsys package com.dnialify.musicstream | grep versionName
-
-    Harus menampilkan versionName=3.5.2.
-
-================================================================
-FASE 4 - GIT COMMIT + PUSH KE MAIN
-================================================================
-
-SYARAT: FASE 1-3 harus sukses semua. Kalau ada yang gagal
-di FASE 3 (build / install), JANGAN lanjut ke FASE 4.
-
-F4.1 - Git status dan review
-
-        cd C:\Project\music-stream
-        git status
-        git diff --stat
-
-    Laporkan di report: file apa saja yang berubah.
-
-    CATATAN PENTING: kalau ada uncommitted changes dari
-    task sebelumnya (Play Protect fix + Mix/refill fix),
-    ikutkan dalam commit ini dengan message yang mencakup
-    semuanya. Kalau user sudah commit sebelumnya, hanya
-    task ini yang masuk commit.
-
-F4.2 - Add + commit
-
-        git add -A
-        git commit -m "fix(ui+queue): search duration display, single X button, duration to right end + play protect & mix fixes + bump 3.5.2"
-
-    Kalau ada commit sebelumnya untuk sebagian fix,
-    sesuaikan message agar tidak duplikat (hapus
-    bagian yang sudah di-commit).
-
-    Verifikasi commit:
-        git log -1 --stat
-
-F4.3 - Push ke main
-
-        git push origin main
-
-    Kalau push gagal karena non-fast-forward (remote
-    lebih baru), STOP dan laporkan - jangan force push.
-    Kalau push gagal karena auth, laporkan - jangan
-    simpan credential apapun.
-
-    Setelah push, verifikasi:
-        git log origin/main -1 --oneline
-
-    Laporkan hash commit di report.
-
-================================================================
-OUTPUT - WAJIB TULIS KE report.txt
-================================================================
-
-Path: C:\Project\music-stream\report.txt
-Encoding: UTF-8, TANPA line wrap paksa.
-
-TIMPA / OVERWRITE isi report.txt yang lama (jangan
-append). Isi report.txt hanya untuk task ini.
-
-Struktur:
-
-  1. RINGKASAN (maks 10 baris)
-     - Status: BERHASIL / SEBAGIAN / GAGAL
-     - 3 issue status masing-masing
-     - Version bump: X -> 3.5.2
-     - Build + install: sukses / gagal
-     - Git commit hash + status push
-
-  2. INVESTIGASI (FASE 1)
-     - I1: root cause durasi "--:--" di recently played
-     - I2: 2 tombol X - identifikasi kiri vs kanan
-     - I3: struktur HTML search result
-     - I4: kesimpulan root cause durasi
-
-  3. FIX YANG DITERAPKAN (FASE 2)
-     - F2.1: file + baris + perubahan durasi
-     - F2.2: file + baris + tombol X mana yang dihapus
-     - F2.3: file + baris + perubahan layout
-     - CSS yang diubah (kalau ada)
-
-  4. VERSION + BUILD + INSTALL (FASE 3)
-     - Version sebelum -> sesudah
-     - cap copy: OK / gagal
-     - Build output: path + ukuran + waktu
-     - adb install: raw output
-     - File sdcard: path + ukuran
-     - versionName terpasang
-
-  5. GIT (FASE 4)
-     - Branch: main (dari awal)
-     - Commit hash + message
-     - Files di commit
-     - Push status: sukses + remote hash / gagal + error
-     - Kalau gagal push: alasan dan rekomendasi
-
-  6. TEST CHECKLIST UNTUK USER
-     [ ] T1. Buka Search Page -> Recently Played
-             - Durasi tampil "3:45" (bukan "--:--")
-     [ ] T2. Ketik di searchbox
-             - Hanya 1 tombol X (di kanan)
-             - Tombol X berfungsi hapus teks
-     [ ] T3. Hasil pencarian
-             - Baris bawah: artist + view count saja
-             - Durasi di ujung kanan
-             - Durasi tampil benar
-     [ ] T4. Cek regresi: Play album, play single,
-             queue, dll masih normal
-
-  7. GAP & PERTANYAAN
-     - Kalau ada yang ambigu saat investigasi, laporkan
-       di sini
-     - Kalau ada file di luar public/ yang terpaksa
-       diubah, laporkan (harusnya tidak ada)
-     - Kalau tombol X yang kanan ternyata sama dengan
-       yang kiri secara visual, laporkan
-
-  8. FILE YANG DIUBAH (path absolut)
-     - Source edits (public/app.js, public/styles.css,
-       public/index.html - sesuai kebutuhan)
-     - Auto-generated (android/app/src/main/assets/public/*)
-     - package.json (bump 3.5.2)
-
-================================================================
-BATASAN
-================================================================
-
-- HANYA edit file di public/ (app.js, styles.css,
-  index.html sesuai kebutuhan)
-- HANYA ubah package.json via npm run bump 3.5.2
-- JANGAN ubah file .java
-- JANGAN ubah server.js
-- JANGAN ubah AndroidManifest.xml
-- JANGAN ubah build.gradle
-- JANGAN force push
-- JANGAN skip cap copy
-- JANGAN push ke branch selain main
-- Kalau ada conflict di git, STOP dan lapor
-- JANGAN tulis report ke file lain selain report.txt
-  (jangan bikin report-search-fix.txt, jangan bikin
-   report-fix-*.txt, cukup report.txt)
-- Log semua command ke
-  %TEMP%\search-fix-<timestamp>.log
-
-================================================================
-EKSEKUSI - URUTAN
-================================================================
-
-1. GUARD: git status, git branch, cek versi, adb devices
-2. FASE 1: investigasi + tulis temuan ke report.txt dulu
-3. FASE 2: fix berdasarkan temuan
-4. FASE 3: bump 3.5.2 -> cap copy -> build -> install
-   -> push sdcard
-5. FASE 4: git add + commit + push origin main
-6. Update report.txt final (isi semua bagian, OVERWRITE)
-7. Print 3 baris terakhir:
-   - Path report.txt
-   - Ukuran file
-   - Status: BERHASIL/SEBAGIAN/GAGAL + commit hash
-
-Kalau di FASE 3 ada yang gagal (build / install), JANGAN
-lanjut ke FASE 4. report.txt tetap ditulis dengan status
-SEBAGIAN dan rekomendasi langkah berikutnya.
-
-Kalau di FASE 1 (investigasi) ada yang ambigu, JANGAN
-langsung fix - tulis investigasi ke report.txt dulu,
-tunggu arahan user.
+Tulis ke C:\Project\music-stream\report.txt (UTF-8).
+Tunjukkan potongan kode (snippet) hasil akhir fungsi
+`trackRowHTML` dan `Library.pushHistory` di dalam report,
+sebagai bukti bahwa logika string split " • " benar-benar
+diimplementasikan. JANGAN hanya menulis "SUDAH DIPERBAIKI"
+tanpa bukti kode.
 
