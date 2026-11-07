@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.6.1";
+const APP_VERSION = "3.6.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -769,6 +769,43 @@ const Library = {
     st[k].title = song.title;
     st[k].thumbnail = song.thumbnail;
     store.set('stats', st);
+  },
+  // L66 (F1/F2): backfill durasi setelah engine tahu durasi sebenarnya.
+  // pushHistory dipanggil terlalu dini (durasi masih 0 di jalur native),
+  // jadi record history perlu di-update saat metadata durasi tiba.
+  updateHistoryDuration(videoId, durationSecs) {
+    if (!videoId || !durationSecs || durationSecs <= 0) return false;
+    const secs = Math.round(Number(durationSecs));
+    if (!(secs > 0 && secs <= 43200)) return false;
+    const norm = normalizeDuration(secs);
+    let any = false;
+    // 1. Update Library.stats
+    try {
+      const st = store.get('stats', {});
+      if (st[videoId]) {
+        if (!st[videoId].duration || parseDurationSec(st[videoId].duration) !== secs) {
+          st[videoId].duration = norm;
+          store.set('stats', st);
+          any = true;
+        }
+      }
+    } catch {}
+    // 2. Update History (hanya record yang durasinya masih kosong)
+    try {
+      const h = this.history;
+      let changed = false;
+      for (let i = 0; i < h.length; i++) {
+        if (h[i] && h[i].videoId === videoId && !h[i].duration) {
+          h[i].duration = norm;
+          changed = true;
+        }
+      }
+      if (changed) {
+        store.set('hist', h);
+        any = true;
+      }
+    } catch {}
+    return any;
   },
   get stats() {
     return store.get('stats', {});
@@ -1416,6 +1453,12 @@ function initAudio(){
       // progress UI from native time (source of truth when nativeActive)
       if (Player.nativeActive && (ev.event === 'timeUpdate' || ev.event === 'playbackStateChanged' || ev.event === 'durationChanged')) {
         const cur = Player.native.cur, dur = Player.native.dur;
+        // L66 (F2): durasi sudah diketahui engine -> tambal history/stats.
+        if (dur) {
+          try {
+            backfillHistoryDuration((ev.videoId || (Player.current && Player.current.videoId)), dur);
+          } catch {}
+        }
         // position widgets freeze while dragging (mirror/icon/lyrics still update) - no fight, no blink
         try {
           if (!(seekDragging || miniSeekDragging)) {
@@ -1531,7 +1574,16 @@ function initAudio(){
       if (d && Player.current) {
         $('#np-dur').textContent = fmtTime(d);
         $('#mini-dur').textContent = fmtTime(d);
+        // L66 (F2): durasi audio sudah diketahui -> tambal history/stats.
+        try { backfillHistoryDuration(Player.current.videoId, d); } catch {}
       }
+    } catch {}
+  });
+  // L66 (F2): durationchange = sinyal paling tepat saat durasi berubah/tersedia.
+  a.addEventListener('durationchange', ()=>{
+    try {
+      const d = a.duration || 0;
+      if (d && Player.current) backfillHistoryDuration(Player.current.videoId, d);
     } catch {}
   });
   a.addEventListener('stalled', ()=>{
@@ -3171,6 +3223,11 @@ function progressLoop(ts){
     const now = Date.now();
     if (playing && _lastTick) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
     _lastTick = now;
+    // L66 (F2): jalur YT iframe — durasi dari getDuration() -> tambal history.
+    dur = Player.yt.getDuration() || 0;
+    if (dur) {
+      try { backfillHistoryDuration(Player.current.videoId, dur); } catch {}
+    }
     if (playing && Player.sbEnabled && Player.sbSegments.length) {
       const seg = Player.sbSegments.find((g) => cur >= g.start && cur < g.end - 0.3);
       if (seg) {
@@ -3178,7 +3235,6 @@ function progressLoop(ts){
         toast(`Skipped ${seg.category.replace('_', ' ')} (SponsorBlock)`);
       }
     }
-    dur = Player.yt.getDuration() || 0;
   }
   // auto fallback when stuck at 00:00 (no duration, not playing) - never in native mode
   if (!Player.nativeActive && Player.current && Player.loadStartedAt && dur === 0 && cur === 0 && Date.now() - Player.loadStartedAt > 4500) {
@@ -4105,6 +4161,40 @@ function splitSubtitle(subtitle) {
 function splitPlays(subtitle) {
   const { plays, rest } = splitSubtitle(subtitle);
   return { plays, rest };
+}
+// L66 (F2/F3): backfill durasi history saat engine tahu durasi sebenarnya.
+// pushHistory dipanggil terlalu dini (durasi masih 0 di jalur native), jadi
+// record history perlu ditambal begitu metadata durasi tiba. Guard per-track
+// supaya tidak dipanggil berulang setiap tick.
+function backfillHistoryDuration(videoId, durSecs) {
+  const s = Math.round(Number(durSecs) || 0);
+  if (!videoId || !(s > 0 && s <= 43200)) return;
+  if (Player._durBackfillFor === videoId && Player._durBackfillVal === s) return;
+  Player._durBackfillFor = videoId;
+  Player._durBackfillVal = s;
+  let changed = false;
+  try { changed = Library.updateHistoryDuration(videoId, s); } catch {}
+  if (!changed) return;
+  try { patchRecentDurationInDom(videoId, s); } catch {}
+}
+// L66 (F3): update kolom durasi in-place bila user sedang di halaman Search,
+// supaya perubahan terlihat tanpa reload / re-route (tidak ada scroll reset).
+function patchRecentDurationInDom(videoId, secs) {
+  const hash = location.hash || '';
+  if (!hash.startsWith('#/search')) return;
+  let root = null;
+  try { root = document.getElementById('view'); } catch {}
+  if (!root) return;
+  const vid = String(videoId).replace(/["\\]/g, '');
+  let rows = [];
+  try { rows = root.querySelectorAll('.track[data-video-id="' + vid + '"]'); } catch {}
+  for (const row of rows) {
+    const d = row.querySelector('.tdur');
+    if (d && d.classList.contains('is-empty')) {
+      d.textContent = fmtTime(secs);
+      d.classList.remove('is-empty');
+    }
+  }
 }
 // L62: durasi (detik) hasil parsing dari subtitle. Prioritas: segmen durasi
 // eksplisit, lalu scan seluruh segmen dengan parseDurationSec.

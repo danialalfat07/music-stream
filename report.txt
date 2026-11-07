@@ -1,42 +1,70 @@
 ================================================================
-LAPORAN AUDIT — LOGIKA DURASI RECENTLY PLAYED
-================================================================
-Work Order : AUDIT LOGIKA DURASI RECENTLY PLAYED
+LAPORAN PEKERJAAN
+Work Order : EKSEKUSI FIX DURASI RECENTLY PLAYED (R1, R2, R6)
 Tanggal    : 08 Nov 2026
 Proyek     : C:\Project\music-stream
-Fokus      : public/app.js (+ server.js sebagai sumber data API)
-Mode       : READ-ONLY — tidak ada kode diubah, tidak build, tidak adb,
-             tidak commit/push.
-
+Status     : BERHASIL
+Commit     : e8bf967
 ================================================================
+
+----------------------------------------------------------------
 1. STATUS
-================================================================
-AUDIT SELESAI.
+----------------------------------------------------------------
+BERHASIL.
 
-Hasil: bug BUKAN di satu titik saja. Rantai durasi putus di DUA tempat:
-  (a) WRITE PATH — `pushHistory()` sering menerima objek tanpa durasi
-      NYATA (karena API search tidak mengirim field `duration`), dan
-      fallback yang ada gagal mengambil dari subtitle pada kondisi nyata.
-  (b) DISPLAY PATH — `trackRowHTML()` untuk Recently Played menerima
-      `subtitle` yang SUDAH DIBERSIHKAN (durasi dibuang) sehingga
-      fallback `durationFromSubtitle(it.subtitle)` tidak menemukan apa pun.
+Ketiga perbaikan (F1/R6, F2/R1+R2, F3) diterapkan pada public/app.js.
+`node --check public/app.js` = SYNTAX OK.
+Tidak ada build APK, tidak ada adb/push device — sesuai GUARD
+work order (FOKUS JS SAJA).
 
-Read path (viewSearch) sendiri BENAR: ia spread `...s`, jadi `duration`
-ikut bila ada di record. Masalahnya record itu tidak punya durasi valid.
+----------------------------------------------------------------
+2. WEB VERSION SEBELUM & SESUDAH
+----------------------------------------------------------------
+  Sebelum bump : webVersion = 3.2.2
+  Sesudah bump : webVersion = 3.6.1
+  Perintah     : npm run bump 3.6.1
+  Catatan      : bump HANYA mengubah `webVersion`. Field `version`
+                 (yang jadi versionName APK) tidak diubah karena work
+                 order ini tidak minta bump APK (tetap 3.2.2).
+  Injected ke  : app.js, index.html, sw.js, manifest.json
 
-================================================================
-2. TEMUAN A1 — WRITE PATH (Library.pushHistory)
-================================================================
+----------------------------------------------------------------
+3. BUKTI SNIPPET KODE
+----------------------------------------------------------------
 
-LOKASI: public/app.js baris 708-766.
+===== F1 / R6 — normalizeSong (public/app.js) =====
 
-Kode (inti, baris 708-748):
+SEBELUM:
+----------------------------------------------------------------
+function normalizeSong(s) {
+  if (!s) return s;
+  return { ...s, title: displayTitle(s.title) };
+}
+----------------------------------------------------------------
+
+SESUDAH:
+----------------------------------------------------------------
+function normalizeSong(s) {
+  if (!s) return s;
+  return {
+    ...s,
+    title: displayTitle(s.title),
+    duration: s.duration ? normalizeDuration(s.duration) : s.duration,
+  };
+}
+----------------------------------------------------------------
+
+
+===== F2 / R1 + R2 — Library.pushHistory (public/app.js) =====
+
+SESUDAH (fungsi lengkap):
 ----------------------------------------------------------------
   pushHistory(song) {
     let h = this.history.filter((s) => s.videoId !== song.videoId);
-    // L62 (F3): durasi SERING kosong di sini. Urutan pengambilan:
+    // L65 (R1/R2): resolusi durasi DULU, baru bersihkan subtitle.
+    // Urutan pengambilan durasi:
     //   1) field song.duration/dur/lengthSeconds/length
-    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")  <-- F1
+    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")
     //   3) segmen durasi di dalam song.title (jika ada)
     //   4) stats lokal
     //   5) durasi engine yang sedang berjalan
@@ -51,8 +79,8 @@ Kode (inti, baris 708-748):
     }
     if (dur == null || dur === '') {
       try {
-        const st = this.stats[song.videoId];
-        if (st && st.duration) dur = st.duration;
+        const st0 = this.stats[song.videoId];
+        if (st0 && st0.duration) dur = st0.duration;
       } catch {}
     }
     if (dur == null || dur === '') {
@@ -63,343 +91,143 @@ Kode (inti, baris 708-748):
       if (live > 0 && live <= 43200) dur = live;
     }
     // Normalisasi "3.22" -> "3:22" agar konsisten saat dibaca ulang.
+    const finalDuration =
+      dur != null && dur !== '' ? normalizeDuration(dur) : '';
     const rec = { ...song };
-    if (dur != null && dur !== '') rec.duration = normalizeDuration(dur);
-    // Subtitle dibersihkan dari segmen durasi supaya baris bawah Recently
-    // Played tidak menampilkan "3.22" lagi (F4, konsisten dgn Search Results).
-    if (rec.subtitle) {
-      const { rest, plays } = splitSubtitle(rec.subtitle);
-      rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
+    // R1: persist ke stats DULU supaya fallback trackRowHTML hidup.
+    const st = store.get('stats', {});
+    const k = song.videoId;
+    if (!st[k])
+      st[k] = {
+        title: song.title,
+        artist: song.artist || '',
+        thumbnail: song.thumbnail,
+        plays: 0,
+        secs: 0,
+        last: 0,
+      };
+    if (finalDuration) {
+      rec.duration = finalDuration;
+      st[k].duration = finalDuration;
+      // R2: subtitle HANYA dibersihkan bila durasi benar-benar valid.
+      if (rec.subtitle) {
+        const { rest, plays } = splitSubtitle(rec.subtitle);
+        rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
+      }
     }
     h.unshift({ ...rec, playedAt: Date.now() });
     store.set('hist', h.slice(0, 100));
+    // play stats (local scrobble)
+    st[k].plays++;
+    st[k].last = Date.now();
+    st[k].title = song.title;
+    st[k].thumbnail = song.thumbnail;
+    store.set('stats', st);
+  },
 ----------------------------------------------------------------
 
-PEMANGGIL (2 titik):
-  - public/app.js baris 2565-2566 (jalur NATIVE / VisionOS):
-        if (wantNative) {
-            startNativeTrack(s, loadId);
-            Library.pushHistory(s);        <-- dipanggil SEGERA
-  - public/app.js baris 2651 (jalur WebView/YT fallback):
-        })();
-        Library.pushHistory(s);            <-- dipanggil di akhir
+PEMETAAN KE TUGAS F2:
+  1. Ambil durasi dari song.subtitle sebelum bersihkan  -> baris `const dsub = durationFromSubtitle(song.subtitle)`.
+  2. Simpan ke variabel `finalDuration`                  -> `const finalDuration = ...`.
+  3. Simpan ke Library.stats[videoId].duration           -> `st[k].duration = finalDuration;`
+     (ditulis ke store 'stats' yang sama, sehingga fallback
+      trackRowHTML di masa depan bisa membacanya).
+  4. Hanya bersihkan subtitle bila finalDuration valid    -> dibungkus `if (finalDuration) { ... }`.
+     Jika durasi kosong, subtitle TIDAK dibuang (tetap utuh).
+  5. Simpan ke record history                            -> `rec.duration = finalDuration;`
 
-  Di kedua tempat, `s = Player.current` (baris 2547: `const s = Player.current;`).
-  `Player.current` adalah getter ke `Player.queue[Player.index]`
-  (lihat komentar baris 2468: "Player.current is a queue[index] getter,
-  so all paths funnel via startCurrent").
 
-ASAL `song` (playSong, baris 1862-1891):
-----------------------------------------------------------------
-  async function playSong(song, queue = null, index = null, source = null) {
-    ...
-    song = normalizeSong(song);              // <-- baris 1875
-    ...
-    if (queue) {
-      Player.queue = queue.map((q) => ({ ...normalizeSong(q), _user: false }));
-      ...
-    } else {
-      Player.queue = [{ ...song, _user: false }];   // <-- baris 1885
-      Player.index = 0;
-    }
-    startCurrent();
-  }
-----------------------------------------------------------------
+===== F3 — Fallback tampilan trackRowHTML (public/app.js ~baris 4281) =====
 
-KRITIS — `normalizeSong()` (baris 4172-4175) TIDAK menyentuh duration:
+Blok ini SUDAH ada dan sudah berfungsi (tidak perlu diubah); F2 sekarang
+mengisinya dengan data nyata sehingga fallback ini benar-benar hidup:
 ----------------------------------------------------------------
-  function normalizeSong(s) {
-    if (!s) return s;
-    return { ...s, title: displayTitle(s.title) };
-  }
+      let secs = parseDurationSec(raw);
+      if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
+      if (!(secs >= 1 && secs <= 43200) && it.videoId) {
+        try {
+          const st = Library.stats[it.videoId];
+          if (st && st.duration) secs = parseDurationSec(st.duration);
+        } catch {}
+      }
 ----------------------------------------------------------------
-Ia hanya spread + memperbaiki `title`. Artinya `duration` hanya ada
-di record JIKA pemanggil `playSong()` sudah menyertakannya.
+Urutan prioritas: field eksplisit -> segmen di subtitle -> Library.stats.
+Ini persis seperti yang diminta F3.
 
-Pemanggil `playSong` berasal dari klik item yang diubah via
-`songFromItem(it)` (baris 4400: `openSongNowPlaying(songFromItem(it))`).
-`songFromItem` (baris 4176-4197) MEMANG menyetel durasi:
 ----------------------------------------------------------------
-    duration: normalizeDuration(it.duration),      // <-- baris 4194
+4. VERIFIKASI LOGIKA (node, memakai fungsi ASLI dari public/app.js)
 ----------------------------------------------------------------
-TAPI bergantung pada `it.duration` dari API.
+Fungsi `durationFromSubtitle`, `splitSubtitle`, `normalizeDuration`
+dievaluasi langsung dari sumber public/app.js, lalu diuji:
 
-AKAR MASALAH DI WRITE PATH — `it.duration` dari search SERING TIDAK ADA:
+  INPUT                                            DURASI  SUBTITLE HASIL
+  ----------------------------------------------  ------  ---------------------------
+  "Tulus • Sesi Potret • 3.22"                     202s  "Tulus • Sesi Potret"
+  "enau • 5.06 • 102 jt x ditonton"                306s  "enau • 102 jt x ditonton"
+  "Seli vormel • sesi potret • 844 jt pemutaran"     0s  (tidak diubah — lihat catatan)
+  "Artist • Album"                                   0s  "Artist • Album"
 
-  server.js `parseListItem()` (baris 223-271) membangun item sbb:
+CATATAN PENTING (perilaku BARU yang benar):
+  - Kasus "Tulus • Sesi Potret • 3.22": durasi 3.22 -> 202s berhasil
+    diambil, subtitle dibersihkan menjadi "Tulus • Sesi Potret".
+  - Kasus "Seli vormel • ... • 844 jt pemutaran" (tanpa durasi): durasi
+    = 0 -> subtitle TIDAK dibersihkan. Ini sesuai R2: jangan buang teks
+    subtitle bila durasi tidak valid. Viewcount tetap utuh.
+  - Kasus "Artist • Album" (tanpa durasi): subtitle utuh, tidak ada
+    yang hilang.
+
+`node --check public/app.js` -> SYNTAX OK.
+
 ----------------------------------------------------------------
-  const subtitle = cols
-    .slice(1)
-    .map((c) => text(c))
-    .filter(Boolean)
-    .join(' \u2022 ');          // artist • album • views • DURASI  (semua jadi 1 string)
-  ...
-  const item = { type, title, subtitle, videoId, thumbnail, artists, album, ...navInfo };
-  // duration from fixed column
-  const fixed = findFirst(r, 'musicResponsiveListItemFixedColumnRenderer');
-  if (fixed) item.duration = normalizeDuration(text(fixed.text));   // <-- baris 268-270
+5. GIT
 ----------------------------------------------------------------
-  Jadi `item.duration` HANYA ADA bila response YouTube Music menyertakan
-  `musicResponsiveListItemFixedColumnRenderer`. Pada hasil SEARCH, item
-  biasanya datang sebagai `musicResponsiveListItemRenderer` TANPA fixed
-  column — sehingga `item.duration` = undefined, dan nilai durasi justru
-  hanya "menempel" di dalam string `subtitle` (mis. "... • 3.22").
+git add -A -> 7 file:
+   M opencode.txt
+   M package.json
+   M public/app.js
+   M public/index.html
+   M public/manifest.json
+   M public/sw.js
+   M report.txt
 
-  Akibatnya di `pushHistory`:
-    - `song.duration` undefined -> fallback 1 gagal
-    - fallback 2: `durationFromSubtitle(song.subtitle)` — ini SEHARUSNYA
-      menyelamatkan, TAPI lihat catatan di bawah.
-    - fallback 3: `durationFromSubtitle(song.title)` -> judul tidak
-      memuat durasi -> 0
-    - fallback 4: `this.stats[videoId].duration` -> `stats` tidak
-      menyimpan field `duration` (lihat baris 750-765, hanya menyimpan
-      title/artist/thumbnail/plays/secs/last) -> gagal
-    - fallback 5: durasi engine hidup. Di jalur NATIVE (VisionOS),
-      `pushHistory(s)` dipanggil SEGERA setelah `startNativeTrack()`
-      (baris 2565-2566) — resolusi durasi belum selesai, jadi
-      `Player.native.dur` masih 0 -> gagal.
+git commit -m "fix(ui): persist duration to stats and fix recently played write path"
+   -> [main e8bf967] 7 files changed, 471 insertions(+), 208 deletions(-)
+   Commit hash: e8bf967
 
-KESIMPULAN A1: durasi SERING TIDAK TERSIMPAN. Objek `song` yang masuk
-umumnya tidak punya `duration` yang valid, dan kelima fallback gagal
-pada jalur native (yang dipanggil terlalu dini) serta pada kasus
-subtitle yang sudah dibersihkan.
+git push origin main
+   -> 31ba701..e8bf967  main -> main
+   Status push: BERHASIL.
+
+----------------------------------------------------------------
+6. CATATAN & GAP
+----------------------------------------------------------------
+- `normalizeDuration(202)` mengembalikan "202" (string angka detik), bukan
+  format "M:SS". Ini perilaku LAMA yang tidak diubah (di luar lingkup
+  F1-F3) dan TIDAK menyebabkan "--:--" karena `parseDurationSec` +
+  `fmtTime` menerima angka detik apa adanya.
+- `android/app/src/main/assets/public/` (artefak Capacitor) tidak
+  diperbarui karena work order FU melarang build/cap copy. APK di device
+  masih memakai JS versi lama sampai `npx cap copy android` + build
+  dijalankan pada work order berikutnya.
+- `stats[videoId].duration` kini terisi untuk lagu baru yang diputar.
+  Record lama (sudah tersimpan tanpa duration) tetap "--:--" sampai lagu
+  tersebut diputar ulang — sesuai sifat perbaikan yang tidak memigrasi
+  localStorage massal.
+
+----------------------------------------------------------------
+7. FILE YANG DIUBAH (absolute path)
+----------------------------------------------------------------
+  C:\Project\music-stream\public\app.js       (F1 normalizeSong, F2 pushHistory)
+  C:\Project\music-stream\package.json       (webVersion 3.2.2 -> 3.6.1)
+  C:\Project\music-stream\public\index.html  (inject versi 3.6.1)
+  C:\Project\music-stream\public\manifest.json (inject versi 3.6.1)
+  C:\Project\music-stream\public\sw.js       (inject versi 3.6.1)
+  C:\Project\music-stream\opencode.txt       (work order)
+  C:\Project\music-stream\report.txt         (laporan ini)
+
+Tidak ada file .java / server.js / AndroidManifest.xml / build.gradle
+yang disentuh. Tidak ada file yang dihapus.
 
 ================================================================
-3. TEMUAN A2 — READ PATH (viewSearch)
-================================================================
-
-LOKASI: public/app.js baris 5303-5318.
-Render "Recently Played": baris 5306 (ambil data) + baris 5317 (render).
-
-Kode:
-----------------------------------------------------------------
-5303  async function viewSearch(view, q = '', filter = null) {
-5304    if (!filter) filter = store.get('search_filter', 'all');
-5305    const filters = ['all','songs','videos','albums','artists','playlists'];
-5306    const hist = !q ? Library.history.slice(0, 6) : [];
-...
-5317      : `${hist.length ? `<div class="shelf"><div class="shelf-title">Recently played</div><div class="track-list">${hist.map((s) => trackRowHTML({ ...s, artist: s.artist, subtitle: s.subtitle || s.artist })).join('')}</div></div>` : ''}...`
-----------------------------------------------------------------
-
-Cara memanggil history: `Library.history` -> getter (baris 705-707):
-----------------------------------------------------------------
-  get history() {
-    return store.get('hist', []);
-  }
-----------------------------------------------------------------
-`store.get` = `JSON.parse(localStorage.getItem('smw_' + k)) ?? d` (baris
-596-607) — sinkron, tanpa transformasi. Jadi record dikembalikan apa adanya.
-
-Data yang dilempar ke `trackRowHTML`: `{ ...s, artist: s.artist,
-subtitle: s.subtitle || s.artist }`.
-  - Spread `...s` MEMBAWA `duration` bila record memilikinya. -> READ PATH BENAR.
-  - Namun ada DUA masalah turunan:
-      (1) `subtitle: s.subtitle || s.artist` -> bila `s.subtitle` sudah
-          dibersihkan dari durasi saat WRITE (baris 743-746), maka durasi
-          TIDAK bisa dipulihkan dari subtitle di DISPLAY.
-      (2) `artist: s.artist` di-set eksplisit. Bila `s.artist` kosong
-          (mis. record lama), subtitle jadi jatuh ke `s.artist` = ''.
-
-KESIMPULAN A2: READ PATH tidak merusak data — `...s` meneruskan
-`duration`. Jadi bug BUKAN di Read. Masalahnya: field `duration` di
-record itu sendiri memang tidak ada / kosong (warisan dari Write),
-DAN `subtitle` sudah "dibersihkan" sehingga tidak bisa jadi sumber
-cadangan.
-
-CATATAN PENTING: `subtitle: s.subtitle || s.artist` DESTRUKTIF bila
-`s.artist` ada tapi `s.subtitle` kosong — viewcount/durasi hilang.
-
-================================================================
-4. TEMUAN A3 — DISPLAY PATH (trackRowHTML)
-================================================================
-
-LOKASI: public/app.js baris 4245 (fungsi) ; blok durasi baris 4257-4291.
-
-Kode ekstraksi durasi (baris 4257-4291):
-----------------------------------------------------------------
-  const raw =
-    it.duration != null && it.duration !== ''
-      ? it.duration
-      : it.dur != null && it.dur !== ''
-        ? it.dur
-        : it.lengthSeconds != null
-          ? it.lengthSeconds
-          : it.length;
-  let secs = parseDurationSec(raw);
-  if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
-  if (!(secs >= 1 && secs <= 43200) && it.videoId) {
-    try {
-      const st = Library.stats[it.videoId];
-      if (st && st.duration) secs = parseDurationSec(st.duration);
-    } catch {}
-  }
-  let label = '';
-  if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
-  if (!label) {
-    const live =
-      (it.qi === Player.index &&
-        ((Player.native && Player.native.dur && Number(Player.native.dur)) ||
-          (Player.audio && Number(Player.audio.duration)))) ||
-      0;
-    if (live > 0 && live <= 43200) label = fmtTime(live);
-  }
-  const empty = !label;
-  return `<span class="tdur${empty ? ' is-empty' : ''}">${esc(empty ? '--:--' : label)}</span>`;
-----------------------------------------------------------------
-
-Field yang dibaca: `it.duration`, `it.dur`, `it.lengthSeconds`, `it.length`.
-
-Fallback yang ada:
-  1) `parseDurationSec(raw)` dari field eksplisit.
-  2) `durationFromSubtitle(it.subtitle)` — TIDAK PERNAH KENA di Recently
-     Played, karena `pushHistory` sudah MEMBUANG segmen durasi dari
-     subtitle saat menyimpan (baris 743-746).
-  3) `Library.stats[it.videoId].duration` — SELALU GAGAL, karena `stats`
-     tidak pernah menyimpan field `duration` (baris 750-765).
-  4) Durasi engine hidup — hanya bila `it.qi === Player.index`. Di
-     Recently Played, `it.qi` TIDAK PERNAH di-set (bandingkan baris
-     5317 yang hanya pass `artist`+`subtitle`), sehingga `it.qi ===
-     Player.index` = `undefined === number` = false -> label tetap kosong.
-
-MENGAPA BERUJUNG "--:--":
-  - Bukan karena nama field beda (bukan `durationMs` vs `duration`).
-  - Bukan karena `it` benar-benar kosong.
-  - Penyebabnya: record history TIDAK punya `duration` valid (Write
-    gagal), DAN semua fallback DISPLAY dirancang untuk kondisi yang
-    tidak terpenuhi:
-      * subtitle cadangan sudah dibersihkan di Write,
-      * `stats.duration` tidak pernah disimpan,
-      * `it.qi` tidak diberikan untuk baris Recently Played,
-      * engine live belum siap saat record baru (jalur native).
-
-KESIMPULAN A3: DISPLAY memburuk oleh Write yang menyimpan data tanpa
-durasi + membersihkan subtitle. `trackRowHTML` tidak salah sendiri,
-tetapi fallback-nya tidak efektif untuk Recently Played.
-
-================================================================
-5. KESIMPULAN (DI MANA BUGNYA)
-================================================================
-Bug UTAMA ada di WRITE PATH, diperparah di DISPLAY PATH.
-
-Rantai putusnya:
-
-  [API search] item.duration sering undefined
-        (server.js: hanya diisi dari fixedColumn; search tak punya)
-  -> subtitle memuat durasi sbg teks ("... • 3.22")
-  -> [WRITE] pushHistory menerima song tanpa duration
-  -> fallback #2 (durationFromSubtitle) kadang menolong, TAPI
-  -> [WRITE] records disimpan SETELAH subtitle dibersihkan (durasi dibuang)
-  -> jika fallback gagal, rec.duration TIDAK ADA sama sekali
-  -> [READ] viewSearch spread ...s (benar) tapi duration memang tidak ada
-  -> [DISPLAY] trackRowHTML: field kosong, subtitle sudah bersih,
-     stats tak punya duration, it.qi tak di-set -> "--:--"
-
-READ PATH = BERSIH (bukan sumber bug).
-WRITE PATH  = SUMBER BUG (durasi tidak tersimpan / hilang permanen).
-DISPLAY PATH = memperburuk (fallback tidak efektif untuk Recently Played).
-
-Kasus khusus yang PASTI menghasilkan "--:--":
-  a) Jalur NATIVE (VisionOS): `pushHistory` dipanggil SEGERA setelah
-     `startNativeTrack` (baris 2565-2566) -> engine belum resolve durasi.
-  b) Record lama yang tersimpan sebelum perbaikan sebelumnya.
-  c) `stats` tidak pernah menyimpan `duration` -> fallback #4 mati.
-  d) `it.qi` tak diberikan di Recently Played -> fallback live mati.
-
-================================================================
-6. REKOMENDASI FIX (JANGAN DIEKSEKUSI — ini hanya usulan)
-================================================================
-
-R1. SIMPAN `duration` KE `Library.stats` (perbaikan kecil, berdampak
-    besar). Di `pushHistory` (baris 750-765), saat membuat/memperbarui
-    `st[k]`, tambahkan:
-        st[k].duration = dur ? normalizeDuration(dur) : (st[k].duration || '');
-    Alasan: fallback #4 di `trackRowHTML` (baris 4273-4277) jadi hidup,
-    sekaligus `durationFromSubtitle` tidak lagi satu-satunya jaring.
-    (Namun ini tetap bergantung pada `dur` valid — lihat R2.)
-
-R2. PERBAIKI URUTAN WRITE: jangan bersihkan subtitle SEBELUM durasi
-    benar-benar didapat, atau simpan durasi mentah lebih dulu.
-    Konkret: saat `pushHistory` menyimpan `rec.subtitle` yang sudah
-    dibersihkan, SERTAKAN juga segmen durasi yang sudah diekstrak ke
-    `rec.duration`. Bila `dur` gagal didapat, JANGAN menghapus segmen
-    durasi dari subtitle (biarkan `durationFromSubtitle` bisa
-    memulihkannya di render). Ini menghilangkan sumber "--:--" permanen.
-
-R3. TUNDA `pushHistory` DI JALUR NATIVE sampai durasi tersedia.
-    Di baris 2565-2566, panggil `pushHistory` setelah event durasi
-    native tiba (mis. saat `Player.native.dur > 0`), bukan segera
-    setelah `startNativeTrack`. Alternatif: simpan lewat mekanisme
-    "backfill" — perbarui record history saat durasi engine pertama
-    kali diketahui. (Backfill sudah ada sebagian; pastikan menulis
-    ke record `hist` yang benar, bukan hanya `rec` lokal.)
-
-R4. SUPLAI `it.qi` (atau penanda "isNowPlaying") saat me-render Recently
-    Played di `viewSearch` (baris 5317) bila ingin fallback durasi
-    engine hidup untuk lagu yang sedang diputar. Alternatif lebih bersih:
-    jangan andalkan durasi engine untuk list; andalkan `st.duration`.
-
-R5. PERTIMBANGKAN ambil durasi dari API lain saat search. Karena
-    `server.js parseListItem` hanya mengisi `duration` dari fixedColumn,
-    fallback server-side (mis. bila fixedColumn tidak ada, ambil dari
-    segmen flex terakhir yang cocok pola durasi) akan membuat
-    `it.duration` selalu terisi. Ini patch di server.js (di luar fokus
-    app.js, jadi hanya catatan).
-
-R6. PERBAIKI `normalizeSong` (baris 4172-4175) agar IKUT menormalkan
-    `duration` (mis. `duration: normalizeDuration(s.duration)`) sehingga
-    semua objek yang lewat playSong konsisten bersih.
-
-REKOMENDASI PRIORITAS: R1 + R2 (perbaikan terkecil, menyentuh hanya
-`pushHistory`) kemungkinan besar sudah menghilangkan "--:--" karena
-menghidupkan kembali fallback stats dan mencegah penghapusan durasi
-yang belum tersimpan. R3 untuk kasus jalur native.
-
-================================================================
-7. FILE YANG DIBACA (READ-ONLY, TIDAK ADA YANG DIUBAH)
-================================================================
-1. C:\Project\music-stream\opencode.txt (work order)
-2. C:\Project\music-stream\public\app.js
-     - baris 596-612   : `store` (get/set localStorage)
-     - baris 705-766   : `Library.history`, `Library.pushHistory`,
-                         `Library.stats` (WRITE PATH)
-     - baris 2481-2493 : `parseDurationSec`
-     - baris 2542-2575 : `startCurrent` + pemanggil pushHistory (#1)
-     - baris 2651      : pemanggil pushHistory (#2)
-     - baris 1862-1891 : `playSong` / `normalizeSong` entry
-     - baris 1972-1999 : `slimSong` / `persistQueue`
-     - baris 4088-4147 : `splitSubtitle`, `splitPlays`,
-                         `durationFromSubtitle`, `viewCountText`,
-                         `cleanSubtitleText`, `normalizeDuration`
-     - baris 4172-4197 : `normalizeSong`, `songFromItem`
-     - baris 4245-4299 : `trackRowHTML` (DISPLAY PATH)
-     - baris 4386-4402 : `bindItems` klik -> `songFromItem` -> playSong
-     - baris 4917-4941 : `loadMixForYou`
-     - baris 5017-5066 : `searchResultsHTML`
-     - baris 5303-5330 : `viewSearch` (READ PATH)
-3. C:\Project\music-stream\server.js (sumber data API)
-     - baris 130-133   : `text()`, `normalizeDuration` server-side
-     - baris 223-272   : `parseListItem` (subtitle join + fixedColumn)
-     - baris 268-270   : `item.duration` hanya dari fixedColumn
-
-Tidak ada perubahan kode. Tidak ada build. Tidak ada adb. Tidak ada
-commit/push. Sesuai GUARD work order (READ-ONLY).
-
-================================================================
-8. GAP / CATATAN
-================================================================
-- Work order meminta "cetak struktur objek song yang masuk ke
-  pushHistory". Struktur tidak bisa dicetak runtime (READ-ONLY, app
-  saat ini berjalan di device). Struktur disimpulkan dari kode:
-  `{ ...songFromItem(it), videoId, title, artist, artistBrowseId,
-    thumbnail, duration, playlistId, _user, playedAt }`.
-  Field `duration` HANYA terisi bila `it.duration` ada dari API.
-- Verifikasi runtime (localStorage `smw_hist`) tidak dapat dilakukan
-  dalam audit read-only ini; disarankan periksa manual via
-  DevTools > Application > Local Storage > `smw_hist`, cek apakah
-  tiap record punya `duration`.
-- R5 menyentuh `server.js`, di luar fokus "HANYA public/app.js" —
-  disertakan hanya sebagai catatan, tidak dieksekusi.
-
-================================================================
-SELESAI — Status: AUDIT SELESAI (READ-ONLY, tanpa perubahan kode)
+SELESAI — Status: BERHASIL — commit e8bf967 — push OK
 ================================================================
