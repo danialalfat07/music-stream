@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.2.2";
+const APP_VERSION = "3.6.1";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -707,9 +707,10 @@ const Library = {
   },
   pushHistory(song) {
     let h = this.history.filter((s) => s.videoId !== song.videoId);
-    // L62 (F3): durasi SERING kosong di sini. Urutan pengambilan:
+    // L65 (R1/R2): resolusi durasi DULU, baru bersihkan subtitle.
+    // Urutan pengambilan durasi:
     //   1) field song.duration/dur/lengthSeconds/length
-    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")  <-- F1
+    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")
     //   3) segmen durasi di dalam song.title (jika ada)
     //   4) stats lokal
     //   5) durasi engine yang sedang berjalan
@@ -724,8 +725,8 @@ const Library = {
     }
     if (dur == null || dur === '') {
       try {
-        const st = this.stats[song.videoId];
-        if (st && st.duration) dur = st.duration;
+        const st0 = this.stats[song.videoId];
+        if (st0 && st0.duration) dur = st0.duration;
       } catch {}
     }
     if (dur == null || dur === '') {
@@ -736,17 +737,10 @@ const Library = {
       if (live > 0 && live <= 43200) dur = live;
     }
     // Normalisasi "3.22" -> "3:22" agar konsisten saat dibaca ulang.
+    const finalDuration =
+      dur != null && dur !== '' ? normalizeDuration(dur) : '';
     const rec = { ...song };
-    if (dur != null && dur !== '') rec.duration = normalizeDuration(dur);
-    // Subtitle dibersihkan dari segmen durasi supaya baris bawah Recently
-    // Played tidak menampilkan "3.22" lagi (F4, konsisten dgn Search Results).
-    if (rec.subtitle) {
-      const { rest, plays } = splitSubtitle(rec.subtitle);
-      rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
-    }
-    h.unshift({ ...rec, playedAt: Date.now() });
-    store.set('hist', h.slice(0, 100));
-    // play stats (local scrobble)
+    // R1: persist ke stats DULU supaya fallback trackRowHTML hidup.
     const st = store.get('stats', {});
     const k = song.videoId;
     if (!st[k])
@@ -758,6 +752,18 @@ const Library = {
         secs: 0,
         last: 0,
       };
+    if (finalDuration) {
+      rec.duration = finalDuration;
+      st[k].duration = finalDuration;
+      // R2: subtitle HANYA dibersihkan bila durasi benar-benar valid.
+      if (rec.subtitle) {
+        const { rest, plays } = splitSubtitle(rec.subtitle);
+        rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
+      }
+    }
+    h.unshift({ ...rec, playedAt: Date.now() });
+    store.set('hist', h.slice(0, 100));
+    // play stats (local scrobble)
     st[k].plays++;
     st[k].last = Date.now();
     st[k].title = song.title;
@@ -4171,7 +4177,11 @@ function displayTitle(t) {
 }
 function normalizeSong(s) {
   if (!s) return s;
-  return { ...s, title: displayTitle(s.title) };
+  return {
+    ...s,
+    title: displayTitle(s.title),
+    duration: s.duration ? normalizeDuration(s.duration) : s.duration,
+  };
 }
 function songFromItem(it) {
   const artists = it.artists || [];

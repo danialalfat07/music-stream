@@ -1,77 +1,97 @@
 ﻿================================================================
-WORK ORDER - FIX SUBTITLE ARTIST & VIEWS (V3)
+WORK ORDER - EKSEKUSI FIX DURASI RECENTLY PLAYED (R1, R2, R6)
 ================================================================
 
 GUARD
-1. Hanya edit public/app.js.
-2. JANGAN baca opencode.txt di subfolder.
-3. Setelah edit, WAJIB jalankan `npx cap copy android`, build, adb install, push sdcard, dan git commit + push.
+1. Root project: C:\Project\music-stream
+2. JANGAN baca file opencode.txt di subfolder manapun.
+3. FOKUS HANYA DI JS (public/app.js).
+4. JANGAN build APK (tidak perlu gradlew).
+5. JANGAN jalankan adb / push ke device / sdcard.
+6. Setelah selesai, jalankan `npm run bump 3.6.1`.
+7. Lalu git commit & push ke main.
 
 ================================================================
-MASALAH
-================================================================
-Berdasarkan pengecekan UI terbaru:
-1. Durasi sudah berhasil muncul di ujung kanan.
-2. TAPI baris bawah (subtitle) masih kotor. Muncul teks judul lagu 
-   yang berulang.
-   Contoh format dari API YouTube Music saat ini:
-   - "éñau & Ari Lesmana • Sesi Potret"
-   - "Erlangg a • sesi potret"
-   - "Tulus • Teh Hijau" (Jika tanpa views)
-   - "Seli vormel • sesi potret"
-
-Ekspektasi User:
-Baris bawah HANYA boleh berisi: Artist (dan Viewcount jika ada).
-Judul lagu TIDAK BOLEH muncul lagi di baris bawah.
-Contoh yang benar:
-- "éñau & Ari Lesmana"
-- "Erlangg a"
-- "Tulus"
-- "Seli vormel • 844 jt pemutaran" (jika ada views)
-
-================================================================
-TUGAS
+TUGAS FIX (Berdasarkan Hasil Audit)
 ================================================================
 
-F1. PERBAIKI LOGIKA PARSING SUBTITLE (public/app.js)
-    Cari fungsi `trackRowHTML` atau tempat di mana subtitle di-render.
+F1. UPDATE normalizeSong (R6)
+    File: public/app.js (sekitar baris 4172).
+    Ubah fungsi agar ikut menormalkan durasi:
     
-    Alih-alih sekadar memotong durasi, lakukan pembersihan total:
-    1. Ambil `it.subtitle`.
-    2. Pecah (split) berdasarkan pemisah " • ".
-    3. Simpan segmen pertama (index 0) sebagai `artistText`.
-    4. Cari segmen yang mengandung Viewcount menggunakan helper 
-       `looksLikePlays()` atau regex jumlah tayang.
-       (Misal: "844 jt pemutaran", "1,2 jt x ditonton").
-    5. Buang semua segmen lain (termasuk judul lagu dan durasi).
+    function normalizeSong(s) {
+      if (!s) return s;
+      return { 
+        ...s, 
+        title: displayTitle(s.title),
+        duration: s.duration ? normalizeDuration(s.duration) : s.duration
+      };
+    }
+
+F2. PERBAIKI PUSH HISTORY (R1 & R2)
+    File: public/app.js (fungsi Library.pushHistory, sekitar baris 708).
+    Lakukan perbaikan alur:
     
-F2. REKONSTRUKSI BARIS BAWAH
-    - Jika viewcount DITEMUKAN:
-      Gabungkan: `${artistText} • ${viewCountText}`
-    - Jika viewcount TIDAK DITEMUKAN:
-      Tampilkan: `${artistText}`
-      
-F3. PASTIKAN TAMPILAN BERSIH
-    - Judul lagu (misal "sesi potret") hilang dari baris bawah.
-    - Durasi (angka/titik) hilang dari baris bawah.
-    - Baris bawah hanya berisi Artist (dan Viewcount jika ada).
+    1. Sebelum membersihkan subtitle, coba ambil durasi dari 
+       `song.subtitle` menggunakan `durationFromSubtitle(song.subtitle)`.
+    2. Simpan durasi yang didapat (dari `song.duration` atau dari 
+       subtitle) ke dalam variabel `finalDuration`.
+    3. Simpan durasi tersebut ke `Library.stats[song.videoId].duration` 
+       agar fallback di `trackRowHTML` bisa membaca ini di masa depan.
+    4. Saat membersihkan subtitle (`splitSubtitle`), pastikan hanya 
+       membersihkan jika `finalDuration` benar-benar valid (tidak kosong). 
+       Jika `finalDuration` kosong, JANGAN buang teks dari subtitle.
+    5. Simpan `finalDuration` ke dalam record history `rec.duration`.
+
+    Contoh logika:
+    let finalDuration = song.duration || durationFromSubtitle(song.subtitle);
+    if (finalDuration) {
+        // 1. Simpan ke stats
+        if (!this.stats[song.videoId]) this.stats[song.videoId] = {};
+        this.stats[song.videoId].duration = finalDuration;
+        // 2. Set ke rec
+        rec.duration = finalDuration;
+        // 3. Baru bersihkan subtitle
+        if (rec.subtitle) {
+           const { rest, plays } = splitSubtitle(rec.subtitle);
+           rec.subtitle = [rest, plays].filter(Boolean).join(' • ');
+        }
+    }
+
+F3. UPDATE FALLBACK TAMPILAN (trackRowHTML)
+    File: public/app.js (sekitar baris 4257).
+    Pastikan `trackRowHTML` memprioritaskan durasi dari `Library.stats` 
+    jika `it.duration` kosong dan `it.subtitle` tidak punya durasi.
+    
+    let secs = parseDurationSec(raw);
+    if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
+    if (!(secs >= 1 && secs <= 43200) && it.videoId) {
+        try {
+            const st = Library.stats[it.videoId];
+            if (st && st.duration) secs = parseDurationSec(st.duration);
+        } catch {}
+    }
+    // Pastikan blok try-catch di atas sudah ada dan berfungsi.
 
 ================================================================
-BUILD & PUSH
+EKSEKUSI
 ================================================================
-1. npm run bump 3.2.2
-2. npx cap copy android
-3. cd android ; .\gradlew.bat assembleDebug
-4. adb install -r ...app-debug.apk
-5. adb push ... /sdcard/Download/Dnialify/dnialify-3.2.2.apk
-6. git add -A
-7. git commit -m "fix(ui): clean subtitle to only show artist and viewcount"
-8. git push origin main
+1. Lakukan F1, F2, F3 di public/app.js.
+2. Verifikasi syntax: `node --check public/app.js`.
+3. Bump web version: `npm run bump 3.6.1`.
+4. Git add, commit, push:
+   - `git add -A`
+   - `git commit -m "fix(ui): persist duration to stats and fix recently played write path"`
+   - `git push origin main`
 
 ================================================================
-REPORT
+OUTPUT REPORT (OVERWRITE report.txt)
 ================================================================
-Tulis ke report.txt (overwrite). Sertakan snippet kode F1-F2
-sebagai bukti logika split & filter berhasil diterapkan.
-
+Tulis ke C:\Project\music-stream\report.txt (UTF-8).
+Laporkan:
+1. Status (BERHASIL/GAGAL).
+2. Web version sebelum & sesudah bump.
+3. Sertakan snippet kode fungsi `normalizeSong` dan blok 
+   `pushHistory` setelah diubah sebagai bukti.
+4. Git commit hash & status push.
 
