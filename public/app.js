@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.5.3";
+const APP_VERSION = "3.5.4";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -4123,18 +4123,16 @@ function viewCountText(it) {
   if (direct) return String(direct);
   return splitSubtitle(it.subtitle).plays;
 }
-// L62: baris bawah (.ts) = Artist + Views saja. Durasi DIBUANG dari sini
-// (segmen durasi difilter oleh splitSubtitle). Artist diprioritaskan dari
-// field eksplisit, kalau tidak ada pakai sisa segmen subtitle.
+// L63: baris bawah (.ts) = Artist + ViewCount. Durasi DIBUANG dari sini
+// (segmen durasi difilter oleh splitSubtitle), TAPI view count WAJIB tetap
+// tampil. Artist dari field eksplisit bila ada, selain itu dari sisa segmen
+// subtitle. View count (plays) selalu ditempel di belakang bila ada.
 function cleanSubtitleText(it) {
   const { rest, plays } = splitSubtitle(it.subtitle);
   const artist = String(it.artist || '').trim();
-  let text = artist || rest;
-  // Kalau artist eksplisit dipakai, jangan tampilkan durasi apa pun di rest.
-  if (artist && plays && !/ditonton|pemutaran|views/i.test(text)) {
-    text = artist;
-  }
-  return text.replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
+  const head = artist || rest;
+  const parts = [head, plays].filter(Boolean);
+  return parts.join(' \u2022 ').replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
 }
 function normalizeDuration(s) {
   const t = String(s || '').trim();

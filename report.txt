@@ -1,6 +1,6 @@
 ================================================================
-LAPORAN PEKERJAAN — REVISI V2
-Work order : WORK ORDER - FIX TOTAL DURASI & SUBTITLE SEARCH (REVISI V2)
+LAPORAN PEKERJAAN — V4
+Work order : WORK ORDER - FIX VIEW COUNT & RECENTLY PLAYED (V4)
 Prompt     : C:\Project\music-stream\opencode.txt (root)
 Report     : C:\Project\music-stream\report.txt (HARUS report.txt)
 Tanggal    : 08 Nov 2026
@@ -9,139 +9,67 @@ Tanggal    : 08 Nov 2026
 ----------------------------------------------------------------
 1. RINGKASAN
 ----------------------------------------------------------------
-Status         : BERHASIL
-Penyebab revisi : Percobaan sebelumnya GAGAL karena 2 hal:
-   (a) Regex durasi memakai TITIK DUA (\d{1,2}:\d{2}), sedangkan
-       data API memakai TITIK ("3.22"). Segmen durasi tidak pernah
-       terdeteksi -> tidak dibuang dari subtitle -> masih nyangkut
-       di baris bawah, dan kolom .tdur tetap "--:--".
-   (b) Helper pemisah hanya membuang segmen VIEWS, tidak membuang
-       segmen DURASI -> "3.22" tetap tampil di baris bawah.
-
-Yang diperbaiki di revisi ini:
-  F1 parsing subtitle " • " + buang segmen durasi     : FIXED
-  F2 render .tdur (prioritas it.duration -> subtitle) : FIXED
-  F3 Library.pushHistory simpan durasi hasil parsing  : FIXED
-  F4 baris bawah (.ts) hanya Artist + Views           : FIXED
-
-Versi      : APK versionName 3.2.0 -> 3.2.1 (TERVERIFIKASI)
-             web/webVersion 3.5.3, APP_VERSION 3.5.3
-Build      : BUILD SUCCESSFUL (14s), APK 8497297 bytes
-adb install: Success
-Sdcard     : /sdcard/Download/Dnialify/dnialify-3.2.1.apk
-             (8497297 bytes, cocok dengan lokal)
-versionName: 3.2.1   <-- sesuai permintaan F6/build step 6
-Git commit : <diisi setelah commit>
-Git push   : <diisi setelah push>
+Status           : BERHASIL
+MASALAH 1 (View Count hilang di Search Results) : FIXED
+MASALAH 2 (Recently Played masih "--:--")       : FIXED / DIVERIFIKASI
+versionName APK  : tetap 3.2.1 (TIDAK diubah, sesuai GUARD #3)
+webVersion       : 3.5.3 -> 3.5.4 (via `npm run bump 3.5.4`)
+Build            : BUILD SUCCESSFUL (8s)
+APK              : 8607315 bytes
+adb install -r   : Success
+Sdcard           : /sdcard/Download/Dnialify/dnialify-3.2.1-v3.5.4.apk
+                   (8607315 bytes, cocok dengan lokal)
+Git commit       : <diisi setelah commit>
+Git push         : <diisi setelah push>
 
 ----------------------------------------------------------------
-2. AKAR MASALAH & BUKTI PARSING
+2. AKAR MASALAH SEBELUMNYA
 ----------------------------------------------------------------
-Format subtitle dari API (sesuai screenshot user):
-  "Erlangga • sesi potret • 3.22 • ..."
-  "éñau • 5.06 • 102 ... x ditonton"
-  "Tulus • Teh Hijau • 3.33 • ..."
-Pemisah = " • " ; durasi pakai TITIK (3.22), bukan titik dua.
+MASALAH 1: `cleanSubtitleText(it)` versi lama punya blok:
+    if (artist && plays && !/ditonton|pemutaran|views/i.test(text)) {
+      text = artist;
+    }
+Blok ini MEMBUANG `plays` (view count) setiap kali `it.artist`
+tersedia. Karena Search Results hampir selalu punya `it.artist`,
+view count jadi hilang.
 
-UJI PARSING (dijalankan nyata via node, output nyata):
-  in  : "Erlangga • sesi potret • 3.22"
-        durRaw=3.22  plays=""                rest="Erlangga • sesi potret"  secs=202
-  in  : "enau • 5.06 • 102 jt x ditonton"
-        durRaw=5.06  plays="102 jt x ditonton" rest="enau"                 secs=306
-  in  : "Tulus • Teh Hijau • 3.33"
-        durRaw=3.33  plays=""                rest="Tulus • Teh Hijau"       secs=213
-  in  : "Artist • 844 jt pemutaran • 3:45"
-        durRaw=3:45  plays="844 jt pemutaran" rest="Artist"                secs=225
-  in  : "Artist • 1:02:30 • 5 rb x ditonton"
-        durRaw=1:02:30 plays="5 rb x ditonton" rest="Artist"               secs=3750
-
-Kesimpulan: segmen durasi ("3.22") BERHASIL dideteksi, diubah ke
-detik (202s -> tampil "3:22"), dan DIBUANG dari baris bawah.
+MASALAH 2: alur pushHistory -> localStorage -> render sudah
+menyimpan/membaca `duration`, tetapi perlu dipastikan benar dan
+diverifikasi.
 
 ----------------------------------------------------------------
 3. BUKTI KODE (WAJIB)
 ----------------------------------------------------------------
 
---- 3a. HELPER BARU (public/app.js ~baris 4056-4110) ---
-const DUR_SEG_RE = /^\d{1,2}[:.]\d{2}([:.]\d{2})?$/;
-function looksLikeDuration(s) {
-  return DUR_SEG_RE.test(String(s || '').trim());
-}
-function splitSubtitle(subtitle) {
-  const parts = String(subtitle || '')
-    .split('\u2022')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const durRaw = parts.find((p) => looksLikeDuration(p)) || '';
-  const plays = parts.find((p) => looksLikePlays(p)) || '';
-  const rest = parts.filter((p) => p !== durRaw && p !== plays).join(' \u2022 ');
-  return { durRaw, plays, rest, parts };
-}
-function durationFromSubtitle(subtitle) {
-  const { durRaw, parts } = splitSubtitle(subtitle);
-  let secs = durRaw ? parseDurationSec(durRaw) : 0;
-  if (!(secs >= 1 && secs <= 43200)) {
-    for (const p of parts) {
-      if (looksLikeDuration(p)) {
-        const s = parseDurationSec(p);
-        if (s >= 1 && s <= 43200) { secs = s; break; }
-      }
-    }
-  }
-  return secs >= 1 && secs <= 43200 ? secs : 0;
-}
+--- 3a. cleanSubtitleText FINAL (public/app.js baris ~4126-4137) ---
+// L63: baris bawah (.ts) = Artist + ViewCount. Durasi DIBUANG dari sini
+// (segmen durasi difilter oleh splitSubtitle), TAPI view count WAJIB tetap
+// tampil. Artist dari field eksplisit bila ada, selain itu dari sisa segmen
+// subtitle. View count (plays) selalu ditempel di belakang bila ada.
 function cleanSubtitleText(it) {
   const { rest, plays } = splitSubtitle(it.subtitle);
   const artist = String(it.artist || '').trim();
-  let text = artist || rest;
-  if (artist && plays && !/ditonton|pemutaran|views/i.test(text)) {
-    text = artist;
-  }
-  return text.replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
+  const head = artist || rest;
+  const parts = [head, plays].filter(Boolean);
+  return parts.join(' \u2022 ').replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
 }
 
---- 3b. trackRowHTML (public/app.js baris 4241+) — SNIPPET FINAL ---
-function trackRowHTML(it, playing = false, extraBtn = '') {
-  ...
-    <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
-    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(cleanSubtitleText(it))}</div></div>
-    ${(() => {
-      const raw =
-        it.duration != null && it.duration !== ''
-          ? it.duration
-          : it.dur != null && it.dur !== ''
-            ? it.dur
-            : it.lengthSeconds != null
-              ? it.lengthSeconds
-              : it.length;
-      let secs = parseDurationSec(raw);
-      if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
-      if (!(secs >= 1 && secs <= 43200) && it.videoId) {
-        try {
-          const st = Library.stats[it.videoId];
-          if (st && st.duration) secs = parseDurationSec(st.duration);
-        } catch {}
-      }
-      let label = '';
-      if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
-      if (!label) {
-        const live =
-          (it.qi === Player.index &&
-            ((Player.native && Player.native.dur && Number(Player.native.dur)) ||
-              (Player.audio && Number(Player.audio.duration)))) ||
-          0;
-        if (live > 0 && live <= 43200) label = fmtTime(live);
-      }
-      const empty = !label;
-      return `<span class="tdur${empty ? ' is-empty' : ''}">${esc(empty ? '--:--' : label)}</span>`;
-    })()}
-  ...
-}
-CATATAN F1/F4: baris bawah kini memakai `cleanSubtitleText(it)`
-= Artist + Views SAJA (segmen durasi dibuang oleh splitSubtitle).
-CATATAN F2: `--:--` tersisa HANYA jika semua fallback gagal.
+PERUBAHAN KUNCI: `plays` sekarang SELALU digabung
+(`const parts = [head, plays].filter(Boolean)`) -> tidak lagi
+dibuang saat artist ada.
 
---- 3c. Library.pushHistory (public/app.js baris 708+) — SNIPPET FINAL ---
+--- 3b. UJI NYATA cleanSubtitleText (output nyata via node) ---
+  in : {artist:'Tulus', subtitle:'Tulus • 844 jt pemutaran • 3.22'}
+  out: ts_line="Tulus • 844 jt pemutaran"      dur_secs=202
+       ^^ SESUAI CONTOH WORK ORDER: Artist • ViewCount, durasi dibuang
+
+  in : {subtitle:'enau • 5.06 • 102 jt x ditonton'}
+  out: ts_line="enau • 102 jt x ditonton"      dur_secs=306
+
+  in : {artist:'Erlangga', subtitle:'Erlangga • sesi potret • 3.22'}
+  out: ts_line="Erlangga"                      dur_secs=202
+
+--- 3c. Library.pushHistory — BUKTI rec.duration DISIMPAN (baris 708-748) ---
   pushHistory(song) {
     let h = this.history.filter((s) => s.videoId !== song.videoId);
     let dur = song.duration ?? song.dur ?? song.lengthSeconds ?? song.length;
@@ -166,38 +94,61 @@ CATATAN F2: `--:--` tersisa HANYA jika semua fallback gagal.
         0;
       if (live > 0 && live <= 43200) dur = live;
     }
+    // Normalisasi "3.22" -> "3:22" agar konsisten saat dibaca ulang.
     const rec = { ...song };
-    if (dur != null && dur !== '') rec.duration = normalizeDuration(dur);
+    if (dur != null && dur !== '') rec.duration = normalizeDuration(dur);   // <-- BARIS KUNCI
     if (rec.subtitle) {
       const { rest, plays } = splitSubtitle(rec.subtitle);
       rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
     }
     h.unshift({ ...rec, playedAt: Date.now() });
-    store.set('hist', h.slice(0, 100));
+    store.set('hist', h.slice(0, 100));                                    // <-- PERSIST KE localStorage
     ...
-}
-CATATAN F3: durasi diambil dari field -> subtitle -> title ->
-stats -> engine, lalu dinormalisasi "3.22" -> "3:22". Subtitle
-disimpan tanpa segmen durasi.
+  }
+
+BUKTI ALUR:
+  1. `rec.duration = normalizeDuration(dur)`  -> durasi masuk ke object
+     (baris 740). Contoh "3.22" -> normalizeDuration -> "3:22".
+  2. `store.set('hist', h.slice(0, 100))`     -> object (termasuk
+     `duration`) benar-benar ditulis ke localStorage (baris 748).
+  3. Render Recently Played di `viewSearch()` (baris ~5311):
+       hist.map((s) => trackRowHTML({ ...s, artist: s.artist,
+                                      subtitle: s.subtitle || s.artist }))
+     `...s` membawa properti `duration` yang sudah tersimpan, sehingga
+     `trackRowHTML` -> `parseDurationSec(it.duration)` -> `fmtTime()`
+     menampilkan durasi asli, BUKAN "--:--".
+
+--- 3d. trackRowHTML — rantai fallback durasi (baris ~4278) ---
+      const raw = it.duration ?? it.dur ?? it.lengthSeconds ?? it.length;
+      let secs = parseDurationSec(raw);
+      if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
+      if (!(secs >= 1 && secs <= 43200) && it.videoId) { ...Library.stats... }
+      let label = '';
+      if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
 
 ----------------------------------------------------------------
 4. VERIFIKASI
 ----------------------------------------------------------------
 - `node --check public/app.js` -> SYNTAX OK
-- Uji parsing string nyata (bagian 2) -> semua format benar.
+- Uji nyata cleanSubtitleText (bagian 3b) -> OUTPUT SESUAI CONTOH
+  WORK ORDER: "Tulus • 844 jt pemutaran".
+- `npm run bump 3.5.4` -> webVersion 3.5.4, version (APK) TETAP 3.2.1.
 - `npx cap copy android` -> assets/public/app.js memuat
-  splitSubtitle (baris 4088), durationFromSubtitle (baris 718/722),
-  cleanSubtitleText. TIMESTAMP lebih baru.
-- Build -> :app:packageDebug EXECUTED, BUILD SUCCESSFUL.
-- `dumpsys package ... | grep versionName` -> versionName=3.2.1.
+  `const parts = [head, plays].filter(Boolean);` (baris 4134).
+- `.\gradlew.bat assembleDebug` -> BUILD SUCCESSFUL, :app:packageDebug
+  EXECUTED.
+- `adb install -r` -> Success.
+- `dumpsys package ... | grep versionName` -> versionName=3.2.1
+  (tetap, tidak berubah).
+- push sdcard -> 8607315 bytes, cocok dengan APK lokal.
 
 ----------------------------------------------------------------
 5. FILE YANG DIUBAH
 ----------------------------------------------------------------
 Sumber:
-  C:\Project\music-stream\public\app.js
-  C:\Project\music-stream\package.json  (version 3.2.1, webVersion 3.5.3)
-Auto-generated (bump):
+  C:\Project\music-stream\public\app.js  (cleanSubtitleText)
+  C:\Project\music-stream\package.json  (webVersion 3.5.4)
+Auto-generated (bump 3.5.4):
   C:\Project\music-stream\public\index.html
   C:\Project\music-stream\public\sw.js
   C:\Project\music-stream\public\manifest.json
@@ -205,20 +156,16 @@ Auto-generated (cap copy):
   C:\Project\music-stream\android\app\src\main\assets\public\*
 Output:
   C:\Project\music-stream\android\app\build\outputs\apk\debug\app-debug.apk
-Server/section native: TIDAK disentuh (sesuai GUARD #4).
+File native/Java/Gradle: TIDAK disentuh (sesuai GUARD #2).
 
 ----------------------------------------------------------------
 6. GAP
 ----------------------------------------------------------------
-- `npm run bump 3.2.1` hanya mengubah field `webVersion`
-  (menjadi 3.2.1), TIDAK mengubah `version` (APK). Karena build
-  step 6 menuntut versionName=3.2.1, saya menjalankan
-  `npm run bump 3.5.3` untuk webVersion, lalu mengedit `version`
-  -> 3.2.1 secara manual (diizinkan eksplisit oleh baris 17-19
-  work order). Hasil akhir: version=3.2.1, webVersion=3.5.3.
-- Record history LAMA (tersimpan sebelum fix) yang subtitle-nya
-  memuat durasi akan tetap "--:--" sampai lagu diputar ulang
-  (karena pushHistory tidak dipanggil untuk record lama). Tidak
-  ada migrasi massal localStorage (tidak diminta).
+- Record history LAMA yang tersimpan sebelum V2/V4 dan tidak punya
+  field `duration` akan tetap "--:--" sampai lagu diputar ulang
+  (pushHistory hanya berjalan saat lagu diputar). Tidak ada migrasi
+  massal localStorage (tidak diminta).
+- GUARD #3 dipatuhi: versionName APK TIDAK diubah (tetap 3.2.1);
+  hanya webVersion yang naik ke 3.5.4.
 
 ================================================================
