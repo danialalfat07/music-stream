@@ -45,10 +45,12 @@
         <!-- Phase 8 diag only: staged VisionOS diagnostic screen (no launcher icon). -->
         <activity
             android:name=".VisionOsDiagActivity"
-            android:exported="true"
+            android:exported="false"
             android:excludeFromRecents="true" />
 
-        <!-- Duck on outside notifications (opt-in via notification access). -->
+        <!-- F1: Duck on outside notifications DISABLED for Play Protect
+             (BIND_NOTIFICATION_LISTENER_SERVICE triggers static flag on
+             sideloaded apps). Kept commented for reversibility.
         <service
             android:name=".NotificationDuckService"
             android:enabled="true"
@@ -58,6 +60,7 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        -->
 
         <!-- Phase 8 diag only: Quick Settings tile opens the stream settings dialog. -->
         <service
@@ -115,6 +118,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- F1: DISABLED for Play Protect (auto-blocks this permission on sideload).
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+    -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>

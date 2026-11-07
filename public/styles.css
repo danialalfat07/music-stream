@@ -473,7 +473,10 @@ html[data-theme="light"] .art-ph { background: linear-gradient(145deg, #e8e8e8, 
 .track .tmeta { flex: 1; min-width: 0; }
 .track .tt { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
 .track .ts { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-.track .tdur { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
+/* L61: baris bawah Search Results memuat view-count di samping artist. */
+.track .ts .tvc { margin-left: 6px; color: var(--muted); opacity: .8; }
+.track .ts .tvc::before { content: "\2022"; margin-right: 6px; }
+.track .tdur { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; flex-shrink: 0; }
 .track .tbtn { color: var(--muted); padding: 6px; border-radius: 50%; opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.15s; line-height: 0; }
 .track .tbtn .ic { width: 15px; height: 15px; }
 .track:hover .tbtn, .track.playing .tbtn { opacity: 1; }
@@ -597,6 +600,13 @@ html[data-theme="light"] .detail-head {
 .search-bar:focus-within { border-color: var(--text); background: var(--card-hover); box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 8%, transparent); }
 .search-bar input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 15px; font-weight: 500; }
 .search-bar input::placeholder { color: var(--muted); }
+/* L61: Search UI — input[type=search] memunculkan tombol clear bawaan
+   browser sehingga tampak DUA tanda X (satu native, satu #search-clear).
+   Sembunyikan yang native, pertahankan #search-clear di ujung kanan. */
+.search-bar input[type="search"] { -webkit-appearance: none; appearance: none; }
+.search-bar input[type="search"]::-webkit-search-cancel-button,
+.search-bar input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }
+.search-bar input[type="search"]::-ms-clear { display: none; width: 0; height: 0; }
 .search-wrap { position: relative; }
 .suggest { position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: var(--card); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.35), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; display: none; flex-direction: column; max-height: min(42vh, 360px); overflow-y: auto; z-index: 20; }
 .suggest.has-content { display: flex; }

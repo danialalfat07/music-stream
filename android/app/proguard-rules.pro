@@ -1,21 +1,21 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# F5: ProGuard/R8 rules for Dnialify MusicStream.
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep all app classes (PlaybackBridge and friends are reached
+# reflectively from the WebView via @JavascriptInterface).
+-keep class com.dnialify.musicstream.** { *; }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# MANDATORY: every @JavascriptInterface method must survive
+# obfuscation or the WebView JS bridge breaks silently.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep Capacitor plugin entry points (loaded reflectively).
+-keep class com.getcapacitor.** { *; }
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keep class * extends com.getcapacitor.Plugin { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep WebView JS interface classes explicitly (belt & braces).
+-keepclassmembers class com.dnialify.musicstream.MainActivity$* {
+    public *;
+}

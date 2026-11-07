@@ -17,10 +17,10 @@ public final class ExoPlayerHolder {
 
     private static final String TAG = "ExoPlayerHolder";
 
-    /** Sama dengan resolver/SongCache/MediaPlayer legacy: googlevideo 403
-     *  tanpa UA ini (socket-3-fix). */
+    /** F4: UA netral (sebelumnya spoof "com.google.visionos.youtube"
+     *  yang memicu flag Play Protect). */
     private static final String VISIONOS_UA =
-            "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
+            "DnialifyMusicStream/3.2.0 (Android)";
 
     private static ExoPlayerHolder instance;
 

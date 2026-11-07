@@ -50,7 +50,7 @@ public final class SongCache {
     private static final int MAX_CHUNK_ATTEMPTS = 9;
     private static final long RECORD_EVERY_BYTES = 2L * 1024L * 1024L;
     private static final String UA =
-            "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
+            "DnialifyMusicStream/3.2.0 (Android)";
 
     private static final java.util.Map<String, Boolean> CANCEL =
             new java.util.concurrent.ConcurrentHashMap<>();

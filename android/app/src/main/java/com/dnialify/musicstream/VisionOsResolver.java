@@ -44,7 +44,7 @@ public final class VisionOsResolver {
     private static final String OS_NAME = "visionOS";
     private static final String OS_VERSION = "25.6.0.23O471";
     private static final String UA =
-            "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
+            "DnialifyMusicStream/3.2.0 (Android)";
     private static final int TIMEOUT_MS = 20000;
     private static final long VISITOR_TTL_MS = 60L * 60L * 1000L;
 

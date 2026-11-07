@@ -108,6 +108,9 @@ public final class NativeAudioEngine {
     private String lastCache = "";    // HIT | MISS (surfaced to WebView badge)
     private String playFile = "";     // local cache path currently served
     private LocalStreamServer streamServer; // 127.0.0.1 proxy (no frozen EOF)
+    // F2: master switch for the local nanohttpd proxy. false = production
+    // (Play Protect safe); true = re-enable for debugging.
+    private static final boolean ENABLE_LOCAL_SERVER = false;
     private long windowEnd = -1;      // sliding prefetch cap (bytes), -1 = unset
     private int windowChunk = -1;     // playback chunk the window was built for
     private int recoveryAttempts = 0; // premature-completion recovery tries for current track
@@ -1971,6 +1974,11 @@ public final class NativeAudioEngine {
 
     /** Lazy local proxy; null when it fails (caller falls back to file path). */
     private LocalStreamServer ensureServer(Context c) {
+        // F2: LocalStreamServer (nanohttpd) DISABLED for Play Protect.
+        // A local HTTP server is treated as Riskware by static scanners.
+        // Returning null makes every caller fall back to direct/file URL.
+        // Set ENABLE_LOCAL_SERVER=true to re-enable (reversible).
+        if (!ENABLE_LOCAL_SERVER) return null;
         if (streamServer != null) return streamServer;
         try {
             Context ac = c != null ? c.getApplicationContext() : appCtx;
@@ -2063,7 +2071,7 @@ public final class NativeAudioEngine {
             try {
                 Map<String, String> headers = new HashMap<>();
                 headers.put("User-Agent",
-                        "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)");
+                        "DnialifyMusicStream/3.2.0 (Android)");
                 mp.setDataSource(appCtx, android.net.Uri.parse(url), headers);
                 mp.prepareAsync();
             } catch (Exception e) {

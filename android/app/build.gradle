@@ -65,7 +65,8 @@ android {
             // Ensure debug uses persistent store if available
         }
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             if (file('release.keystore').exists()) {
                 signingConfig signingConfigs.release

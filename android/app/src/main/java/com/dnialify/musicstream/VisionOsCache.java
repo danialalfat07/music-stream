@@ -20,7 +20,7 @@ public final class VisionOsCache {
     private static final int CHUNK = 102400;
     private static final int TIMEOUT_MS = 20000;
     private static final String UA =
-            "com.google.visionos.youtube/1.02(RealityDevice14,1; U; CPU visionOS 25_6_0 like Mac OS X; US)";
+            "DnialifyMusicStream/3.2.0 (Android)";
 
     public static final class CacheResult {
         public final File file;

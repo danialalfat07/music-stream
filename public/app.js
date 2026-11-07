@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.5.1";
+const APP_VERSION = "3.5.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -707,7 +707,25 @@ const Library = {
   },
   pushHistory(song) {
     let h = this.history.filter((s) => s.videoId !== song.videoId);
-    h.unshift({ ...song, playedAt: Date.now() });
+    // L61: pastikan durasi ikut tersimpan supaya "Recently played" tidak
+    // menampilkan --:--. Fallback ke stats lokal / engine yang berjalan bila
+    // song tidak membawa field duration.
+    let dur = song.duration;
+    if (dur == null || dur === '') {
+      try {
+        const st = this.stats[song.videoId];
+        if (st && st.duration) dur = st.duration;
+      } catch {}
+    }
+    if ((dur == null || dur === '') && song.videoId) {
+      const live =
+        (Player.native && Player.native.dur && Number(Player.native.dur)) ||
+        (Player.audio && Number(Player.audio.duration)) ||
+        0;
+      if (live > 0 && live <= 43200) dur = live;
+    }
+    const rec = dur == null || dur === '' ? { ...song } : { ...song, duration: dur };
+    h.unshift({ ...rec, playedAt: Date.now() });
     store.set('hist', h.slice(0, 100));
     // play stats (local scrobble)
     const st = store.get('stats', {});
@@ -1015,6 +1033,7 @@ const Player = {
   index: -1,
   shuffle: false,
   repeat: 0, // 0 none, 1 all, 2 one
+  _queueSource: 'single', // F1: gate sumber queue untuk Mix/refill (single|album|offline)
   lyrics: { synced: null, plain: null, source: null, lines: [] },
   lyricsBrowseId: null,
   relatedBrowseId: null,
@@ -1821,9 +1840,12 @@ window.onYouTubeIframeAPIReady = () => {
   document.head.appendChild(s);
 })();
 
-async function playSong(song, queue = null, index = null) {
+async function playSong(song, queue = null, index = null, source = null) {
   if (!song || !song.videoId) return;
   Player._offlineMode = false;
+  // F2: queueSource = single source of truth untuk gate Mix/refill.
+  // Jalur offline bypass playSong, jadi hanya 'album' vs 'single' di sini.
+  Player._queueSource = (source === 'album') ? 'album' : 'single';
   try { if (window.NativePlayback && NativePlayback.diagLog) NativePlayback.diagLog('[TRACE_01] playSong enter videoId=' + song.videoId); } catch {}
   // mandatory version check before any play - uses cache/no-store fetch with 5min cooldown
   try {
@@ -1953,6 +1975,7 @@ function persistQueue() {
       shuffle: !!Player.shuffle,
       repeat: Player.repeat || 0,
       speed: Player.speed || 1,
+      queueSource: Player._queueSource || 'single',
     });
   } catch {}
 }
@@ -1970,6 +1993,10 @@ function restoreQueue() {
   Player.shuffle = !!st.shuffle;
   Player.repeat = st.repeat === 1 || st.repeat === 2 ? st.repeat : 0;
   if (typeof st.speed === 'number' && st.speed > 0) Player.speed = st.speed;
+  // F8: pulihkan sumber queue (backward-compatible: payload lama -> 'single')
+  Player._queueSource = st.queueSource === 'album' || st.queueSource === 'offline'
+    ? st.queueSource
+    : 'single';
   Player.cued = true;
   Player.pending = null;
   const s = Player.current;
@@ -2278,6 +2305,7 @@ const OfflineLib = {
   play(videoId) {    const e = this.get(videoId);
     if (!e || !e.offlineAvailable) { toast('Not available offline yet'); return; }
     Player._offlineMode = true;
+    Player._queueSource = 'offline';
     const song = {
       videoId: e.videoId, title: e.title, artist: e.artist,
       subtitle: e.artist, thumbnail: e.artworkThumb || e.thumbnail || '', duration: e.duration,
@@ -2710,7 +2738,7 @@ async function fetchQueue(song) {
 // Guard: _queueFetching (skip saat Mix sedang replace).
 async function refillRadio() {
   try {
-    if (Player._offlineMode) return;
+    if (Player._queueSource === 'offline' || Player._queueSource === 'album') return;
     if (Player._queueFetching) return;  // Mix sedang jalan
     if (Player._radioRefillInFlight) return;
     const seed = Player.current;
@@ -3712,7 +3740,7 @@ function renderQueue() {
     html += `<div class="q-head">Your queue</div><div class="q-hint">Nothing queued yet - tap the queue icon on a song, or Play next on Now Playing.</div>`;
   }
   if (radio.length) {
-    const hideMix = Player._offlineMode;
+    const hideMix = (Player._queueSource === 'offline' || Player._queueSource === 'album');
     const mixBtn = hideMix ? '' : `<button type="button" class="q-clear" id="queue-mix" title="Refresh radio">${icon('i-refresh')}<span>Mix</span></button>`;
     html += `<div class="q-head q-head-row"><span>From radio · ${radio.length}</span><span class="q-actions"><button type="button" class="q-clear" id="q-scramble" title="Shuffle radio order">${icon('i-shuffle')}<span>Scramble</span></button>${mixBtn}</span></div>`;
     html += radio
@@ -4028,6 +4056,27 @@ async function downloadMp3(song) {
 function looksLikePlays(s) {
   return /pemutaran|plays|ditonton|views|x ditonton/i.test(String(s || ''));
 }
+// L61: Search UI — pisahkan subtitle "Artist • 844 jt pemutaran • 3:45"
+// menjadi bagian artist dan bagian view-count. Dipakai supaya baris bawah
+// hasil pencarian hanya menampilkan artist + jumlah tayang (durasi tidak
+// lagi ikut di baris bawah; durasi punya kolom sendiri di ujung kanan).
+function splitPlays(subtitle) {
+  const parts = String(subtitle || '')
+    .split('\u2022')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const plays = parts.find((p) => looksLikePlays(p)) || '';
+  const rest = parts.filter((p) => p !== plays).join(' \u2022 ');
+  return { plays, rest };
+}
+// L61: jumlah tayang untuk baris bawah Search Results. Ambil dari subtitle
+// (segment "844 jt pemutaran") atau field eksplisit bila API mengirimnya.
+function viewCountText(it) {
+  const direct =
+    it.viewCount || it.views || it.viewCountText || it.playCount || '';
+  if (direct) return String(direct);
+  return splitPlays(it.subtitle).plays;
+}
 function normalizeDuration(s) {
   const t = String(s || '').trim();
   if (/^\d{1,2}(\.\d{2}){1,2}$/.test(t)) return t.replace(/\./g, ':');
@@ -4142,7 +4191,7 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
     <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
     ${tn}${qn}
     <span class="track-art-wrap">${coverHTML(it.thumbnail, 'track')}${renderDownloadBadge(it.videoId)}</span>
-    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || it.subtitle || '')}</div></div>
+    <div class="tmeta"><div class="tt">${esc(displayTitle(it.title))}</div><div class="ts">${esc(it.artist || splitPlays(it.subtitle).rest || it.subtitle || '')}${viewCountText(it) ? `<span class="tvc">${esc(viewCountText(it))}</span>` : ''}</div></div>
     ${(() => {
       // L56: durasi baris queue WAJIB tampil. Ambil dari semua nama field yang
       // dipakai repo (duration/dur/lengthSeconds/length), parse ke detik, dan
@@ -4156,7 +4205,25 @@ function trackRowHTML(it, playing = false, extraBtn = '') {
             : it.lengthSeconds != null
               ? it.lengthSeconds
               : it.length;
-      const secs = parseDurationSec(raw);
+      let secs = parseDurationSec(raw);
+      if (!(secs >= 1 && secs <= 43200)) {
+        // L61: fallback — subtitle sering memuat durasi ("Artist • 844 jt
+        // pemutaran • 3:45") atau record history lama tidak menyimpan durasi.
+        // Ambil dari segment subtitle, lalu dari stats lokal.
+        const sub = splitPlays(it.subtitle).rest;
+        const m = String(sub).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (m) {
+          secs = m[3]
+            ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+            : Number(m[1]) * 60 + Number(m[2]);
+        }
+      }
+      if (!(secs >= 1 && secs <= 43200) && it.videoId) {
+        try {
+          const st = Library.stats[it.videoId];
+          if (st && st.duration) secs = parseDurationSec(st.duration);
+        } catch {}
+      }
       let label = '';
       if (secs >= 1 && secs <= 43200) label = fmtTime(secs);
       else if (secs > 43200) label = ''; // >12 jam = data rusak
@@ -5197,7 +5264,7 @@ async function viewSearch(view, q = '', filter = null) {
     <div id="search-results">${
       q
         ? '<div class="loading-note">Searching…</div>'
-        : `${hist.length ? `<div class="shelf"><div class="shelf-title">Recently played</div><div class="track-list">${hist.map((s) => trackRowHTML({ ...s, subtitle: s.artist })).join('')}</div></div>` : ''}<div id="browse-all"><div class="shelf-title">Browse all</div><div class="mood-grid" id="browse-grid"><div class="loading-note">Loading…</div></div></div>`
+        : `${hist.length ? `<div class="shelf"><div class="shelf-title">Recently played</div><div class="track-list">${hist.map((s) => trackRowHTML({ ...s, artist: s.artist, subtitle: s.subtitle || s.artist })).join('')}</div></div>` : ''}<div id="browse-all"><div class="shelf-title">Browse all</div><div class="mood-grid" id="browse-grid"><div class="loading-note">Loading…</div></div></div>`
     }</div>`;
   bindSearchChrome(view, q, filter);
   if (!q) bindItems($('#search-results'));
@@ -5471,6 +5538,7 @@ function playOfflineQueue() {
     return;
   }
   Player._offlineMode = true;
+  Player._queueSource = 'offline';
   Player.queue = list;
   Player.index = 0;
   Player._playCached = list[0].videoId;
@@ -5537,6 +5605,7 @@ function playOfflineSequential() {
   const list = getOfflineTracks();
   if (!list.length) { try { toast('No downloaded songs'); } catch {} return; }
   Player._offlineMode = true;
+  Player._queueSource = 'offline';
   Player.queue = list;
   Player.index = 0;
   Player._playCached = list[0].videoId;
@@ -5550,6 +5619,7 @@ function playOfflineShuffle() {
   if (!list.length) { try { toast('No downloaded songs'); } catch {} return; }
   const q = shuffleOfflineArray(list.slice());
   Player._offlineMode = true;
+  Player._queueSource = 'offline';
   Player.queue = q;
   Player.index = 0;
   Player._playCached = q[0].videoId;
@@ -5563,6 +5633,7 @@ function onOfflineRowClick(idx) {
   if (!list.length) return;
   const i = Math.max(0, Math.min(idx, list.length - 1));
   Player._offlineMode = true;
+  Player._queueSource = 'offline';
   Player.queue = list;
   Player.index = i;
   Player._playCached = list[i].videoId;
@@ -6417,12 +6488,12 @@ function viewLocalPlaylist(view, pid) {
   }
   $('#pl-play').addEventListener(
     'click',
-    () => pl.tracks.length && playSong(pl.tracks[0], [...pl.tracks], 0),
+    () => pl.tracks.length && playSong(pl.tracks[0], [...pl.tracks], 0, 'album'),
   );
   $('#pl-shuffle').addEventListener('click', () => {
     if (!pl.tracks.length) return;
     const q = [...pl.tracks].sort(() => Math.random() - 0.5);
-    playSong(q[0], q, 0);
+    playSong(q[0], q, 0, 'album');
   });
   $('#pl-rename').addEventListener('click', () => openRenamePlaylist(pid));
   $('#pl-del').addEventListener('click', () => openDeletePlaylist(pid));
@@ -6501,13 +6572,13 @@ async function viewBrowse(view, id, kind, extraParams) {
   if (bp)
     bp.addEventListener('click', () => {
       const q = toSongs();
-      playSong(q[0], q, 0);
+      playSong(q[0], q, 0, 'album');
     });
   const bs = $('#br-shuffle');
   if (bs)
     bs.addEventListener('click', () => {
       const q = toSongs().sort(() => Math.random() - 0.5);
-      playSong(q[0], q, 0);
+      playSong(q[0], q, 0, 'album');
     });
   const bsv = $('#br-save');
   if (bsv)
