@@ -285,7 +285,7 @@ window.LogBuffer = LogBuffer;
   setTimeout(function () { refreshPresets(); render(); }, 500);
 })();
 
-const APP_VERSION = "3.5.4";
+const APP_VERSION = "3.2.2";
 const BUILD_CHANNEL = String(APP_VERSION).includes('-beta') ? 'beta' : 'stable';
 window.__BUILD_CHANNEL = BUILD_CHANNEL;
 
@@ -4127,12 +4127,18 @@ function viewCountText(it) {
 // (segmen durasi difilter oleh splitSubtitle), TAPI view count WAJIB tetap
 // tampil. Artist dari field eksplisit bila ada, selain itu dari sisa segmen
 // subtitle. View count (plays) selalu ditempel di belakang bila ada.
+// L64: baris bawah (.ts) HANYA boleh berisi Artist (+ ViewCount bila ada).
+// Judul lagu/album (mis. "Sesi Potret") dan durasi TIDAK BOLEH muncul di sini.
+// Strategi: ambil segmen PERTAMA subtitle sebagai artistText, buang semua
+// segmen lain (album, durasi), lalu tempel viewcount bila ditemukan.
 function cleanSubtitleText(it) {
-  const { rest, plays } = splitSubtitle(it.subtitle);
-  const artist = String(it.artist || '').trim();
-  const head = artist || rest;
-  const parts = [head, plays].filter(Boolean);
-  return parts.join(' \u2022 ').replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
+  const { plays, parts } = splitSubtitle(it.subtitle);
+  const explicit = String(it.artist || '').trim();
+  // Segmen pertama subtitle biasanya artist; kalau API sudah mengirim field
+  // artist eksplisit, pakai itu (lebih akurat).
+  const artistText = explicit || parts[0] || '';
+  const out = [artistText, plays].filter(Boolean).join(' \u2022 ');
+  return out.replace(/\s*\u2022\s*\u2022\s*/g, ' \u2022 ').trim();
 }
 function normalizeDuration(s) {
   const t = String(s || '').trim();

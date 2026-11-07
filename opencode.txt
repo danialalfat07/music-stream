@@ -1,61 +1,77 @@
 ﻿================================================================
-WORK ORDER - FIX VIEW COUNT & RECENTLY PLAYED (V4)
+WORK ORDER - FIX SUBTITLE ARTIST & VIEWS (V3)
 ================================================================
 
 GUARD
-1. Root project: C:\Project\music-stream
-2. Murni JS FE. JANGAN sentuh file native/Java/Gradle.
-3. ATURAN VERSI: JANGAN ubah versionName APK (biarkan 3.2.1).
-   HANYA jalankan `npm run bump 3.5.4` untuk webVersion.
-4. JANGAN halusinasi. Ini perbaikan dari logika yang salah
-   di revisi sebelumnya.
+1. Hanya edit public/app.js.
+2. JANGAN baca opencode.txt di subfolder.
+3. Setelah edit, WAJIB jalankan `npx cap copy android`, build, adb install, push sdcard, dan git commit + push.
 
 ================================================================
-MASALAH YANG HARUS DIPERBAIKI
+MASALAH
 ================================================================
+Berdasarkan pengecekan UI terbaru:
+1. Durasi sudah berhasil muncul di ujung kanan.
+2. TAPI baris bawah (subtitle) masih kotor. Muncul teks judul lagu 
+   yang berulang.
+   Contoh format dari API YouTube Music saat ini:
+   - "éñau & Ari Lesmana • Sesi Potret"
+   - "Erlangg a • sesi potret"
+   - "Tulus • Teh Hijau" (Jika tanpa views)
+   - "Seli vormel • sesi potret"
 
-MASALAH 1: VIEW COUNT HILANG DI SEARCH RESULTS
-Di revisi sebelumnya (V2), logika `cleanSubtitleText` 
-membuang View Count jika `it.artist` tersedia.
-Tugas kamu:
-- Perbaiki fungsi `cleanSubtitleText(it)` di public/app.js.
-- Fungsi ini HARUS mengembalikan gabungan dari:
-  `Artist • ViewCount` (jika keduanya ada).
-- Contoh: "Tulus • 844 jt pemutaran" (Durasi sudah dibuang, 
-  ViewCount tetap tampil).
-- JANGAN buang variabel `plays` (view count).
-
-MASALAH 2: RECENTLY PLAYED MASIH "--:--"
-Pastikan `Library.pushHistory` benar-benar menyimpan durasi 
-ke dalam `localStorage`. 
-Tugas kamu:
-- Di `viewSearch()` (saat render Recently Played), panggil
-  `trackRowHTML` dan PASTIKAN object `it` membawa properti 
-  `duration` yang sudah tersimpan di history.
-- Di `Library.pushHistory(song)`, pastikan `rec.duration = 
-  normalizeDuration(dur)` benar-benar tereksekusi dan 
-  disimpan ke localStorage.
+Ekspektasi User:
+Baris bawah HANYA boleh berisi: Artist (dan Viewcount jika ada).
+Judul lagu TIDAK BOLEH muncul lagi di baris bawah.
+Contoh yang benar:
+- "éñau & Ari Lesmana"
+- "Erlangg a"
+- "Tulus"
+- "Seli vormel • 844 jt pemutaran" (jika ada views)
 
 ================================================================
-LANGKAH KERJA
+TUGAS
 ================================================================
-1. Edit `cleanSubtitleText(it)` agar menggabungkan artist + plays.
-2. Cek ulang alur render Recently Played di `viewSearch()`.
-3. Jalankan `node --check public/app.js`.
-4. `npm run bump 3.5.4`
-5. `npx cap copy android` (WAJIB)
-6. `cd android ; .\gradlew.bat assembleDebug`
-7. `adb install -r android\app\build\outputs\apk\debug\app-debug.apk`
-8. Git push agar OTA jalan:
-   `git add -A`
-   `git commit -m "fix(ui): restore view count in search & ensure duration saved in history"`
-   `git push origin main`
+
+F1. PERBAIKI LOGIKA PARSING SUBTITLE (public/app.js)
+    Cari fungsi `trackRowHTML` atau tempat di mana subtitle di-render.
+    
+    Alih-alih sekadar memotong durasi, lakukan pembersihan total:
+    1. Ambil `it.subtitle`.
+    2. Pecah (split) berdasarkan pemisah " • ".
+    3. Simpan segmen pertama (index 0) sebagai `artistText`.
+    4. Cari segmen yang mengandung Viewcount menggunakan helper 
+       `looksLikePlays()` atau regex jumlah tayang.
+       (Misal: "844 jt pemutaran", "1,2 jt x ditonton").
+    5. Buang semua segmen lain (termasuk judul lagu dan durasi).
+    
+F2. REKONSTRUKSI BARIS BAWAH
+    - Jika viewcount DITEMUKAN:
+      Gabungkan: `${artistText} • ${viewCountText}`
+    - Jika viewcount TIDAK DITEMUKAN:
+      Tampilkan: `${artistText}`
+      
+F3. PASTIKAN TAMPILAN BERSIH
+    - Judul lagu (misal "sesi potret") hilang dari baris bawah.
+    - Durasi (angka/titik) hilang dari baris bawah.
+    - Baris bawah hanya berisi Artist (dan Viewcount jika ada).
 
 ================================================================
-OUTPUT REPORT (OVERWRITE report.txt)
+BUILD & PUSH
 ================================================================
-- TAMPILKAN potongan kode final dari fungsi `cleanSubtitleText`.
-- TAMPILKAN bukti bahwa `rec.duration` disimpan dengan benar 
-  di `pushHistory`.
+1. npm run bump 3.2.2
+2. npx cap copy android
+3. cd android ; .\gradlew.bat assembleDebug
+4. adb install -r ...app-debug.apk
+5. adb push ... /sdcard/Download/Dnialify/dnialify-3.2.2.apk
+6. git add -A
+7. git commit -m "fix(ui): clean subtitle to only show artist and viewcount"
+8. git push origin main
+
+================================================================
+REPORT
+================================================================
+Tulis ke report.txt (overwrite). Sertakan snippet kode F1-F2
+sebagai bukti logika split & filter berhasil diterapkan.
 
 
