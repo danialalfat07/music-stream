@@ -1425,6 +1425,13 @@ public class MainActivity extends BridgeActivity {
                         }
                     }
                 } catch (Exception ignored) {}
+                // A2: incomplete (.part) files kini di files dir, sapu juga.
+                try {
+                    java.io.File[] ps = SongCache.incompleteDir(MainActivity.this).listFiles();
+                    if (ps != null) {
+                        for (java.io.File f : ps) f.delete();
+                    }
+                } catch (Exception ignored) {}
             } catch (Exception ignored) {}
         }
 

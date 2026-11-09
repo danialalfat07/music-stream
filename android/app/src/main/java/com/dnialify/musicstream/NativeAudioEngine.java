@@ -201,6 +201,7 @@ public final class NativeAudioEngine {
                 lastCache = "";
                 appCtx = c.getApplicationContext();
                 videoId = vid != null ? vid : "";
+                SongCache.setActiveVideoId(videoId);
                 title = t != null ? t : "";
                 artist = ar != null ? ar : "";
                 artwork = art != null ? art : "";
@@ -243,6 +244,7 @@ public final class NativeAudioEngine {
             lastCache = "";
             appCtx = c.getApplicationContext();
             videoId = vid != null ? vid : "";
+            SongCache.setActiveVideoId(videoId);
             title = t != null ? t : "";
             artist = ar != null ? ar : "";
             artwork = art != null ? art : "";
@@ -395,6 +397,7 @@ public final class NativeAudioEngine {
         if (vid != null && !vid.isEmpty() && !SongCache.isFull(vid)) {
             SongCache.pauseDownload(vid);
         }
+        SongCache.setActiveVideoId(null);
         pushAll();
     }
 

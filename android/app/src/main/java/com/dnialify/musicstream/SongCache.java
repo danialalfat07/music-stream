@@ -52,6 +52,17 @@ public final class SongCache {
     private static final String UA =
             "DnialifyMusicStream/3.2.0 (Android)";
 
+    /** Max jumlah file incomplete (.part) yang disimpan; yang paling lama
+     *  (lastModified) dihapus lebih dulu. */
+    private static final int MAX_INCOMPLETE = 10;
+    /** videoId yang sedang diputar (dilindungi dari eviction incomplete). */
+    private static volatile String ACTIVE_VID = null;
+
+    /** Ditandai engine saat mulai memutar / berhenti memutar sebuah lagu. */
+    public static void setActiveVideoId(String videoId) {
+        ACTIVE_VID = (videoId == null || videoId.isEmpty()) ? null : videoId;
+    }
+
     private static final java.util.Map<String, Boolean> CANCEL =
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Set<String> RUNNING =
@@ -123,12 +134,22 @@ public final class SongCache {
         return VisionOsCache.dir(c);
     }
 
+    /**
+     * A2: file incomplete (.part) disimpan di getFilesDir() (data app permanen,
+     * tidak dihapus OS), BUKAN di getCacheDir() yang bisa dibersihkan OS.
+     */
+    public static File incompleteDir(Context c) {
+        File d = new File(c.getFilesDir(), "incomplete_cache");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
     public static File audioFile(Context c, String videoId) {
         return VisionOsCache.fileFor(c, videoId);
     }
 
     public static File partFile(Context c, String videoId) {
-        return new File(dir(c), videoId + ".webm.part");
+        return new File(incompleteDir(c), videoId + ".webm.part");
     }
 
     public static File recordFile(Context c, String videoId) {
@@ -469,8 +490,10 @@ public final class SongCache {
                     boolean ok = f.delete();
                     File meta = new File(dir, vid + ".song.json");
                     if (meta.exists()) meta.delete();
-                    File part = new File(dir, vid + ".webm.part");
+                    File part = partFile(ctx, vid);
                     if (part.exists()) part.delete();
+                    File legacyPart = new File(dir, vid + ".webm.part");
+                    if (legacyPart.exists()) legacyPart.delete();
                     File art = artFile(ctx, vid);
                     if (art.exists()) art.delete();
                     File snap = new File(dir, vid + ".play.webm");
@@ -488,6 +511,78 @@ public final class SongCache {
             Log.d(TAG, "[EVICT] done: final count=" + count);
         } catch (Exception e) {
             Log.e(TAG, "[EVICT] fatal: " + e.getMessage());
+        }
+    }
+
+    /**
+     * A3: batasi jumlah file incomplete (.part) di incompleteDir ke
+     * MAX_INCOMPLETE. Jika lebih, hapus yang lastModified-nya paling lama.
+     * File milik lagu yang SEDANG diputar (protectVid / ACTIVE_VID) dan
+     * yang sedang ditulis (RUNNING) tidak pernah dihapus.
+     */
+    public static synchronized void enforceIncompleteLimit(Context ctx, String protectVid) {
+        if (ctx == null) return;
+        try {
+            File dir = incompleteDir(ctx);
+            File[] files = dir.listFiles(
+                    f -> f.isFile() && f.getName().endsWith(".webm.part"));
+            if (files == null || files.length <= MAX_INCOMPLETE) return;
+            final String active = ACTIVE_VID;
+            java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            int count = files.length;
+            Log.d(TAG, "[INCOMPLETE_EVICT] start: files=" + count + " max=" + MAX_INCOMPLETE
+                    + " protect=" + protectVid + " active=" + active);
+            for (File f : files) {
+                if (count <= MAX_INCOMPLETE) break;
+                String name = f.getName();
+                String vid = name.substring(0, name.length() - ".webm.part".length());
+                if ((protectVid != null && vid.equals(protectVid))
+                        || (active != null && vid.equals(active))
+                        || RUNNING.contains(vid)) {
+                    Log.d(TAG, "[INCOMPLETE_EVICT] skip active vid=" + vid);
+                    continue;
+                }
+                try {
+                    if (f.delete()) {
+                        count--;
+                        Log.d(TAG, "[INCOMPLETE_EVICT] removed " + vid + " count now " + count);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "[INCOMPLETE_EVICT] error " + vid + ": " + e.getMessage());
+                }
+            }
+            Log.d(TAG, "[INCOMPLETE_EVICT] done: final count=" + count);
+        } catch (Exception e) {
+            Log.e(TAG, "[INCOMPLETE_EVICT] fatal: " + e.getMessage());
+        }
+    }
+
+    /** Move src -> dst; rename dulu (cepat), fallback copy+delete jika beda
+     *  direktori/rename gagal. Dipakai saat .part (files dir) -> .webm (cache dir). */
+    static boolean moveFile(File src, File dst) {
+        try {
+            if (src.renameTo(dst)) return true;
+        } catch (Exception ignored) {}
+        FileInputStream in = null;
+        FileOutputStream out = null;
+        try {
+            in = new FileInputStream(src);
+            out = new FileOutputStream(dst);
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            out.getFD().sync();
+            in.close();
+            in = null;
+            out.close();
+            out = null;
+            try { src.delete(); } catch (Exception ignored) {}
+            return true;
+        } catch (Exception e) {
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            try { if (out != null) out.close(); } catch (Exception ignored) {}
+            try { dst.delete(); } catch (Exception ignored) {}
+            return false;
         }
     }
 
@@ -532,6 +627,8 @@ public final class SongCache {
         CacheEvents.emit(c, "cacheState", videoId, r);
         File part = partFile(c, videoId);
         File fin = audioFile(c, videoId);
+        // A3: jaga jumlah file incomplete <= 10 sebelum menulis file baru.
+        enforceIncompleteLimit(c, videoId);
         long received = (part.isFile() && total > 0 && part.length() < total)
                 ? part.length() : 0;
         if (received > 0) {
@@ -687,7 +784,7 @@ public final class SongCache {
                         + " want=" + total);
             }
             if (fin.exists()) fin.delete();
-            if (!part.renameTo(fin)) {
+            if (!moveFile(part, fin)) {
                 throw new Exception("atomic rename failed");
             }
             try {
@@ -946,6 +1043,7 @@ public final class SongCache {
         if (videoId != null && !videoId.isEmpty()) DELETED.add(videoId);
         try {
             File[] fs = {audioFile(c, videoId), partFile(c, videoId),
+                    new File(dir(c), videoId + ".webm.part"),
                     recordFile(c, videoId), artFile(c, videoId),
                     lyricsFile(c, videoId), lyricsTmpFile(c, videoId),
                     new File(dir(c), videoId + ".play.webm")};
