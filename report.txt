@@ -1,233 +1,223 @@
-================================================================
+====================================================================
 LAPORAN PEKERJAAN
-Work Order : EKSEKUSI FIX DURASI RECENTLY PLAYED (R1, R2, R6)
-Tanggal    : 08 Nov 2026
-Proyek     : C:\Project\music-stream
-Status     : BERHASIL
-Commit     : e8bf967
-================================================================
+Tanggal  : 09 Nov 2026
+Proyek   : C:\Project\music-stream (native Android)
+Order    : FIX NATIVE CACHE: LIMIT INCOMPLETE & PINDAH DIRECTORY
+====================================================================
 
-----------------------------------------------------------------
+--------------------------------------------------------------------
 1. STATUS
-----------------------------------------------------------------
-BERHASIL.
+--------------------------------------------------------------------
+SEBAGIAN.
 
-Ketiga perbaikan (F1/R6, F2/R1+R2, F3) diterapkan pada public/app.js.
-`node --check public/app.js` = SYNTAX OK.
-Tidak ada build APK, tidak ada adb/push device — sesuai GUARD
-work order (FOKUS JS SAJA).
+  - Kode (A1/A2/A3)      : BERHASIL
+  - Build APK            : BERHASIL
+  - adb install          : TIDAK DIJALANKAN (tidak ada device)
+  - Push ke /sdcard      : TIDAK DIJALANKAN (tidak ada device)
+  - Bump versi           : BERHASIL (3.2.2 -> 3.2.3)
+  - Git commit & push    : BERHASIL (f18ffdb)
 
-----------------------------------------------------------------
-2. WEB VERSION SEBELUM & SESUDAH
-----------------------------------------------------------------
-  Sebelum bump : webVersion = 3.2.2
-  Sesudah bump : webVersion = 3.6.1
-  Perintah     : npm run bump 3.6.1
-  Catatan      : bump HANYA mengubah `webVersion`. Field `version`
-                 (yang jadi versionName APK) tidak diubah karena work
-                 order ini tidak minta bump APK (tetap 3.2.2).
-  Injected ke  : app.js, index.html, sw.js, manifest.json
+Catatan: `adb devices` kosong saat eksekusi. Percobaan `adb connect`
+ke 100.71.211.98:42737 dan :33391 ditolak (connection refused).
+Device tidak terhubung, jadi langkah install & push ke sdcard di-skip
+dan dilaporkan sebagai gap (bukan kegagalan kode).
 
-----------------------------------------------------------------
-3. BUKTI SNIPPET KODE
-----------------------------------------------------------------
+--------------------------------------------------------------------
+2. TEMUAN A1 (Investigasi)
+--------------------------------------------------------------------
+Grep `getCacheDir` / `getFilesDir` + `.part`:
+  - Semua file cache lagu berada di:
+      VisionOsCache.dir(c) = new File(getCacheDir(), "visionos_cache")
+      (VisionOsCache.java baris 39-43)
+  - SongCache.dir(c) -> VisionOsCache.dir(c) (SongCache.java baris 133).
+  - File COMPLETE  : <id>.webm
+    File INCOMPLETE: <id>.webm.part  <- yang ditangani task ini
+    File lain       : <id>.song.json, <id>.art, <id>.lyrics.json,
+                      <id>.play.webm (snapshot)
+  - Path file incomplete dibuat oleh:
+      SongCache.partFile(c, vid) = new File(dir(c), vid + ".webm.part")
+      (SEBELUM perubahan, baris 130-132).
 
-===== F1 / R6 — normalizeSong (public/app.js) =====
+Nama & penyimpanan file incomplete:
+  - Ekstensi : ".webm.part" (bukan .tmp)
+  - Lokasi   : getCacheDir()/visionos_cache (SEBELUM)
 
-SEBELUM:
-----------------------------------------------------------------
-function normalizeSong(s) {
-  if (!s) return s;
-  return { ...s, title: displayTitle(s.title) };
-}
-----------------------------------------------------------------
+Referensi .part di luar SongCache (yang ikut dipertimbangkan):
+  - NativeAudioEngine.java : pakai SongCache.partFile() (ikut otomatis):
+      baris 987, 1837, 2517
+  - LocalStreamServer.java : cek nama berakhiran ".part" (baris 248) dan
+      register path dari engine (baris 1044 -> SongCache.partFile). Ikut.
+  - VisionOsHarness.java   : pakai SongCache.partFile() (baris 1485-1486).
+  - MainActivity.java      : sapu ".part" di VisionOsCache.dir()
+      (baris 1418-1424) -> ikut disesuaikan.
+  - VisionOsCache.download(): punya part terpisah di VisionOsCache.dir()
+      (baris 58) -> HANYA dipakai harness/diagnostik
+      (VisionOsDiagActivity:228, VisionOsHarness:425). TIDAK diubah
+      (dilaporkan sebagai gap, lihat bagian 6).
 
-SESUDAH:
-----------------------------------------------------------------
-function normalizeSong(s) {
-  if (!s) return s;
-  return {
-    ...s,
-    title: displayTitle(s.title),
-    duration: s.duration ? normalizeDuration(s.duration) : s.duration,
-  };
-}
-----------------------------------------------------------------
+Logika eviction COMPLETE (referensi) — SongCache.enforceLimit(ctx, max):
+  - Baris 441-492. Baris 459 sort by lastModified, hapus terlama,
+    skip `pinned` (StreamSettings.getPinnedIds). Dipanggil di akhir
+    download COMPLETE (baris ~711-712). Ini pola yang ditiru untuk
+    eviction incomplete.
 
+--------------------------------------------------------------------
+3. BUKTI A2 (Pindah direktori getCacheDir -> getFilesDir)
+--------------------------------------------------------------------
+File: android/app/src/main/java/com/dnialify/musicstream/SongCache.java
 
-===== F2 / R1 + R2 — Library.pushHistory (public/app.js) =====
-
-SESUDAH (fungsi lengkap):
-----------------------------------------------------------------
-  pushHistory(song) {
-    let h = this.history.filter((s) => s.videoId !== song.videoId);
-    // L65 (R1/R2): resolusi durasi DULU, baru bersihkan subtitle.
-    // Urutan pengambilan durasi:
-    //   1) field song.duration/dur/lengthSeconds/length
-    //   2) segmen durasi DI DALAM song.subtitle ("3.22" / "3:22")
-    //   3) segmen durasi di dalam song.title (jika ada)
-    //   4) stats lokal
-    //   5) durasi engine yang sedang berjalan
-    let dur = song.duration ?? song.dur ?? song.lengthSeconds ?? song.length;
-    if (dur == null || dur === '') {
-      const dsub = durationFromSubtitle(song.subtitle);
-      if (dsub) dur = dsub;
+Direktori baru (ditambahkan setelah dir()):
+    /**
+     * A2: file incomplete (.part) disimpan di getFilesDir() (data app
+     * permanen, tidak dihapus OS), BUKAN di getCacheDir().
+     */
+    public static File incompleteDir(Context c) {
+        File d = new File(c.getFilesDir(), "incomplete_cache");
+        if (!d.exists()) d.mkdirs();
+        return d;
     }
-    if (dur == null || dur === '') {
-      const dtitle = durationFromSubtitle(song.title);
-      if (dtitle) dur = dtitle;
-    }
-    if (dur == null || dur === '') {
-      try {
-        const st0 = this.stats[song.videoId];
-        if (st0 && st0.duration) dur = st0.duration;
-      } catch {}
-    }
-    if (dur == null || dur === '') {
-      const live =
-        (Player.native && Player.native.dur && Number(Player.native.dur)) ||
-        (Player.audio && Number(Player.audio.duration)) ||
-        0;
-      if (live > 0 && live <= 43200) dur = live;
-    }
-    // Normalisasi "3.22" -> "3:22" agar konsisten saat dibaca ulang.
-    const finalDuration =
-      dur != null && dur !== '' ? normalizeDuration(dur) : '';
-    const rec = { ...song };
-    // R1: persist ke stats DULU supaya fallback trackRowHTML hidup.
-    const st = store.get('stats', {});
-    const k = song.videoId;
-    if (!st[k])
-      st[k] = {
-        title: song.title,
-        artist: song.artist || '',
-        thumbnail: song.thumbnail,
-        plays: 0,
-        secs: 0,
-        last: 0,
-      };
-    if (finalDuration) {
-      rec.duration = finalDuration;
-      st[k].duration = finalDuration;
-      // R2: subtitle HANYA dibersihkan bila durasi benar-benar valid.
-      if (rec.subtitle) {
-        const { rest, plays } = splitSubtitle(rec.subtitle);
-        rec.subtitle = [rest, plays].filter(Boolean).join(' \u2022 ');
-      }
-    }
-    h.unshift({ ...rec, playedAt: Date.now() });
-    store.set('hist', h.slice(0, 100));
-    // play stats (local scrobble)
-    st[k].plays++;
-    st[k].last = Date.now();
-    st[k].title = song.title;
-    st[k].thumbnail = song.thumbnail;
-    store.set('stats', st);
-  },
-----------------------------------------------------------------
 
-PEMETAAN KE TUGAS F2:
-  1. Ambil durasi dari song.subtitle sebelum bersihkan  -> baris `const dsub = durationFromSubtitle(song.subtitle)`.
-  2. Simpan ke variabel `finalDuration`                  -> `const finalDuration = ...`.
-  3. Simpan ke Library.stats[videoId].duration           -> `st[k].duration = finalDuration;`
-     (ditulis ke store 'stats' yang sama, sehingga fallback
-      trackRowHTML di masa depan bisa membacanya).
-  4. Hanya bersihkan subtitle bila finalDuration valid    -> dibungkus `if (finalDuration) { ... }`.
-     Jika durasi kosong, subtitle TIDAK dibuang (tetap utuh).
-  5. Simpan ke record history                            -> `rec.duration = finalDuration;`
+partFile() dialihkan ke direktori baru:
+    public static File partFile(Context c, String videoId) {
+        return new File(incompleteDir(c), videoId + ".webm.part");
+    }
 
+Karena SEMUA baca/tulis .part memakai SongCache.partFile(), seluruh
+alur (engine, LocalStreamServer, harness) otomatis menunjuk ke
+getFilesDir()/incomplete_cache.
 
-===== F3 — Fallback tampilan trackRowHTML (public/app.js ~baris 4281) =====
+Karena .part (files dir) kini beda direktori dengan tujuan .webm
+(cache dir), renameTo() bisa gagal. Ditambahkan helper moveFile()
+(rename dulu, fallback copy+delete) dan dipakai saat finalisasi:
+    if (fin.exists()) fin.delete();
+    if (!moveFile(part, fin)) {
+        throw new Exception("atomic rename failed");
+    }
 
-Blok ini SUDAH ada dan sudah berfungsi (tidak perlu diubah); F2 sekarang
-mengisinya dengan data nyata sehingga fallback ini benar-benar hidup:
-----------------------------------------------------------------
-      let secs = parseDurationSec(raw);
-      if (!(secs >= 1 && secs <= 43200)) secs = durationFromSubtitle(it.subtitle);
-      if (!(secs >= 1 && secs <= 43200) && it.videoId) {
+Pembersihan lama yang menyapu cache dir juga disesuaikan:
+  - enforceLimit(): hapus part baru (partFile) + part legacy (cache dir).
+  - delete(videoId): tambah hapus part legacy di cache dir.
+  - MainActivity.clearCachedSongs(): sapu juga files dir
+    (SongCache.incompleteDir).
+
+--------------------------------------------------------------------
+4. BUKTI A3 (Limit 10 file incomplete + proteksi lagu aktif)
+--------------------------------------------------------------------
+File: SongCache.java
+
+Konstanta + penanda lagu aktif:
+    private static final int MAX_INCOMPLETE = 10;
+    private static volatile String ACTIVE_VID = null;
+    public static void setActiveVideoId(String videoId) {
+        ACTIVE_VID = (videoId == null || videoId.isEmpty()) ? null : videoId;
+    }
+
+Logika eviction (ditambahkan setelah enforceLimit):
+    public static synchronized void enforceIncompleteLimit(Context ctx, String protectVid) {
+        if (ctx == null) return;
         try {
-          const st = Library.stats[it.videoId];
-          if (st && st.duration) secs = parseDurationSec(st.duration);
-        } catch {}
-      }
-----------------------------------------------------------------
-Urutan prioritas: field eksplisit -> segmen di subtitle -> Library.stats.
-Ini persis seperti yang diminta F3.
+            File dir = incompleteDir(ctx);
+            File[] files = dir.listFiles(
+                    f -> f.isFile() && f.getName().endsWith(".webm.part"));
+            if (files == null || files.length <= MAX_INCOMPLETE) return;
+            final String active = ACTIVE_VID;
+            java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            int count = files.length;
+            for (File f : files) {
+                if (count <= MAX_INCOMPLETE) break;
+                String name = f.getName();
+                String vid = name.substring(0, name.length() - ".webm.part".length());
+                if ((protectVid != null && vid.equals(protectVid))
+                        || (active != null && vid.equals(active))
+                        || RUNNING.contains(vid)) {
+                    continue; // lagu aktif / sedang ditulis: JANGAN hapus
+                }
+                if (f.delete()) count--;
+            }
+        } catch (Exception e) { /* log */ }
+    }
 
-----------------------------------------------------------------
-4. VERIFIKASI LOGIKA (node, memakai fungsi ASLI dari public/app.js)
-----------------------------------------------------------------
-Fungsi `durationFromSubtitle`, `splitSubtitle`, `normalizeDuration`
-dievaluasi langsung dari sumber public/app.js, lalu diuji:
+Dipanggil setiap kali file incomplete baru ditulis — di downloadInner,
+tepat setelah part & fin ditentukan:
+    File part = partFile(c, videoId);
+    File fin = audioFile(c, videoId);
+    enforceIncompleteLimit(c, videoId);   // A3
 
-  INPUT                                            DURASI  SUBTITLE HASIL
-  ----------------------------------------------  ------  ---------------------------
-  "Tulus • Sesi Potret • 3.22"                     202s  "Tulus • Sesi Potret"
-  "enau • 5.06 • 102 jt x ditonton"                306s  "enau • 102 jt x ditonton"
-  "Seli vormel • sesi potret • 844 jt pemutaran"     0s  (tidak diubah — lihat catatan)
-  "Artist • Album"                                   0s  "Artist • Album"
+Proteksi "active playing" (3 lapis):
+  1. protectVid  = videoId yang sedang di-download/ditulis.
+  2. ACTIVE_VID  = videoId yang sedang diputar engine.
+     Di-set di NativeAudioEngine.play() (kedua cabang mode):
+         videoId = vid != null ? vid : "";
+         SongCache.setActiveVideoId(videoId);
+     Di-clear di NativeAudioEngine.stop():
+         SongCache.setActiveVideoId(null);
+  3. RUNNING     = set id yang writer-nya aktif (sudah ada di SongCache).
 
-CATATAN PENTING (perilaku BARU yang benar):
-  - Kasus "Tulus • Sesi Potret • 3.22": durasi 3.22 -> 202s berhasil
-    diambil, subtitle dibersihkan menjadi "Tulus • Sesi Potret".
-  - Kasus "Seli vormel • ... • 844 jt pemutaran" (tanpa durasi): durasi
-    = 0 -> subtitle TIDAK dibersihkan. Ini sesuai R2: jangan buang teks
-    subtitle bila durasi tidak valid. Viewcount tetap utuh.
-  - Kasus "Artist • Album" (tanpa durasi): subtitle utuh, tidak ada
-    yang hilang.
+--------------------------------------------------------------------
+5. HASIL BUILD & ADB INSTALL
+--------------------------------------------------------------------
+Build:
+  cd android ; .\gradlew.bat assembleDebug
+  -> BUILD SUCCESSFUL in 2m 4s (82 tasks: 12 executed, 70 up-to-date)
+  -> Hanya warning "deprecated API" (bukan error).
+  (PowerShell melaporkan "Exited with code 1" karena stderr gradle
+   dianggap NativeCommandError — false positive, build sukses.)
+  APK : C:\Project\music-stream\android\app\build\outputs\apk\debug\app-debug.apk
+  Size: 8.500.347 bytes (~8.10 MB)
+  Waktu: 09 Nov 2026 20:08
 
-`node --check public/app.js` -> SYNTAX OK.
+adb:
+  adb devices -> (kosong)
+  adb connect 100.71.211.98:42737 -> refused (10061)
+  adb connect 100.71.211.98:33391 -> refused (10061)
+  -> adb install & push ke /sdcard TIDAK DIJALANKAN.
 
-----------------------------------------------------------------
-5. GIT
-----------------------------------------------------------------
-git add -A -> 7 file:
-   M opencode.txt
-   M package.json
-   M public/app.js
-   M public/index.html
-   M public/manifest.json
-   M public/sw.js
-   M report.txt
+--------------------------------------------------------------------
+6. GAP & CATATAN
+--------------------------------------------------------------------
+G1. Tidak ada device adb -> langkah install (-r) dan push ke
+    /sdcard/Download/Dnialify/dnialify-3.2.3.apk TIDAK dapat dijalankan.
+    Jalankan saat device siap:
+      adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+      adb shell mkdir -p /sdcard/Download/Dnialify
+      adb push android\app\build\outputs\apk\debug\app-debug.apk /sdcard/Download/Dnialify/dnialify-3.2.3.apk
+      adb shell dumpsys package com.dnialify.musicstream | grep versionName
+      (harus menampilkan versionName=3.2.3)
 
-git commit -m "fix(ui): persist duration to stats and fix recently played write path"
-   -> [main e8bf967] 7 files changed, 471 insertions(+), 208 deletions(-)
-   Commit hash: e8bf967
+G2. VisionOsCache.download() (baris 58) masih membuat .part di
+    getCacheDir()/visionos_cache. Ini jalur PROOF-OF-CONCEPT yang hanya
+    dipakai VisionOsDiagActivity (baris 228) dan VisionOsHarness
+    (baris 425) — untuk diagnostik. Alur produksi (SongCache.download)
+    sudah pindah. Jalur PoC ini TIDAK diubah agar perubahan tetap
+    minimal & reversible. Bila diinginkan, bisa disamakan menyusul.
 
-git push origin main
-   -> 31ba701..e8bf967  main -> main
-   Status push: BERHASIL.
+G3. Mesin file "play.webm" (snapshot) tetap di cache dir — bukan file
+    incomplete, di luar cakupan task, tidak diubah.
 
-----------------------------------------------------------------
-6. CATATAN & GAP
-----------------------------------------------------------------
-- `normalizeDuration(202)` mengembalikan "202" (string angka detik), bukan
-  format "M:SS". Ini perilaku LAMA yang tidak diubah (di luar lingkup
-  F1-F3) dan TIDAK menyebabkan "--:--" karena `parseDurationSec` +
-  `fmtTime` menerima angka detik apa adanya.
-- `android/app/src/main/assets/public/` (artefak Capacitor) tidak
-  diperbarui karena work order FU melarang build/cap copy. APK di device
-  masih memakai JS versi lama sampai `npx cap copy android` + build
-  dijalankan pada work order berikutnya.
-- `stats[videoId].duration` kini terisi untuk lagu baru yang diputar.
-  Record lama (sudah tersimpan tanpa duration) tetap "--:--" sampai lagu
-  tersebut diputar ulang — sesuai sifat perbaikan yang tidak memigrasi
-  localStorage massal.
+G4. Karena .part kini di getFilesDir()/incomplete_cache dan .webm di
+    getCacheDir()/visionos_cache, finalisasi memakai moveFile()
+    (rename + fallback copy). Keduanya masih dalam data partisi yang
+    sama sehingga rename hampir selalu berhasil.
 
-----------------------------------------------------------------
-7. FILE YANG DIUBAH (absolute path)
-----------------------------------------------------------------
-  C:\Project\music-stream\public\app.js       (F1 normalizeSong, F2 pushHistory)
-  C:\Project\music-stream\package.json       (webVersion 3.2.2 -> 3.6.1)
-  C:\Project\music-stream\public\index.html  (inject versi 3.6.1)
-  C:\Project\music-stream\public\manifest.json (inject versi 3.6.1)
-  C:\Project\music-stream\public\sw.js       (inject versi 3.6.1)
-  C:\Project\music-stream\opencode.txt       (work order)
-  C:\Project\music-stream\report.txt         (laporan ini)
+git commit: f18ffdb -> push 4904c32..f18ffdb (main -> main)
+Commit report: dibuat terpisah (docs) agar report memuat hash fix
+               di atas.
 
-Tidak ada file .java / server.js / AndroidManifest.xml / build.gradle
-yang disentuh. Tidak ada file yang dihapus.
+--------------------------------------------------------------------
+7. FILE YANG DIUBAH
+--------------------------------------------------------------------
+Kode native (commit f18ffdb):
+  C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\SongCache.java
+  C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\NativeAudioEngine.java
+  C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\MainActivity.java
+  C:\Project\music-stream\package.json   (version 3.2.2 -> 3.2.3)
 
-================================================================
-SELESAI — Status: BERHASIL — commit e8bf967 — push OK
-================================================================
+Tidak diubah (sesuai batasan / di luar cakupan):
+  - PlaybackService.java (legacy)
+  - LocalStreamServer.java (hanya ikut path via SongCache.partFile)
+  - GrowingFileDataSource.java
+  - File di folder public/ (JS) tidak disentuh.
+
+Auto-generated (bukan source, tidak di-commit):
+  - android/app/src/main/assets/public/*  (hasil `npx cap copy android`)
+====================================================================
