@@ -8,19 +8,19 @@ Order    : FIX NATIVE CACHE: LIMIT INCOMPLETE & PINDAH DIRECTORY
 --------------------------------------------------------------------
 1. STATUS
 --------------------------------------------------------------------
-SEBAGIAN.
+BERHASIL (seluruh tahap selesai setelah device tersambung).
 
   - Kode (A1/A2/A3)      : BERHASIL
   - Build APK            : BERHASIL
-  - adb install          : TIDAK DIJALANKAN (tidak ada device)
-  - Push ke /sdcard      : TIDAK DIJALANKAN (tidak ada device)
+  - adb install          : BERHASIL (Success)
+  - Push ke /sdcard      : BERHASIL (ukuran terverifikasi)
   - Bump versi           : BERHASIL (3.2.2 -> 3.2.3)
   - Git commit & push    : BERHASIL (f18ffdb)
 
-Catatan: `adb devices` kosong saat eksekusi. Percobaan `adb connect`
-ke 100.71.211.98:42737 dan :33391 ditolak (connection refused).
-Device tidak terhubung, jadi langkah install & push ke sdcard di-skip
-dan dilaporkan sebagai gap (bukan kegagalan kode).
+Catatan: pada eksekusi awal `adb devices` kosong sehingga install &
+push di-skip (dilaporkan SEBAGIAN). Pada lanjutan (11 Nov 2026)
+device tersambung sebagai `100.71.211.98:42763` dan kedua langkah
+dijalankan serta diverifikasi (lihat bagian 5).
 
 --------------------------------------------------------------------
 2. TEMUAN A1 (Investigasi)
@@ -166,23 +166,27 @@ Build:
   Size: 8.500.347 bytes (~8.10 MB)
   Waktu: 09 Nov 2026 20:08
 
-adb:
-  adb devices -> (kosong)
-  adb connect 100.71.211.98:42737 -> refused (10061)
-  adb connect 100.71.211.98:33391 -> refused (10061)
-  -> adb install & push ke /sdcard TIDAK DIJALANKAN.
+adb (lanjutan 11 Nov 2026):
+  adb devices -> 100.71.211.98:42763   device
+  adb install -r app-debug.apk
+      -> "Performing Streamed Install" / "Success"
+  adb shell mkdir -p /sdcard/Download/Dnialify   -> ok
+  adb push app-debug.apk /sdcard/Download/Dnialify/dnialify-3.2.3.apk
+      -> 1 file pushed, 0 skipped. 8500347 bytes in 3.284s
+  adb shell ls -l /sdcard/Download/Dnialify/dnialify-3.2.3.apk
+      -> -rw-rw---- 1 u0_a311 media_rw 8500347 2026-11-09 20:08
+         (ukuran COCOK dengan APK lokal: 8.500.347 bytes)
+  adb shell dumpsys package com.dnialify.musicstream | grep versionName
+      -> versionName=3.2.3   (COCOK)
 
 --------------------------------------------------------------------
 6. GAP & CATATAN
 --------------------------------------------------------------------
-G1. Tidak ada device adb -> langkah install (-r) dan push ke
-    /sdcard/Download/Dnialify/dnialify-3.2.3.apk TIDAK dapat dijalankan.
-    Jalankan saat device siap:
-      adb install -r android\app\build\outputs\apk\debug\app-debug.apk
-      adb shell mkdir -p /sdcard/Download/Dnialify
-      adb push android\app\build\outputs\apk\debug\app-debug.apk /sdcard/Download/Dnialify/dnialify-3.2.3.apk
-      adb shell dumpsys package com.dnialify.musicstream | grep versionName
-      (harus menampilkan versionName=3.2.3)
+G1. (SELESAI 11 Nov 2026) Saat eksekusi awal tidak ada device adb
+    sehingga install & push di-skip. Pada lanjutan device tersambung
+    (100.71.211.98:42763) dan langkah install (-r) + push ke
+    /sdcard/Download/Dnialify/dnialify-3.2.3.apk BERHASIL, dengan
+    verifikasi ukuran file (8.500.347 bytes) dan versionName=3.2.3.
 
 G2. VisionOsCache.download() (baris 58) masih membuat .part di
     getCacheDir()/visionos_cache. Ini jalur PROOF-OF-CONCEPT yang hanya
