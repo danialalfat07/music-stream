@@ -1,85 +1,77 @@
 ﻿================================================================
-WORK ORDER - FIX NATIVE CACHE: LIMIT INCOMPLETE & PINDAH DIRECTORY
+WORK ORDER - FIX TOTAL: PINDAH SEMUA CACHE KE EXTERNAL FILES DIR
 ================================================================
 
 GUARD
 1. Root project: C:\Project\music-stream
 2. JANGAN baca file opencode.txt di subfolder manapun.
-3. FOKUS DI NATIVE ANDROID (Java).
-4. Di task ini, kamu DIIZINKAN menyentuh file native yang berkaitan
-   dengan Cache/Streaming (misal SongCache.java, GrowingFileDataSource.java,
-   NativeAudioEngine.java). TAPI JANGAN ubah logika playback utama 
-   atau PlaybackService.java (legacy) yang tidak ada hubungannya.
-5. JANGAN sentuh file di folder public/ (JS) kecuali benar-benar 
-   terpaksa (harus dilaporkan).
-6. Setelah selesai, jalankan build APK, adb install, dan push ke sdcard.
-7. Bump versi APK di package.json dari 3.2.2 menjadi 3.2.3.
-8. Lalu git commit & push ke main.
+3. FOKUS DI NATIVE ANDROID (SongCache.java, VisionOsCache.java, NativeAudioEngine.java).
+4. JANGAN sentuh file .java yang tidak berhubungan dengan cache.
+5. Setelah selesai, jalankan build APK, adb install, dan push sdcard.
+6. Bump versi APK menjadi 3.2.4.
+7. Git commit & push ke main.
 
 ================================================================
-KONTEKS MASALAH
+KOREKSI MASALAH DARI VERSI 3.2.3
 ================================================================
-Saat ini, cache lagu "Complete" sudah memiliki limit (bisa diatur
-lewat Settings, misal maksimal 50 lagu). Ini sudah BENAR.
-
-NAMUN, cache lagu "Incomplete" (file yang sedang di-download /
-di-stream parsial) TIDAK MEMILIKI LIMIT. Bisa menumpuk sampai 300 file
-dan memakan storage.
-
-Selain itu, file incomplete ini disimpan di direktori Cache OS
-(Context.getCacheDir), yang mana OS Android bisa menghapusnya
-sewaktu-waktu secara sepihak.
-
-EKSPEKTASI:
-1. Limit file incomplete maksimal 10 file. Jika lebih, hapus file
-   incomplete paling lama.
-2. Pindahkan direktori penyimpanan file incomplete dari getCacheDir()
-   ke getFilesDir() (folder data aplikasi permanen yang tidak 
-   dihapus OS).
+1. Pada versi 3.2.3, file INCOMPLETE (.part) dipindah menggunakan 
+   `context.getFilesDir()`. Ini salah, karena getFilesDir() adalah 
+   Internal Storage yang tidak terlihat di file manager (Android/data).
+   Seharusnya gunakan `context.getExternalFilesDir(null)`.
+   
+2. Lagu offline yang sudah COMPLETE (.webm) dan file metadata-nya 
+   (.song.json, .art, .lyrics.json) TIDAK ikut dipindah. Akibatnya
+   saat user "Clear Cache", lagu offline mereka hilang.
 
 ================================================================
 TUGAS IMPLEMENTASI
 ================================================================
 
-A1. INVESTIGASI (Wajib Dilakukan Dulu)
-    - Grep `getCacheDir` dan `getFilesDir` di seluruh folder
-      android/app/src/main/java/com/dnialify/musicstream/.
-    - Cari class yang menangani file parsial / incomplete (biasanya
-      SongCache.java, GrowingFileDataSource.java, atau NativeAudioEngine.java).
-    - Laporkan bagaimana file incomplete diberi nama dan disimpan
-      (apakah berekstensi .part, .tmp, atau di folder khusus?).
-    - Cari di mana logika eviction/limit untuk file COMPLETE berada
-      (sebagai referensi cara menghapus file).
+A1. GANTI SEMUA PATH KE EXTERNAL FILES DIR
+    - Buka VisionOsCache.java dan SongCache.java.
+    - Cari semua pemanggilan `context.getFilesDir()` dan `context.getCacheDir()`.
+    - Ganti semuanya menjadi `context.getExternalFilesDir(null)`.
+    - Pastikan folder utamanya dinamai secara terpusat, misal:
+      `new File(context.getExternalFilesDir(null), "visionos_media")`.
+    - Struktur folder baru yang diharapkan:
+      * .../Android/data/com.dnialify.musicstream/files/visionos_media/complete/
+      * .../Android/data/com.dnialify.musicstream/files/visionos_media/incomplete/
+      * .../Android/data/com.dnialify.musicstream/files/visionos_media/meta/
 
-A2. PINDAH DIREKTORI (Files Dir)
-    - Ubah path untuk file incomplete. Alih-alih menggunakan 
-      `context.getCacheDir()`, gunakan sub-folder di dalam 
-      `context.getFilesDir()` (misal: `new File(context.getFilesDir(), "incomplete_cache")`).
-    - Pastikan folder tersebut dibuat (mkdirs) jika belum ada.
-    - Pastikan class yang membaca file (seperti GrowingFileDataSource) 
-      menunjuk ke path yang BARU ini, bukan path cache lama.
+A2. MIGRASI FILE LAMA (WAJIB!)
+    - Buat fungsi `migrateLegacyCaches(Context c)` di SongCache.java.
+    - Fungsi ini harus mengecek 2 lokasi lama:
+      1. `getCacheDir()/visionos_cache` (tempat file COMPLETE yang bikin hilang)
+      2. `getFilesDir()/incomplete_cache` (tempat file INCOMPLETE dari v3.2.3)
+    - Jika ada file di lokasi lama, pindahkan (copy + delete) ke lokasi
+      baru di `getExternalFilesDir()`.
+    - Panggil fungsi migrasi ini sekali saat aplikasi pertama kali start
+      (misal di NativeAudioEngine atau MainActivity).
 
-A3. IMPLEMENTASI LIMIT 10 FILE INCOMPLETE
-    - Setiap kali sistem membuat/menyimpan file incomplete BARU, 
-      lakukan pengecekan.
-    - Jika jumlah file di folder `incomplete_cache` > 10, cari file
-      yang `lastModified()`-nya paling lama, lalu hapus file tersebut.
-    - Pastikan file yang SEDANG DIPUTAR saat ini (active playing)
-      TIDAK dihapus oleh proses eviction ini.
+A3. PASTIKAN HAPUS CACHE TIDAK MENGHAPUS OFFLINE
+    - Karena file COMPLETE sekarang ada di `getExternalFilesDir()`,
+      OS Android tidak akan menyentuhnya saat user melakukan "Clear Cache".
+    - Pastikan fungsi "Hapus Cache" di dalam aplikasi (jika ada tombolnya)
+      hanya menghapus file dari folder `incomplete/` dan tidak menyentuh
+      folder `complete/`.
+
+A4. PERBAIKI LOGIKA MOVE FILE
+    - Karena semua file sekarang berada di dalam `getExternalFilesDir()`
+      (satu partisi penyimpanan yang sama), fungsi `moveFile()` bisa
+      menggunakan `renameTo()` secara aman dan cepat, menghindari copy+delete
+      yang memakan waktu.
 
 ================================================================
 EKSEKUSI BUILD & DEPLOY
 ================================================================
-1. Bump versi di package.json root: `"version": "3.2.3"` (ubah manual 
-   atau via script jika ada).
-2. `npx cap copy android` (jaga-jaga jika ada perubahan web).
+1. Bump versi di package.json root: `"version": "3.2.4"`.
+2. `npx cap copy android`
 3. Build: `cd android ; .\gradlew.bat assembleDebug`
 4. Install: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
-5. Push ke sdcard: `adb push ... /sdcard/Download/Dnialify/dnialify-3.2.3.apk`
+5. Push sdcard: `adb push ... /sdcard/Download/Dnialify/dnialify-3.2.4.apk`
 6. Git add, commit, push:
-   - `git add -A`
-   - `git commit -m "fix(native): limit incomplete cache to 10 files and move to files dir"`
-   - `git push origin main`
+   `git commit -m "fix(native): move all cache (complete & incomplete) to external files dir and migrate legacy caches"`
+   `git push origin main`
 
 ================================================================
 OUTPUT REPORT (OVERWRITE report.txt)
@@ -87,8 +79,8 @@ OUTPUT REPORT (OVERWRITE report.txt)
 Tulis ke C:\Project\music-stream\report.txt (UTF-8).
 Laporkan:
 1. STATUS (BERHASIL/GAGAL).
-2. TEMUAN A1 (File apa yang menangani incomplete, dan di mana path-nya).
-3. BUKTI A2 (Snippet kode perubahan getCacheDir -> getFilesDir).
-4. BUKTI A3 (Snippet kode logika penghapusan jika file > 10).
-5. Hasil build & adb install.
-6. Git commit hash & status push.
+2. BUKTI A1 (Snippet kode pemanggilan getExternalFilesDir).
+3. BUKTI A2 (Snippet kode migrateLegacyCaches yang memindahkan file
+   dari getCacheDir lama).
+4. Hasil build & adb install.
+5. Git commit hash & status push.

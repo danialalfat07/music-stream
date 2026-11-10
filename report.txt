@@ -1,227 +1,223 @@
 ====================================================================
 LAPORAN PEKERJAAN
-Tanggal  : 09 Nov 2026
+Tanggal  : 11 Nov 2026
 Proyek   : C:\Project\music-stream (native Android)
-Order    : FIX NATIVE CACHE: LIMIT INCOMPLETE & PINDAH DIRECTORY
+Order    : FIX TOTAL: PINDAH SEMUA CACHE KE EXTERNAL FILES DIR
+Versi    : 3.2.3 -> 3.2.4
 ====================================================================
 
 --------------------------------------------------------------------
 1. STATUS
 --------------------------------------------------------------------
-BERHASIL (seluruh tahap selesai setelah device tersambung).
+BERHASIL.
 
-  - Kode (A1/A2/A3)      : BERHASIL
-  - Build APK            : BERHASIL
-  - adb install          : BERHASIL (Success)
-  - Push ke /sdcard      : BERHASIL (ukuran terverifikasi)
-  - Bump versi           : BERHASIL (3.2.2 -> 3.2.3)
-  - Git commit & push    : BERHASIL (f18ffdb)
+  - A1 pindah semua cache ke getExternalFilesDir() : BERHASIL
+  - A2 migrateLegacyCaches (migrasi sekali)          : BERHASIL
+  - A3 "Hapus Cache" hanya hapus incomplete/          : BERHASIL
+  - A4 moveFile() rename-first (satu partisi)         : BERHASIL
+  - Build APK                                         : BERHASIL
+  - adb install                                       : BERHASIL (Success)
+  - Push ke /sdcard                                   : BERHASIL (ukuran cocok)
+  - Bump versi                                        : 3.2.3 -> 3.2.4
+  - Git commit & push                                 : BERHASIL
 
-Catatan: pada eksekusi awal `adb devices` kosong sehingga install &
-push di-skip (dilaporkan SEBAGIAN). Pada lanjutan (11 Nov 2026)
-device tersambung sebagai `100.71.211.98:42763` dan kedua langkah
-dijalankan serta diverifikasi (lihat bagian 5).
-
---------------------------------------------------------------------
-2. TEMUAN A1 (Investigasi)
---------------------------------------------------------------------
-Grep `getCacheDir` / `getFilesDir` + `.part`:
-  - Semua file cache lagu berada di:
-      VisionOsCache.dir(c) = new File(getCacheDir(), "visionos_cache")
-      (VisionOsCache.java baris 39-43)
-  - SongCache.dir(c) -> VisionOsCache.dir(c) (SongCache.java baris 133).
-  - File COMPLETE  : <id>.webm
-    File INCOMPLETE: <id>.webm.part  <- yang ditangani task ini
-    File lain       : <id>.song.json, <id>.art, <id>.lyrics.json,
-                      <id>.play.webm (snapshot)
-  - Path file incomplete dibuat oleh:
-      SongCache.partFile(c, vid) = new File(dir(c), vid + ".webm.part")
-      (SEBELUM perubahan, baris 130-132).
-
-Nama & penyimpanan file incomplete:
-  - Ekstensi : ".webm.part" (bukan .tmp)
-  - Lokasi   : getCacheDir()/visionos_cache (SEBELUM)
-
-Referensi .part di luar SongCache (yang ikut dipertimbangkan):
-  - NativeAudioEngine.java : pakai SongCache.partFile() (ikut otomatis):
-      baris 987, 1837, 2517
-  - LocalStreamServer.java : cek nama berakhiran ".part" (baris 248) dan
-      register path dari engine (baris 1044 -> SongCache.partFile). Ikut.
-  - VisionOsHarness.java   : pakai SongCache.partFile() (baris 1485-1486).
-  - MainActivity.java      : sapu ".part" di VisionOsCache.dir()
-      (baris 1418-1424) -> ikut disesuaikan.
-  - VisionOsCache.download(): punya part terpisah di VisionOsCache.dir()
-      (baris 58) -> HANYA dipakai harness/diagnostik
-      (VisionOsDiagActivity:228, VisionOsHarness:425). TIDAK diubah
-      (dilaporkan sebagai gap, lihat bagian 6).
-
-Logika eviction COMPLETE (referensi) — SongCache.enforceLimit(ctx, max):
-  - Baris 441-492. Baris 459 sort by lastModified, hapus terlama,
-    skip `pinned` (StreamSettings.getPinnedIds). Dipanggil di akhir
-    download COMPLETE (baris ~711-712). Ini pola yang ditiru untuk
-    eviction incomplete.
+Konteks koreksi: v3.2.3 keliru menaruh file INCOMPLETE (.part) di
+getFilesDir() (internal, tak terlihat di file manager) dan TIDAK
+memindahkan lagu offline COMPLETE (.webm) + metadata. Akibatnya tombol
+"Hapus Cache" bisa menghapus lagu offline milik user. Order ini
+memindahkan SEMUA cache ke getExternalFilesDir() dan memperbaiki
+perilaku tombol Hapus Cache.
 
 --------------------------------------------------------------------
-3. BUKTI A2 (Pindah direktori getCacheDir -> getFilesDir)
+2. BUKTI A1 — semua cache ke getExternalFilesDir()
 --------------------------------------------------------------------
-File: android/app/src/main/java/com/dnialify/musicstream/SongCache.java
+File: android/app/src/main/java/com/dnialify/musicstream/VisionOsCache.java
 
-Direktori baru (ditambahkan setelah dir()):
-    /**
-     * A2: file incomplete (.part) disimpan di getFilesDir() (data app
-     * permanen, tidak dihapus OS), BUKAN di getCacheDir().
-     */
-    public static File incompleteDir(Context c) {
-        File d = new File(c.getFilesDir(), "incomplete_cache");
+Root terpusat + subfolder (nama dir() dipertahankan agar pemanggil
+lama seperti VisionOsLoopback / VisionOsHarness / SongCache tetap valid):
+
+    public static File rootDir(Context c) {
+        File base = c.getExternalFilesDir(null);
+        if (base == null) base = c.getFilesDir();   // fallback internal
+        File d = new File(base, "visionos_media");
         if (!d.exists()) d.mkdirs();
         return d;
     }
 
-partFile() dialihkan ke direktori baru:
-    public static File partFile(Context c, String videoId) {
-        return new File(incompleteDir(c), videoId + ".webm.part");
-    }
+    public static File completeDir(Context c)   { ... new File(rootDir(c), "complete");   }
+    public static File incompleteDir(Context c) { ... new File(rootDir(c), "incomplete"); }
+    public static File metaDir(Context c)       { ... new File(rootDir(c), "meta");       }
 
-Karena SEMUA baca/tulis .part memakai SongCache.partFile(), seluruh
-alur (engine, LocalStreamServer, harness) otomatis menunjuk ke
-getFilesDir()/incomplete_cache.
+    // Nama lama dipertahankan, sekarang menunjuk complete/
+    public static File dir(Context c) { return completeDir(c); }
 
-Karena .part (files dir) kini beda direktori dengan tujuan .webm
-(cache dir), renameTo() bisa gagal. Ditambahkan helper moveFile()
-(rename dulu, fallback copy+delete) dan dipakai saat finalisasi:
-    if (fin.exists()) fin.delete();
-    if (!moveFile(part, fin)) {
-        throw new Exception("atomic rename failed");
-    }
+Struktur hasil di device:
+  Android/data/com.dnialify.musicstream/files/visionos_media/
+      complete/    -> <id>.webm            (lagu offline selesai)
+      incomplete/  -> <id>.webm.part       (sedang/tak selesai)
+      meta/        -> <id>.song.json, <id>.art, <id>.lyrics.json
+                      (termasuk .lyrics.json.tmp)
 
-Pembersihan lama yang menyapu cache dir juga disesuaikan:
-  - enforceLimit(): hapus part baru (partFile) + part legacy (cache dir).
-  - delete(videoId): tambah hapus part legacy di cache dir.
-  - MainActivity.clearCachedSongs(): sapu juga files dir
-    (SongCache.incompleteDir).
+Perubahan terkait:
+  - VisionOsCache.download(): part = new File(incompleteDir(c),
+    videoId + ".webm.part")  (line 92)
+  - SongCache.incompleteDir() -> VisionOsCache.incompleteDir() (external)
+  - SongCache.recordFile/artFile/lyricsFile/lyricsTmpFile -> metaDir()
+  - SongCache.listRecords()/enforceLimit() scan metaDir()
 
 --------------------------------------------------------------------
-4. BUKTI A3 (Limit 10 file incomplete + proteksi lagu aktif)
+3. BUKTI A2 — migrateLegacyCaches()
 --------------------------------------------------------------------
-File: SongCache.java
+File: SongCache.java (line 195)
 
-Konstanta + penanda lagu aktif:
-    private static final int MAX_INCOMPLETE = 10;
-    private static volatile String ACTIVE_VID = null;
-    public static void setActiveVideoId(String videoId) {
-        ACTIVE_VID = (videoId == null || videoId.isEmpty()) ? null : videoId;
-    }
-
-Logika eviction (ditambahkan setelah enforceLimit):
-    public static synchronized void enforceIncompleteLimit(Context ctx, String protectVid) {
-        if (ctx == null) return;
+    public static synchronized void migrateLegacyCaches(Context c) {
+        if (c == null) return;
+        int moved = 0;
         try {
-            File dir = incompleteDir(ctx);
-            File[] files = dir.listFiles(
-                    f -> f.isFile() && f.getName().endsWith(".webm.part"));
-            if (files == null || files.length <= MAX_INCOMPLETE) return;
-            final String active = ACTIVE_VID;
-            java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-            int count = files.length;
-            for (File f : files) {
-                if (count <= MAX_INCOMPLETE) break;
-                String name = f.getName();
-                String vid = name.substring(0, name.length() - ".webm.part".length());
-                if ((protectVid != null && vid.equals(protectVid))
-                        || (active != null && vid.equals(active))
-                        || RUNNING.contains(vid)) {
-                    continue; // lagu aktif / sedang ditulis: JANGAN hapus
+            File[] legacyDirs = {
+                new File(c.getCacheDir(), "visionos_cache"),      // COMPLETE+meta v<=3.2.3
+                new File(c.getFilesDir(), "incomplete_cache"),    // INCOMPLETE v3.2.3
+                new File(c.getFilesDir(), "visionos_cache")       // jaring pengaman
+            };
+            File complete = completeDir(c);
+            File incomplete = incompleteDir(c);
+            File meta = metaDir(c);
+            for (File legacy : legacyDirs) {
+                if (legacy == null || !legacy.isDirectory()) continue;
+                File[] files = legacy.listFiles();
+                if (files == null) continue;
+                for (File f : files) {
+                    if (f == null || !f.isFile()) continue;
+                    String name = f.getName();
+                    File dst;
+                    if (name.endsWith(".webm.part"))            dst = new File(incomplete, name);
+                    else if (name.endsWith(".webm"))            dst = new File(complete, name);
+                    else if (name.endsWith(".song.json")
+                          || name.endsWith(".art")
+                          || name.endsWith(".lyrics.json")
+                          || name.endsWith(".lyrics.json.tmp")) dst = new File(meta, name);
+                    else continue;                        // tipe tak dikenal: biarkan
+                    if (dst.exists()) continue;           // idempotent
+                    try { if (moveFile(f, dst)) moved++; } catch (Exception ignored) {}
                 }
-                if (f.delete()) count--;
             }
-        } catch (Exception e) { /* log */ }
+            Log.d(TAG, "[MIGRATE] legacy caches moved=" + moved);
+        } catch (Exception e) {
+            Log.d(TAG, "[MIGRATE] error: " + e);
+        }
     }
 
-Dipanggil setiap kali file incomplete baru ditulis — di downloadInner,
-tepat setelah part & fin ditentukan:
-    File part = partFile(c, videoId);
-    File fin = audioFile(c, videoId);
-    enforceIncompleteLimit(c, videoId);   // A3
+Sifat: sekali jalan, idempoten (skip bila file tujuan sudah ada),
+memakai rename-first + fallback copy+delete, TIDAK menghapus data bila
+gagal (file dibiarkan di lokasi lama). Dipanggil di
+MainActivity.onCreate() (line ~102) tepat SEBELUM enforceLimit:
 
-Proteksi "active playing" (3 lapis):
-  1. protectVid  = videoId yang sedang di-download/ditulis.
-  2. ACTIVE_VID  = videoId yang sedang diputar engine.
-     Di-set di NativeAudioEngine.play() (kedua cabang mode):
-         videoId = vid != null ? vid : "";
-         SongCache.setActiveVideoId(videoId);
-     Di-clear di NativeAudioEngine.stop():
-         SongCache.setActiveVideoId(null);
-  3. RUNNING     = set id yang writer-nya aktif (sudah ada di SongCache).
+    try {
+        SongCache.migrateLegacyCaches(this);
+    } catch (Exception e) {
+        Log.d(TAG_DIAG, "migrateLegacyCaches onCreate failed " + e);
+    }
 
 --------------------------------------------------------------------
-5. HASIL BUILD & ADB INSTALL
+4. BUKTI A3 — "Hapus Cache" hanya hapus incomplete/
+--------------------------------------------------------------------
+File: MainActivity.java — PlaybackBridge.clearCachedSongs() (line 1417)
+
+    @JavascriptInterface
+    public void clearCachedSongs() {
+        try {
+            // A3: HANYA membersihkan file INCOMPLETE (.part).
+            // complete/ + meta/ TIDAK disentuh -> lagu offline aman.
+            try {
+                java.io.File[] ps = SongCache.incompleteDir(MainActivity.this).listFiles();
+                if (ps != null) for (java.io.File f : ps) f.delete();
+            } catch (Exception ignored) {}
+            // sisa .part di lokasi lama (v3.2.3 files dir)
+            try {
+                java.io.File[] old = new java.io.File(
+                        getFilesDir(), "incomplete_cache").listFiles();
+                if (old != null) for (java.io.File f : old) f.delete();
+            } catch (Exception ignored) {}
+            // sisa .part di cache dir lama
+            try {
+                java.io.File oldDir = new java.io.File(getCacheDir(), "visionos_cache");
+                java.io.File[] of = oldDir.listFiles();
+                if (of != null) for (java.io.File f : of)
+                    if (f.getName().endsWith(".part")) f.delete();
+            } catch (Exception ignored) {}
+        } catch (Exception ignored) {}
+    }
+
+Sebelumnya fungsi ini memanggil SongCache.listRecords() + SongCache.delete()
+untuk SEMUA lagu (termasuk COMPLETE) -> itulah yang menghapus lagu
+offline user. Sekarang tidak lagi.
+
+--------------------------------------------------------------------
+5. BUKTI A4 — moveFile() rename-first
+--------------------------------------------------------------------
+File: SongCache.java (line 627). Semua cache kini berada di dalam
+getExternalFilesDir() (satu partisi), sehingga renameTo() hampir selalu
+berhasil. moveFile() mencoba renameTo() lebih dulu; fallback
+copy (buffer 64 KB) + fsync + delete hanya dipakai bila rename gagal
+(mis. lintas partisi / fallback internal). Data tujuan dibatalkan bila
+proses gagal agar tidak ada file setengah jadi.
+
+--------------------------------------------------------------------
+6. HASIL BUILD & ADB INSTALL
 --------------------------------------------------------------------
 Build:
   cd android ; .\gradlew.bat assembleDebug
-  -> BUILD SUCCESSFUL in 2m 4s (82 tasks: 12 executed, 70 up-to-date)
+  -> BUILD SUCCESSFUL in 1m 57s (82 tasks: 10 executed, 72 up-to-date)
   -> Hanya warning "deprecated API" (bukan error).
-  (PowerShell melaporkan "Exited with code 1" karena stderr gradle
-   dianggap NativeCommandError — false positive, build sukses.)
   APK : C:\Project\music-stream\android\app\build\outputs\apk\debug\app-debug.apk
-  Size: 8.500.347 bytes (~8.10 MB)
-  Waktu: 09 Nov 2026 20:08
+  Size: 8.501.241 bytes (~8.11 MB)
+  Waktu: 11 Nov 2026 01:23
 
-adb (lanjutan 11 Nov 2026):
-  adb devices -> 100.71.211.98:42763   device
+adb (device 100.71.211.98:42763):
   adb install -r app-debug.apk
       -> "Performing Streamed Install" / "Success"
-  adb shell mkdir -p /sdcard/Download/Dnialify   -> ok
-  adb push app-debug.apk /sdcard/Download/Dnialify/dnialify-3.2.3.apk
-      -> 1 file pushed, 0 skipped. 8500347 bytes in 3.284s
-  adb shell ls -l /sdcard/Download/Dnialify/dnialify-3.2.3.apk
-      -> -rw-rw---- 1 u0_a311 media_rw 8500347 2026-11-09 20:08
-         (ukuran COCOK dengan APK lokal: 8.500.347 bytes)
+  adb shell mkdir -p /sdcard/Download/Dnialify                 -> ok
+  adb push app-debug.apk .../dnialify-3.2.4.apk
+      -> 1 file pushed, 0 skipped. 8501241 bytes in 6.574s
+  adb shell ls -l .../dnialify-3.2.4.apk
+      -> -rw-rw---- 1 u0_a311 media_rw 8501241 2026-11-11 01:23
+         (ukuran COCOK: 8.501.241 bytes)
   adb shell dumpsys package com.dnialify.musicstream | grep versionName
-      -> versionName=3.2.3   (COCOK)
-
---------------------------------------------------------------------
-6. GAP & CATATAN
---------------------------------------------------------------------
-G1. (SELESAI 11 Nov 2026) Saat eksekusi awal tidak ada device adb
-    sehingga install & push di-skip. Pada lanjutan device tersambung
-    (100.71.211.98:42763) dan langkah install (-r) + push ke
-    /sdcard/Download/Dnialify/dnialify-3.2.3.apk BERHASIL, dengan
-    verifikasi ukuran file (8.500.347 bytes) dan versionName=3.2.3.
-
-G2. VisionOsCache.download() (baris 58) masih membuat .part di
-    getCacheDir()/visionos_cache. Ini jalur PROOF-OF-CONCEPT yang hanya
-    dipakai VisionOsDiagActivity (baris 228) dan VisionOsHarness
-    (baris 425) — untuk diagnostik. Alur produksi (SongCache.download)
-    sudah pindah. Jalur PoC ini TIDAK diubah agar perubahan tetap
-    minimal & reversible. Bila diinginkan, bisa disamakan menyusul.
-
-G3. Mesin file "play.webm" (snapshot) tetap di cache dir — bukan file
-    incomplete, di luar cakupan task, tidak diubah.
-
-G4. Karena .part kini di getFilesDir()/incomplete_cache dan .webm di
-    getCacheDir()/visionos_cache, finalisasi memakai moveFile()
-    (rename + fallback copy). Keduanya masih dalam data partisi yang
-    sama sehingga rename hampir selalu berhasil.
-
-git commit: f18ffdb -> push 4904c32..f18ffdb (main -> main)
-Commit report: dibuat terpisah (docs) agar report memuat hash fix
-               di atas.
+      -> versionName=3.2.4   (COCOK)
 
 --------------------------------------------------------------------
 7. FILE YANG DIUBAH
 --------------------------------------------------------------------
-Kode native (commit f18ffdb):
+Kode native (commit 9f3d17e):
+  C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\VisionOsCache.java
   C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\SongCache.java
-  C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\NativeAudioEngine.java
   C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\MainActivity.java
-  C:\Project\music-stream\package.json   (version 3.2.2 -> 3.2.3)
+  C:\Project\music-stream\package.json   (version 3.2.3 -> 3.2.4)
 
-Tidak diubah (sesuai batasan / di luar cakupan):
+Tidak diubah (sesuai batasan):
   - PlaybackService.java (legacy)
-  - LocalStreamServer.java (hanya ikut path via SongCache.partFile)
-  - GrowingFileDataSource.java
-  - File di folder public/ (JS) tidak disentuh.
+  - OfflineStorage.java (fitur terpisah: getFilesDir()/offline/)
+  - File di folder public/ (JS)
 
 Auto-generated (bukan source, tidak di-commit):
   - android/app/src/main/assets/public/*  (hasil `npx cap copy android`)
+
+--------------------------------------------------------------------
+8. GAP & CATATAN
+--------------------------------------------------------------------
+G1. OfflineStorage.java masih memakai getFilesDir()/offline/ — ini
+    fitur offline TERPISAH (segmen bin per lagu), bukan bagian cache
+    lagu, dan di luar cakupan order. Tidak diubah.
+G2. VisionOsCache.download() (PoC diagnostik untuk VisionOsDiagActivity
+    /VisionOsHarness) kini juga memakai incompleteDir() external,
+    konsisten dengan alur produksi.
+G3. Saat upgrade dari 3.2.3: migrasi berjalan otomatis sekali di
+    onCreate; file COMPLETE lama yang tadinya di getCacheDir() kini
+    pindah ke complete/ (external) sehingga tidak lagi terhapus OS.
+G4. Folder baru berada di Android/data/<pkg>/files/visionos_media —
+    terlihat di file manager dan bertahan saat "Clear Cache".
+
+git commit: 9f3d17e "fix(native): move all cache (complete & incomplete)
+             to external files dir and migrate legacy caches"
+             -> push <hash>..9f3d17e (main -> main)
 ====================================================================

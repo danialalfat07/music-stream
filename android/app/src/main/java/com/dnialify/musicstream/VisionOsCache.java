@@ -36,10 +36,44 @@ public final class VisionOsCache {
 
     private VisionOsCache() {}
 
-    public static File dir(Context c) {
-        File d = new File(c.getCacheDir(), "visionos_cache");
-        d.mkdirs();
+    /**
+     * A1: root cache terpusat di EXTERNAL files dir
+     * (Android/data/<pkg>/files/visionos_media) supaya terlihat di file
+     * manager dan TIDAK dihapus OS saat "Clear Cache" / low storage.
+     * Fallback ke internal getFilesDir() bila external storage tak tersedia.
+     */
+    public static File rootDir(Context c) {
+        File base = c.getExternalFilesDir(null);
+        if (base == null) base = c.getFilesDir();
+        File d = new File(base, "visionos_media");
+        if (!d.exists()) d.mkdirs();
         return d;
+    }
+
+    /** A1: folder COMPLETE (.webm hasil download). */
+    public static File completeDir(Context c) {
+        File d = new File(rootDir(c), "complete");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    /** A1: folder INCOMPLETE (.webm.part yang sedang/tak selesai). */
+    public static File incompleteDir(Context c) {
+        File d = new File(rootDir(c), "incomplete");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    /** A1: folder META (.song.json, .art, .lyrics.json). */
+    public static File metaDir(Context c) {
+        File d = new File(rootDir(c), "meta");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    /** Folder audiod final (.webm). Nama dipertahankan agar pemanggil lama tetap valid. */
+    public static File dir(Context c) {
+        return completeDir(c);
     }
 
     public static File fileFor(Context c, String videoId) {
@@ -55,7 +89,7 @@ public final class VisionOsCache {
     public static CacheResult download(Context c, String videoId, String url, long total) throws Exception {
         if (total <= 0) throw new Exception("CACHE total<=0");
         VisionOsNet.noteRequest(new URL(url).getHost());
-        File part = new File(dir(c), videoId + ".webm.part");
+        File part = new File(incompleteDir(c), videoId + ".webm.part");
         File fin = fileFor(c, videoId);
         if (part.exists()) part.delete();
         FileOutputStream out = new FileOutputStream(part);

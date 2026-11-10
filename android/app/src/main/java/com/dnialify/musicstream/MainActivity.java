@@ -97,6 +97,13 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception ignored) {}
         try {
+            // A2: migrasi satu kali cache lama (getCacheDir/getFilesDir) ke
+            // struktur baru di getExternalFilesDir()/visionos_media.
+            SongCache.migrateLegacyCaches(this);
+        } catch (Exception e) {
+            Log.d(TAG_DIAG, "migrateLegacyCaches onCreate failed " + e);
+        }
+        try {
             int max = StreamSettings.getMaxCachedSongs(this);
             SongCache.enforceLimit(this, max);
         } catch (Exception e) {
@@ -1410,26 +1417,28 @@ public class MainActivity extends BridgeActivity {
         public void clearCachedSongs() {
             try {
                 Log.d("DnialifyVisionOS", "[NATIVE_CMD] clearCachedSongs");
-                for (org.json.JSONObject r : SongCache.listRecords(MainActivity.this)) {
-                    SongCache.delete(MainActivity.this, r.optString("videoId", ""));
-                }
-                // legacy flat audio without records
-                try {
-                    java.io.File[] fs = VisionOsCache.dir(MainActivity.this).listFiles();
-                    if (fs != null) {
-                        for (java.io.File f : fs) {
-                            if (f.getName().endsWith(".webm")
-                                    || f.getName().endsWith(".part")
-                                    || f.getName().endsWith(".lyrics.json")
-                                    || f.getName().endsWith(".lyrics.json.tmp")) f.delete();
-                        }
-                    }
-                } catch (Exception ignored) {}
-                // A2: incomplete (.part) files kini di files dir, sapu juga.
+                // A3: "Hapus Cache" HANYA membersihkan file INCOMPLETE (.part).
+                // Folder complete/ + meta/ TIDAK disentuh supaya lagu offline
+                // (COMPLETE) milik user tidak hilang.
                 try {
                     java.io.File[] ps = SongCache.incompleteDir(MainActivity.this).listFiles();
                     if (ps != null) {
                         for (java.io.File f : ps) f.delete();
+                    }
+                } catch (Exception ignored) {}
+                // sisa .part di lokasi lama (v3.2.3 files dir) + cache dir lama
+                try {
+                    java.io.File[] old = new java.io.File(
+                            getFilesDir(), "incomplete_cache").listFiles();
+                    if (old != null) for (java.io.File f : old) f.delete();
+                } catch (Exception ignored) {}
+                try {
+                    java.io.File oldDir = new java.io.File(getCacheDir(), "visionos_cache");
+                    java.io.File[] of = oldDir.listFiles();
+                    if (of != null) {
+                        for (java.io.File f : of) {
+                            if (f.getName().endsWith(".part")) f.delete();
+                        }
                     }
                 } catch (Exception ignored) {}
             } catch (Exception ignored) {}

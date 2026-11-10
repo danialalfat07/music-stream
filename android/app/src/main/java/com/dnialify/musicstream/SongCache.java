@@ -134,14 +134,23 @@ public final class SongCache {
         return VisionOsCache.dir(c);
     }
 
+    /** A1: folder COMPLETE (.webm) di external files dir. */
+    public static File completeDir(Context c) {
+        return VisionOsCache.completeDir(c);
+    }
+
+    /** A1: folder META (.song.json, .art, .lyrics.json) di external files dir. */
+    public static File metaDir(Context c) {
+        return VisionOsCache.metaDir(c);
+    }
+
     /**
-     * A2: file incomplete (.part) disimpan di getFilesDir() (data app permanen,
-     * tidak dihapus OS), BUKAN di getCacheDir() yang bisa dibersihkan OS.
+     * A1: file incomplete (.part) dipindah ke folder `incomplete/` di dalam
+     * getExternalFilesDir() (Android/data/<pkg>/files/visionos_media/incomplete).
+     * File TIDAK dihapus OS saat "Clear Cache" dan tetap terlihat di file manager.
      */
     public static File incompleteDir(Context c) {
-        File d = new File(c.getFilesDir(), "incomplete_cache");
-        if (!d.exists()) d.mkdirs();
-        return d;
+        return VisionOsCache.incompleteDir(c);
     }
 
     public static File audioFile(Context c, String videoId) {
@@ -153,20 +162,78 @@ public final class SongCache {
     }
 
     public static File recordFile(Context c, String videoId) {
-        return new File(dir(c), videoId + ".song.json");
+        return new File(metaDir(c), videoId + ".song.json");
     }
 
     public static File artFile(Context c, String videoId) {
-        return new File(dir(c), videoId + ".art");
+        return new File(metaDir(c), videoId + ".art");
     }
 
     /** Lirik terpisah: <id>.lyrics.json (sibling .song.json, bukan bagian record). */
     public static File lyricsFile(Context c, String videoId) {
-        return new File(dir(c), videoId + ".lyrics.json");
+        return new File(metaDir(c), videoId + ".lyrics.json");
     }
 
     static File lyricsTmpFile(Context c, String videoId) {
-        return new File(dir(c), videoId + ".lyrics.json.tmp");
+        return new File(metaDir(c), videoId + ".lyrics.json.tmp");
+    }
+
+    /**
+     * A2: migrasi satu kali dari lokasi cache LAMA ke struktur baru di
+     * getExternalFilesDir()/visionos_media/{complete,incomplete,meta}.
+     *
+     * Lokasi lama:
+     *   1) getCacheDir()/visionos_cache        -> COMPLETE + meta (v<=3.2.3)
+     *      (tempat ini yang membuat lagu offline "hilang" saat Clear Cache)
+     *   2) getFilesDir()/incomplete_cache      -> INCOMPLETE (.part dari v3.2.3)
+     *   3) getFilesDir()/visionos_cache        -> jaring pengaman bila ada
+     *
+     * Memindahkan (rename, fallback copy+delete) dan IDEMPOTEN: hanya jalan
+     * bila folder tujuan belum memiliki file bernama sama. Tidak menghapus
+     * data pengguna bila gagal (file dibiarkan di tempat lama).
+     */
+    public static synchronized void migrateLegacyCaches(Context c) {
+        if (c == null) return;
+        int moved = 0;
+        try {
+            File[] legacyDirs = {
+                new File(c.getCacheDir(), "visionos_cache"),
+                new File(c.getFilesDir(), "incomplete_cache"),
+                new File(c.getFilesDir(), "visionos_cache")
+            };
+            File complete = completeDir(c);
+            File incomplete = incompleteDir(c);
+            File meta = metaDir(c);
+            for (File legacy : legacyDirs) {
+                if (legacy == null || !legacy.isDirectory()) continue;
+                File[] files = legacy.listFiles();
+                if (files == null) continue;
+                for (File f : files) {
+                    if (f == null || !f.isFile()) continue;
+                    String name = f.getName();
+                    File dst;
+                    if (name.endsWith(".webm.part")) {
+                        dst = new File(incomplete, name);
+                    } else if (name.endsWith(".webm")) {
+                        dst = new File(complete, name);
+                    } else if (name.endsWith(".song.json")
+                            || name.endsWith(".art")
+                            || name.endsWith(".lyrics.json")
+                            || name.endsWith(".lyrics.json.tmp")) {
+                        dst = new File(meta, name);
+                    } else {
+                        continue; // tipe tak dikenal: biarkan di tempat lama
+                    }
+                    if (dst.exists()) continue; // sudah ada di tujuan (idempotent)
+                    try {
+                        if (moveFile(f, dst)) moved++;
+                    } catch (Exception ignored) {}
+                }
+            }
+            Log.d(TAG, "[MIGRATE] legacy caches moved=" + moved);
+        } catch (Exception e) {
+            Log.d(TAG, "[MIGRATE] error: " + e);
+        }
     }
 
     /** Baca file lirik mentah atau null. Never throws. */
@@ -351,7 +418,7 @@ public final class SongCache {
     public static List<JSONObject> listRecords(Context c) {
         List<JSONObject> out = new ArrayList<>();
         try {
-            File[] fs = dir(c).listFiles();
+            File[] fs = metaDir(c).listFiles();
             if (fs == null) return out;
             for (File f : fs) {
                 if (f.getName().endsWith(".song.json")) {
@@ -488,7 +555,7 @@ public final class SongCache {
                 }
                 try {
                     boolean ok = f.delete();
-                    File meta = new File(dir, vid + ".song.json");
+                    File meta = recordFile(ctx, vid);
                     if (meta.exists()) meta.delete();
                     File part = partFile(ctx, vid);
                     if (part.exists()) part.delete();
@@ -557,8 +624,9 @@ public final class SongCache {
         }
     }
 
-    /** Move src -> dst; rename dulu (cepat), fallback copy+delete jika beda
-     *  direktori/rename gagal. Dipakai saat .part (files dir) -> .webm (cache dir). */
+    /** A4: move src -> dst. Semua cache kini di dalam getExternalFilesDir()
+     *  (satu partisi yang sama), sehingga renameTo() aman & cepat; copy+delete
+     *  hanya dipakai sebagai jaring pengaman bila rename tak didukung. */
     static boolean moveFile(File src, File dst) {
         try {
             if (src.renameTo(dst)) return true;
@@ -1044,6 +1112,9 @@ public final class SongCache {
         try {
             File[] fs = {audioFile(c, videoId), partFile(c, videoId),
                     new File(dir(c), videoId + ".webm.part"),
+                    new File(VisionOsCache.incompleteDir(c), videoId + ".webm.part"),
+                    new File(new File(c.getCacheDir(), "visionos_cache"), videoId + ".webm.part"),
+                    new File(new File(c.getFilesDir(), "incomplete_cache"), videoId + ".webm.part"),
                     recordFile(c, videoId), artFile(c, videoId),
                     lyricsFile(c, videoId), lyricsTmpFile(c, videoId),
                     new File(dir(c), videoId + ".play.webm")};
