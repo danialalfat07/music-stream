@@ -188,7 +188,7 @@ adb (device 100.71.211.98:42763):
 --------------------------------------------------------------------
 7. FILE YANG DIUBAH
 --------------------------------------------------------------------
-Kode native (commit 9f3d17e):
+Kode native (commit 459c0fb):
   C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\VisionOsCache.java
   C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\SongCache.java
   C:\Project\music-stream\android\app\src\main\java\com\dnialify\musicstream\MainActivity.java
@@ -217,7 +217,7 @@ G3. Saat upgrade dari 3.2.3: migrasi berjalan otomatis sekali di
 G4. Folder baru berada di Android/data/<pkg>/files/visionos_media —
     terlihat di file manager dan bertahan saat "Clear Cache".
 
-git commit: 9f3d17e "fix(native): move all cache (complete & incomplete)
+git commit: 459c0fb "fix(native): move all cache (complete & incomplete)
              to external files dir and migrate legacy caches"
-             -> push <hash>..9f3d17e (main -> main)
+             -> push e0179b6..459c0fb (main -> main)
 ====================================================================
