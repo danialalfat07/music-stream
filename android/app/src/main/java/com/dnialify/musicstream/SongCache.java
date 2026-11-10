@@ -178,64 +178,6 @@ public final class SongCache {
         return new File(metaDir(c), videoId + ".lyrics.json.tmp");
     }
 
-    /**
-     * A2: migrasi satu kali dari lokasi cache LAMA ke struktur baru di
-     * getExternalFilesDir()/visionos_media/{complete,incomplete,meta}.
-     *
-     * Lokasi lama:
-     *   1) getCacheDir()/visionos_cache        -> COMPLETE + meta (v<=3.2.3)
-     *      (tempat ini yang membuat lagu offline "hilang" saat Clear Cache)
-     *   2) getFilesDir()/incomplete_cache      -> INCOMPLETE (.part dari v3.2.3)
-     *   3) getFilesDir()/visionos_cache        -> jaring pengaman bila ada
-     *
-     * Memindahkan (rename, fallback copy+delete) dan IDEMPOTEN: hanya jalan
-     * bila folder tujuan belum memiliki file bernama sama. Tidak menghapus
-     * data pengguna bila gagal (file dibiarkan di tempat lama).
-     */
-    public static synchronized void migrateLegacyCaches(Context c) {
-        if (c == null) return;
-        int moved = 0;
-        try {
-            File[] legacyDirs = {
-                new File(c.getCacheDir(), "visionos_cache"),
-                new File(c.getFilesDir(), "incomplete_cache"),
-                new File(c.getFilesDir(), "visionos_cache")
-            };
-            File complete = completeDir(c);
-            File incomplete = incompleteDir(c);
-            File meta = metaDir(c);
-            for (File legacy : legacyDirs) {
-                if (legacy == null || !legacy.isDirectory()) continue;
-                File[] files = legacy.listFiles();
-                if (files == null) continue;
-                for (File f : files) {
-                    if (f == null || !f.isFile()) continue;
-                    String name = f.getName();
-                    File dst;
-                    if (name.endsWith(".webm.part")) {
-                        dst = new File(incomplete, name);
-                    } else if (name.endsWith(".webm")) {
-                        dst = new File(complete, name);
-                    } else if (name.endsWith(".song.json")
-                            || name.endsWith(".art")
-                            || name.endsWith(".lyrics.json")
-                            || name.endsWith(".lyrics.json.tmp")) {
-                        dst = new File(meta, name);
-                    } else {
-                        continue; // tipe tak dikenal: biarkan di tempat lama
-                    }
-                    if (dst.exists()) continue; // sudah ada di tujuan (idempotent)
-                    try {
-                        if (moveFile(f, dst)) moved++;
-                    } catch (Exception ignored) {}
-                }
-            }
-            Log.d(TAG, "[MIGRATE] legacy caches moved=" + moved);
-        } catch (Exception e) {
-            Log.d(TAG, "[MIGRATE] error: " + e);
-        }
-    }
-
     /** Baca file lirik mentah atau null. Never throws. */
     public static synchronized String readLyrics(Context c, String videoId) {
         try {

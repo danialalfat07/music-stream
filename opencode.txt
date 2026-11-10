@@ -1,76 +1,76 @@
 ﻿================================================================
-WORK ORDER - FIX TOTAL: PINDAH SEMUA CACHE KE EXTERNAL FILES DIR
+WORK ORDER - REVERT, FIX NATIVE BRIDGE, & SIMPLE DIRECTORY CHANGE
 ================================================================
 
 GUARD
 1. Root project: C:\Project\music-stream
 2. JANGAN baca file opencode.txt di subfolder manapun.
-3. FOKUS DI NATIVE ANDROID (SongCache.java, VisionOsCache.java, NativeAudioEngine.java).
-4. JANGAN sentuh file .java yang tidak berhubungan dengan cache.
-5. Setelah selesai, jalankan build APK, adb install, dan push sdcard.
-6. Bump versi APK menjadi 3.2.4.
-7. Git commit & push ke main.
+3. FOKUS DI NATIVE ANDROID (MainActivity.java, SongCache.java, VisionOsCache.java).
+4. Tugas utama: REVERT kode migrasi kemarin yang bikin Native Bridge mati.
+5. JANGAN ubah logika UI/JS.
+6. Setelah selesai, build APK, adb install, push sdcard.
+7. Bump versi APK menjadi 3.2.5.
+8. Git commit & push ke main.
 
 ================================================================
-KOREKSI MASALAH DARI VERSI 3.2.3
+KONTEKS MASALAH
 ================================================================
-1. Pada versi 3.2.3, file INCOMPLETE (.part) dipindah menggunakan 
-   `context.getFilesDir()`. Ini salah, karena getFilesDir() adalah 
-   Internal Storage yang tidak terlihat di file manager (Android/data).
-   Seharusnya gunakan `context.getExternalFilesDir(null)`.
-   
-2. Lagu offline yang sudah COMPLETE (.webm) dan file metadata-nya 
-   (.song.json, .art, .lyrics.json) TIDAK ikut dipindah. Akibatnya
-   saat user "Clear Cache", lagu offline mereka hilang.
+Pada versi 3.2.4, fitur Native Bridge (`NativePlayback`) mati total. 
+Aplikasi mendeteksi dirinya sebagai Web Browser (iFrame mode) dan 
+menolak fitur offline.
+
+Penyebabnya: Penambahan fungsi `migrateLegacyCaches()` di dalam 
+`MainActivity.onCreate()` kemungkinan besar melempar Exception 
+(misal karena akses file), sehingga eksekusi `onCreate` terhenti 
+sebelum sempat memanggil `addJavascriptInterface()`.
+
+User meminta:
+1. REVERT total logika migrasi cache yang rumit tersebut.
+2. Buang pemanggilan `migrateLegacyCaches` dari `MainActivity`.
+3. Cukup ubah direktorinya saja secara SIMPEL: dari `getCacheDir()` 
+   ke `getExternalFilesDir(null)`. Biarkan file lama di cache (nanti 
+   dihapus OS), yang penting file baru masuk ke folder data.
 
 ================================================================
 TUGAS IMPLEMENTASI
 ================================================================
 
-A1. GANTI SEMUA PATH KE EXTERNAL FILES DIR
-    - Buka VisionOsCache.java dan SongCache.java.
-    - Cari semua pemanggilan `context.getFilesDir()` dan `context.getCacheDir()`.
-    - Ganti semuanya menjadi `context.getExternalFilesDir(null)`.
-    - Pastikan folder utamanya dinamai secara terpusat, misal:
-      `new File(context.getExternalFilesDir(null), "visionos_media")`.
-    - Struktur folder baru yang diharapkan:
-      * .../Android/data/com.dnialify.musicstream/files/visionos_media/complete/
-      * .../Android/data/com.dnialify.musicstream/files/visionos_media/incomplete/
-      * .../Android/data/com.dnialify.musicstream/files/visionos_media/meta/
+F1. REVERT & AMANKAN MAINACTIVITY (PALING KRUSIAL)
+    - Buka `android/app/src/main/java/com/dnialify/musicstream/MainActivity.java`.
+    - Cari pemanggilan `SongCache.migrateLegacyCaches(this);` di dalam `onCreate`.
+    - HAPUS pemanggilan tersebut (atau comment out).
+    - AUDIT fungsi `onCreate`:
+      Pastikan `webView.addJavascriptInterface(new PlaybackBridge(), "NativePlayback")` 
+      dieksekusi tanpa ada kode cache yang berpotensi melempar Exception 
+      sebelumnya.
+    - Jika ada try-catch yang memotong eksekusi, pastikan WebView tetap terinisialisasi.
 
-A2. MIGRASI FILE LAMA (WAJIB!)
-    - Buat fungsi `migrateLegacyCaches(Context c)` di SongCache.java.
-    - Fungsi ini harus mengecek 2 lokasi lama:
-      1. `getCacheDir()/visionos_cache` (tempat file COMPLETE yang bikin hilang)
-      2. `getFilesDir()/incomplete_cache` (tempat file INCOMPLETE dari v3.2.3)
-    - Jika ada file di lokasi lama, pindahkan (copy + delete) ke lokasi
-      baru di `getExternalFilesDir()`.
-    - Panggil fungsi migrasi ini sekali saat aplikasi pertama kali start
-      (misal di NativeAudioEngine atau MainActivity).
+F2. SIMPLE DIRECTORY CHANGE (NO MIGRATION)
+    - Buka `VisionOsCache.java`.
+    - Cari fungsi `rootDir(Context c)` atau sejenisnya.
+    - Ubah base directory dari `c.getCacheDir()` menjadi `c.getExternalFilesDir(null)`.
+    - Biarkan struktur foldernya tetap (misal `visionos_media/complete`).
+    - JANGAN buat logika copy-paste file dari cache lama ke folder baru. 
+      Biarkan file lama diabaikan.
+    - Buka `SongCache.java`. Pastikan `partFile()` dan `audioFile()` 
+      menggunakan direktori dari `VisionOsCache` yang baru ini.
 
-A3. PASTIKAN HAPUS CACHE TIDAK MENGHAPUS OFFLINE
-    - Karena file COMPLETE sekarang ada di `getExternalFilesDir()`,
-      OS Android tidak akan menyentuhnya saat user melakukan "Clear Cache".
-    - Pastikan fungsi "Hapus Cache" di dalam aplikasi (jika ada tombolnya)
-      hanya menghapus file dari folder `incomplete/` dan tidak menyentuh
-      folder `complete/`.
-
-A4. PERBAIKI LOGIKA MOVE FILE
-    - Karena semua file sekarang berada di dalam `getExternalFilesDir()`
-      (satu partisi penyimpanan yang sama), fungsi `moveFile()` bisa
-      menggunakan `renameTo()` secara aman dan cepat, menghindari copy+delete
-      yang memakan waktu.
+F3. BERSIHKAN SISA FUNGSI MIGRASI
+    - Hapus fungsi `migrateLegacyCaches()` di `SongCache.java` jika ada 
+      (atau biarkan tidak terpanggil, tapi lebih baik dihapus agar bersih).
+    - Hapus logika aneh di `clearCachedSongs()` jika itu ikut memodifikasi 
+      path.
 
 ================================================================
 EKSEKUSI BUILD & DEPLOY
 ================================================================
-1. Bump versi di package.json root: `"version": "3.2.4"`.
+1. Bump versi di package.json root: `"version": "3.2.5"`.
 2. `npx cap copy android`
 3. Build: `cd android ; .\gradlew.bat assembleDebug`
 4. Install: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
-5. Push sdcard: `adb push ... /sdcard/Download/Dnialify/dnialify-3.2.4.apk`
+5. Push sdcard: `adb push ... /sdcard/Download/Dnialify/dnialify-3.2.5.apk`
 6. Git add, commit, push:
-   `git commit -m "fix(native): move all cache (complete & incomplete) to external files dir and migrate legacy caches"`
+   `git commit -m "revert(native): remove complex cache migration and fix native bridge, use simple external files dir"`
    `git push origin main`
 
 ================================================================
@@ -79,8 +79,7 @@ OUTPUT REPORT (OVERWRITE report.txt)
 Tulis ke C:\Project\music-stream\report.txt (UTF-8).
 Laporkan:
 1. STATUS (BERHASIL/GAGAL).
-2. BUKTI A1 (Snippet kode pemanggilan getExternalFilesDir).
-3. BUKTI A2 (Snippet kode migrateLegacyCaches yang memindahkan file
-   dari getCacheDir lama).
+2. BUKTI F1 (Snippet MainActivity.onCreate yang sudah bersih dari migrasi).
+3. BUKTI F2 (Snippet VisionOsCache yang memakai getExternalFilesDir).
 4. Hasil build & adb install.
 5. Git commit hash & status push.

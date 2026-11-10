@@ -97,13 +97,6 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception ignored) {}
         try {
-            // A2: migrasi satu kali cache lama (getCacheDir/getFilesDir) ke
-            // struktur baru di getExternalFilesDir()/visionos_media.
-            SongCache.migrateLegacyCaches(this);
-        } catch (Exception e) {
-            Log.d(TAG_DIAG, "migrateLegacyCaches onCreate failed " + e);
-        }
-        try {
             int max = StreamSettings.getMaxCachedSongs(this);
             SongCache.enforceLimit(this, max);
         } catch (Exception e) {
